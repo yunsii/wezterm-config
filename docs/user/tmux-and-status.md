@@ -18,9 +18,10 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 - WezTerm cwd-dependent actions inside tmux still rely on shell integration emitting `OSC 7` from the interactive runtime shell, except for `Alt+o` fallback handling.
 - Managed workspace creation only requires `default_domain` in `hybrid-wsl` mode.
 - The shell integration currently lives in the runtime shell rc files such as `~/.zshrc` and `~/.bashrc`.
-- In `hybrid-wsl`, `Alt+o` uses WezTerm's current-pane cwd plus `wsl.exe --cd ... code .` when WezTerm has a usable WSL cwd.
-- In `posix-local`, `Alt+o` launches the configured local VS Code opener directly with the current directory path.
-- If WezTerm only sees the WSL host fallback path such as `/C:/Users/...` in `hybrid-wsl`, it forwards `Alt+o` to the pane instead; tmux then launches `code .` from `#{pane_current_path}`.
+- In `hybrid-wsl`, `Alt+o` resolves the current pane into the repo family's primary worktree and then uses `wsl.exe --cd ... code .` when WezTerm has a usable WSL cwd.
+- In `posix-local`, `Alt+o` resolves the current pane into the repo family's primary worktree and then launches the configured local VS Code opener there.
+- Outside git worktrees, `Alt+o` still opens the current directory.
+- If WezTerm only sees the WSL host fallback path such as `/C:/Users/...` in `hybrid-wsl`, it forwards `Alt+o` to the pane instead; tmux then resolves `#{pane_current_path}` to the primary worktree before launching `code .`.
 - If WezTerm only reports `/`, managed workspace tabs still fall back to the tab's configured project directory instead of opening the WSL root.
 - In `hybrid-wsl`, `Alt+b` uses the synced Windows PowerShell launcher for the debug Chrome profile.
 - In `posix-local`, `Alt+b` uses the synced shell launcher at `wezterm-x/scripts/focus-or-start-debug-chrome.sh`.

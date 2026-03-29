@@ -47,6 +47,32 @@ local function copy_args(values)
   return result
 end
 
+local function trim(value)
+  if not value then
+    return nil
+  end
+
+  return (value:gsub('^%s+', ''):gsub('%s+$', ''))
+end
+
+local function dirname(path)
+  if not path or path == '' then
+    return nil
+  end
+
+  local normalized = path:gsub('[/\\]+$', '')
+  if normalized == '' then
+    return path
+  end
+
+  local parent = normalized:match('^(.*)[/\\][^/\\]+$')
+  if parent == '' then
+    return path:sub(1, 1) == '/' and '/' or normalized
+  end
+
+  return parent or normalized
+end
+
 local function is_windows_host_path(path)
   if not path or path == '' then
     return false
@@ -95,6 +121,56 @@ local function wsl_distro_from_domain(domain_name)
   return domain_name:match '^WSL:(.+)$'
 end
 
+local function resolve_primary_worktree_cwd(wezterm, cwd, runtime_mode, domain_name, constants, logger)
+  if not cwd or cwd == '' then
+    return cwd
+  end
+
+  local command
+  if runtime_mode == 'hybrid-wsl' then
+    local distro = wsl_distro_from_domain(domain_name) or wsl_distro_from_domain(constants.default_domain)
+    if not distro then
+      return cwd
+    end
+
+    command = { 'wsl.exe', '--distribution', distro, '--cd', cwd, 'git', 'rev-parse', '--path-format=absolute', '--git-common-dir' }
+  else
+    command = { 'git', '-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir' }
+  end
+
+  local ok, success, stdout, stderr = pcall(wezterm.run_child_process, command)
+  if not ok then
+    logger.warn('alt_o', 'failed to resolve primary worktree cwd', {
+      cwd = cwd,
+      error = success,
+      runtime_mode = runtime_mode,
+    })
+    return cwd
+  end
+
+  if not success then
+    logger.info('alt_o', 'cwd is not part of a git worktree family; keeping current directory', {
+      cwd = cwd,
+      error = trim(stderr),
+      runtime_mode = runtime_mode,
+    })
+    return cwd
+  end
+
+  local common_dir = trim(stdout)
+  local main_root = dirname(common_dir)
+  if not main_root or main_root == '' then
+    return cwd
+  end
+
+  logger.info('alt_o', 'resolved primary worktree cwd', {
+    cwd = cwd,
+    main_root = main_root,
+    runtime_mode = runtime_mode,
+  })
+  return main_root
+end
+
 local function open_current_dir_in_vscode(wezterm, window, pane, constants, workspace, logger)
   local raw_cwd = pane:get_current_working_dir()
   local cwd = file_path_from_cwd(raw_cwd)
@@ -120,6 +196,8 @@ local function open_current_dir_in_vscode(wezterm, window, pane, constants, work
     window:toast_notification('WezTerm', 'Alt+o failed: current pane working directory is unavailable', nil, 3000)
     return
   end
+
+  cwd = resolve_primary_worktree_cwd(wezterm, cwd, runtime_mode, domain_name, constants, logger)
 
   local command
   if runtime_mode == 'hybrid-wsl' then

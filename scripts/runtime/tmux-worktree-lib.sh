@@ -124,6 +124,38 @@ tmux_worktree_main_root() {
   dirname "$common_dir"
 }
 
+tmux_worktree_primary_root_for_path() {
+  local cwd="${1:-$PWD}"
+  local resolved_cwd=""
+  local common_dir=""
+  local main_root=""
+  local repo_root=""
+
+  resolved_cwd="$(tmux_worktree_abs_path "$cwd")"
+
+  if ! tmux_worktree_in_git_repo "$resolved_cwd"; then
+    printf '%s\n' "$resolved_cwd"
+    return 0
+  fi
+
+  common_dir="$(tmux_worktree_common_dir "$resolved_cwd" || true)"
+  if [[ -n "$common_dir" ]]; then
+    main_root="$(tmux_worktree_main_root "$common_dir" || true)"
+    if [[ -n "$main_root" && -d "$main_root" ]]; then
+      printf '%s\n' "$main_root"
+      return 0
+    fi
+  fi
+
+  repo_root="$(tmux_worktree_repo_root "$resolved_cwd" || true)"
+  if [[ -n "$repo_root" ]]; then
+    printf '%s\n' "$repo_root"
+    return 0
+  fi
+
+  printf '%s\n' "$resolved_cwd"
+}
+
 tmux_worktree_repo_label() {
   local repo_root="${1:-$PWD}"
   basename "$repo_root"
