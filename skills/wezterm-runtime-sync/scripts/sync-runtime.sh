@@ -27,13 +27,29 @@ EOF
 resolve_repo_root() {
   local repo_root="${WEZTERM_CONFIG_REPO:-$PWD}"
   [[ -d "$repo_root" ]] || { printf 'Repository root does not exist: %s\n' "$repo_root" >&2; return 1; }
-  repo_root="$(cd "$repo_root" && pwd)"
+  repo_root="$(cd "$repo_root" && pwd -P)"
   [[ -f "$repo_root/wezterm.lua" ]] || { printf 'Expected %s/wezterm.lua. Run from the repo root or set WEZTERM_CONFIG_REPO.\n' "$repo_root" >&2; return 1; }
   [[ -d "$repo_root/wezterm-x" ]] || { printf 'Expected %s/wezterm-x. Run from the repo root or set WEZTERM_CONFIG_REPO.\n' "$repo_root" >&2; return 1; }
   printf '%s\n' "$repo_root"
 }
 
+append_unique_candidate() {
+  local entry="$1"
+  local existing
+
+  for existing in "${DETECTED_CANDIDATES[@]:-}"; do
+    if [[ "$existing" == "$entry" ]]; then
+      return 0
+    fi
+  done
+
+  DETECTED_CANDIDATES+=("$entry")
+}
+
+DETECTED_CANDIDATES=()
+
 detect_candidate_homes() {
+  DETECTED_CANDIDATES=()
   local roots=()
   local uname
   uname="$(uname -s)"
@@ -51,8 +67,6 @@ detect_candidate_homes() {
       ;;
   esac
 
-  local -A seen=()
-  local candidates=()
   local base
   for base in "${roots[@]}"; do
     [[ -d "$base" ]] || continue
@@ -65,12 +79,9 @@ detect_candidate_homes() {
       if [[ "$base" == "/mnt/c/Users" ]] && is_system_windows_profile "$name"; then
         continue
       fi
-      [[ ${seen["$entry"]+1} ]] && continue
-      seen["$entry"]=1
-      candidates+=("$entry")
+      append_unique_candidate "$entry"
     done
   done
-  printf '%s\n' "${candidates[@]}"
 }
 
 is_system_windows_profile() {
@@ -89,10 +100,10 @@ list_candidate_homes() {
   local lang
   lang="$(sync_prompt_language)"
 
-  mapfile -t candidates < <(detect_candidate_homes)
-  [[ ${#candidates[@]} -gt 0 ]] || { sync_prompt_no_dir_message "$lang" >&2; return 1; }
+  detect_candidate_homes
+  [[ ${#DETECTED_CANDIDATES[@]} -gt 0 ]] || { sync_prompt_no_dir_message "$lang" >&2; return 1; }
 
-  printf '%s\n' "${candidates[@]}"
+  printf '%s\n' "${DETECTED_CANDIDATES[@]}"
 }
 
 validate_explicit_target_home() {
@@ -121,7 +132,8 @@ prompt_user_for_target() {
   local lang
   lang="$(sync_prompt_language)"
 
-  mapfile -t candidates < <(detect_candidate_homes)
+  detect_candidate_homes
+  local candidates=("${DETECTED_CANDIDATES[@]}")
   [[ ${#candidates[@]} -gt 0 ]] || { sync_prompt_no_dir_message "$lang" >&2; return 1; }
 
   if [[ ! -t 0 ]]; then
@@ -224,7 +236,10 @@ rm -rf "$TARGET_RUNTIME_DIR"
 mkdir -p "$TARGET_RUNTIME_DIR"
 cp -R "$RUNTIME_SOURCE_DIR"/. "$TARGET_RUNTIME_DIR"/
 
-repo_root_path="${WEZTERM_REPO_ROOT:-$(realpath "$REPO_ROOT")}"
+repo_root_path="${WEZTERM_REPO_ROOT:-}"
+if [[ -z "$repo_root_path" ]]; then
+  repo_root_path="$(cd "$REPO_ROOT" && pwd -P)"
+fi
 printf '%s\n' "$repo_root_path" > "$TARGET_RUNTIME_DIR/repo-root.txt"
 
 printf 'Synced %s -> %s\n' "$SOURCE_FILE" "$TARGET_FILE"

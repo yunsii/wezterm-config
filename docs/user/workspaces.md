@@ -17,9 +17,10 @@ WezTerm workspaces are the top-level session unit.
 - Each managed project tab boots through `tmux`.
 - The left pane runs the configured primary command.
 - The right pane stays as a shell in the same directory.
-- `work` and `config` currently default to launching `codex` through `scripts/runtime/run-managed-command.sh`.
-- Managed `codex` startup forces `tui.theme=github` because terminal background detection is unreliable inside `tmux`.
-- Running `codex` directly in a normal shell is unchanged.
+- `work` and `config` default to the managed launcher profile from `managed_cli.default_profile`.
+- The tracked baseline currently uses the `codex` profile.
+- Managed `codex` startup uses the default dark theme in `managed_cli.ui_variant = "dark"` and forces `tui.theme=github` in `managed_cli.ui_variant = "light"`.
+- Raw `command = { ... }` overrides still bypass the managed launcher profile entirely.
 
 ## Public Vs Local Config
 
@@ -34,14 +35,15 @@ WezTerm workspaces are the top-level session unit.
 Edit `wezterm-x/workspaces.lua` when you need to change:
 
 - shared workspace semantics
-- the default command for that workspace
+- the default launcher for that workspace
 - tracked workspace names such as `config`
 
 Edit `wezterm-x/local/workspaces.lua` when you need to change:
 
 - your private project directories
 - machine-specific workspace overrides
-- per-project command overrides that should not be committed
+- per-project launcher overrides that should not be committed
+- raw per-project command overrides that should bypass the managed launcher
 
 Example local override:
 
@@ -50,18 +52,15 @@ local wezterm = require 'wezterm'
 local runtime_dir = wezterm.config_dir .. '/.wezterm-x'
 local constants = dofile(runtime_dir .. '/lua/constants.lua')
 
-local managed_command = nil
-if constants.repo_root then
-  managed_command = {
-    constants.repo_root .. '/scripts/runtime/run-managed-command.sh',
-    'codex-github-theme',
-  }
+local managed_launcher = nil
+if constants.managed_cli and constants.managed_cli.default_profile then
+  managed_launcher = constants.managed_cli.default_profile
 end
 
 return {
   work = {
     defaults = {
-      command = managed_command,
+      launcher = managed_launcher,
     },
     items = {
       { cwd = '/home/your-user/work/project-a' },
@@ -71,6 +70,8 @@ return {
   },
 }
 ```
+
+The tracked launcher profiles live in `wezterm-x/lua/constants.lua` under `managed_cli.profiles`, while machine-specific overrides belong in `wezterm-x/local/constants.lua`.
 
 If you change the local file shape, update `wezterm-x/local.example/workspaces.lua` in the same edit.
 

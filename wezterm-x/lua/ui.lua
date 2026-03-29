@@ -34,6 +34,14 @@ local function basename(path)
   return path:match('([^/\\]+)[/\\]?$') or path
 end
 
+local function copy_args(values)
+  local result = {}
+  for _, value in ipairs(values or {}) do
+    result[#result + 1] = value
+  end
+  return result
+end
+
 local function is_windows_host_path(path)
   if not path or path == '' then
     return false
@@ -86,9 +94,9 @@ local function open_current_dir_in_vscode(wezterm, window, pane, constants, work
   local raw_cwd = pane:get_current_working_dir()
   local cwd = file_path_from_cwd(raw_cwd)
   local domain_name = pane:get_domain_name()
-  local distro = wsl_distro_from_domain(domain_name) or wsl_distro_from_domain(constants.default_domain)
   local mux_window = window:mux_window()
   local workspace_name = mux_window and mux_window:get_workspace() or window:active_workspace()
+  local runtime_mode = constants.runtime_mode or 'hybrid-wsl'
 
   if not cwd or cwd == '/' then
     cwd = managed_workspace_cwd_fallback(window, workspace_name, workspace)
@@ -108,28 +116,45 @@ local function open_current_dir_in_vscode(wezterm, window, pane, constants, work
     return
   end
 
-  if not distro then
-    logger.warn('alt_o', 'current pane is not backed by a WSL domain', {
-      cwd = cwd,
-      domain = domain_name,
-    })
-    window:toast_notification('WezTerm', 'Alt+o failed: current pane is not backed by a WSL domain', nil, 3000)
-    return
+  local command
+  if runtime_mode == 'hybrid-wsl' then
+    local distro = wsl_distro_from_domain(domain_name) or wsl_distro_from_domain(constants.default_domain)
+    if not distro then
+      logger.warn('alt_o', 'current pane is not backed by a WSL domain', {
+        cwd = cwd,
+        domain = domain_name,
+      })
+      window:toast_notification('WezTerm', 'Alt+o failed: current pane is not backed by a WSL domain', nil, 3000)
+      return
+    end
+
+    local hybrid_command = constants.integrations
+      and constants.integrations.vscode
+      and constants.integrations.vscode.hybrid_wsl_command
+      or { 'wsl.exe' }
+
+    command = copy_args(hybrid_command)
+    command[#command + 1] = '--distribution'
+    command[#command + 1] = distro
+    command[#command + 1] = '--cd'
+    command[#command + 1] = cwd
+    command[#command + 1] = 'code'
+    command[#command + 1] = '.'
+  else
+    local posix_command = constants.integrations
+      and constants.integrations.vscode
+      and constants.integrations.vscode.posix_command
+      or { 'code' }
+
+    command = copy_args(posix_command)
+    command[#command + 1] = cwd
   end
 
-  local command = {
-    'wsl.exe',
-    '--distribution',
-    distro,
-    '--cd',
-    cwd,
-    'code',
-    '.',
-  }
   logger.info('alt_o', 'opening current dir via WezTerm', {
     command = table.concat(command, ' '),
     cwd = cwd,
     domain = domain_name,
+    runtime_mode = runtime_mode,
   })
   local ok, err = pcall(wezterm.background_child_process, command)
   if not ok then
@@ -141,6 +166,14 @@ local function open_current_dir_in_vscode(wezterm, window, pane, constants, work
 end
 
 local function open_debug_chrome(wezterm, window, constants, logger)
+  if constants.runtime_mode ~= 'hybrid-wsl' then
+    logger.warn('chrome', 'chrome debug launcher is unavailable in this runtime mode', {
+      runtime_mode = constants.runtime_mode,
+    })
+    window:toast_notification('WezTerm', 'Alt+b is only available in hybrid-wsl mode', nil, 3000)
+    return
+  end
+
   local chrome = constants.chrome_debug_browser
   if not chrome or not chrome.user_data_dir or chrome.user_data_dir == '' then
     logger.warn('chrome', 'missing chrome debug browser user_data_dir', {})
@@ -148,16 +181,19 @@ local function open_debug_chrome(wezterm, window, constants, logger)
     return
   end
 
+  local integration = constants.integrations and constants.integrations.chrome_debug or {}
+  local runtime_dir = integration.runtime_dir or (wezterm.home_dir .. '\\.wezterm-x')
+  local script_path = integration.script or 'scripts\\focus-or-start-debug-chrome.ps1'
   local command = {
-    constants.windows_cmd,
+    integration.cmd or 'cmd.exe',
     '/c',
-    constants.windows_powershell,
+    integration.powershell or 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
     '-NoProfile',
     '-NonInteractive',
     '-ExecutionPolicy',
     'Bypass',
     '-File',
-    constants.windows_runtime_dir .. '\\scripts\\focus-or-start-debug-chrome.ps1',
+    runtime_dir .. '\\' .. script_path,
     '-ChromePath',
     chrome.executable,
     '-RemoteDebuggingPort',
@@ -200,10 +236,15 @@ function M.apply(opts)
   config.notification_handling = 'NeverShow'
   config.audible_bell = 'Disabled'
   config.visual_bell = { fade_in_duration_ms = 0, fade_out_duration_ms = 0 }
-  config.launch_menu = constants.launch_menu
-  config.set_environment_variables = {
+  config.launch_menu = constants.launch_menu or {}
+  local set_environment_variables = {
     COLORFGBG = '0;15',
+    WEZTERM_RUNTIME_MODE = constants.runtime_mode or 'hybrid-wsl',
   }
+  if constants.shell and constants.shell.program and constants.shell.program ~= '' then
+    set_environment_variables.WEZTERM_MANAGED_SHELL = constants.shell.program
+  end
+  config.set_environment_variables = set_environment_variables
 
   config.window_decorations = 'RESIZE'
   config.window_padding = {
@@ -272,11 +313,12 @@ function M.apply(opts)
       mods = 'ALT',
       action = wezterm.action_callback(function(window, pane)
         local cwd = file_path_from_cwd(pane:get_current_working_dir())
+        local runtime_mode = constants.runtime_mode or 'hybrid-wsl'
         local distro = wsl_distro_from_domain(pane:get_domain_name()) or wsl_distro_from_domain(constants.default_domain)
 
         -- In WSL panes, WezTerm may only see the host-side fallback cwd like /C:/Users/...
         -- Forward Alt+o to the pane so tmux or the shell can resolve the real working directory.
-        if distro and is_windows_host_path(cwd) then
+        if runtime_mode == 'hybrid-wsl' and distro and is_windows_host_path(cwd) then
           logger.info('alt_o', 'forwarding Alt+o to pane fallback', {
             cwd = cwd,
             domain = pane:get_domain_name(),

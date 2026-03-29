@@ -61,18 +61,50 @@ ensure_workspace_panes() {
   fi
 }
 
+repo_root_path() {
+  (
+    cd "$SCRIPT_DIR/../.."
+    pwd -P
+  )
+}
+
+resolve_login_shell() {
+  if [[ -n "${WEZTERM_MANAGED_SHELL:-}" && -x "${WEZTERM_MANAGED_SHELL:-}" ]]; then
+    printf '%s\n' "$WEZTERM_MANAGED_SHELL"
+    return 0
+  fi
+
+  if [[ -n "${SHELL:-}" && -x "${SHELL:-}" ]]; then
+    printf '%s\n' "$SHELL"
+    return 0
+  fi
+
+  local candidate
+  for candidate in /bin/zsh /usr/bin/zsh /bin/bash /usr/bin/bash /bin/sh /usr/bin/sh; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  printf '/bin/sh\n'
+}
+
 build_primary_shell_command() {
   local command_string=""
+  local login_shell quoted_shell
+  login_shell="$(resolve_login_shell)"
+  quoted_shell="$(printf '%q' "$login_shell")"
 
   if [[ $# -gt 0 ]]; then
     printf -v command_string '%q ' "$@"
     command_string="${command_string% }"
-    command_string="$command_string; exec /bin/zsh -l"
-    printf '/bin/zsh -lc %q' "$command_string"
+    command_string="$command_string; exec ${quoted_shell} -l"
+    printf '%s -lc %q' "$quoted_shell" "$command_string"
     return
   fi
 
-  printf '/bin/zsh -l'
+  printf '%s -l' "$quoted_shell"
 }
 
 if ! tmux has-session -t "$session_name" 2>/dev/null; then
@@ -80,14 +112,14 @@ if ! tmux has-session -t "$session_name" 2>/dev/null; then
   runtime_log_info workspace "creating tmux session" "session_name=$session_name" "cwd=$cwd"
 
   tmux new-session -d -s "$session_name" -c "$cwd" "$primary_shell_command"
-  tmux set-option -g @wezterm_repo_root "$(realpath "$SCRIPT_DIR/../..")"
+  tmux set-option -g @wezterm_repo_root "$(repo_root_path)"
   tmux source-file "$TMUX_CONF"
   tmux rename-window -t "${session_name}:0" "$project_name"
   tmux split-window -h -t "${session_name}:0.0" -c "$cwd"
   tmux select-pane -t "${session_name}:0.0"
 else
   runtime_log_info workspace "reusing existing tmux session" "session_name=$session_name" "cwd=$cwd"
-  tmux set-option -g @wezterm_repo_root "$(realpath "$SCRIPT_DIR/../..")"
+  tmux set-option -g @wezterm_repo_root "$(repo_root_path)"
   tmux source-file "$TMUX_CONF"
 fi
 

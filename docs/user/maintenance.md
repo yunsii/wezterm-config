@@ -32,7 +32,7 @@ scripts/dev/reload-tmux.sh
 ```
 
 Recreate affected sessions only if a simple reload is not enough.
-5. If WSL shell rc files changed, reload the interactive shell in affected tmux panes or recreate those sessions.
+5. If runtime shell rc files changed, reload the interactive shell in affected tmux panes or recreate those sessions.
 
 ## Diagnostics
 
@@ -45,9 +45,11 @@ Recreate affected sessions only if a simple reload is not enough.
 - Leave `WEZTERM_RUNTIME_LOG_CATEGORIES` empty to capture all runtime categories, or set a comma-separated list such as `alt_o,workspace`.
 - Current runtime categories include `alt_o`, `workspace`, and `managed_command`.
 
-## WSL Shell Integration
+## Shell Integration
 
 - WezTerm cwd tracking inside tmux depends on `OSC 7` shell integration in `~/.zshrc` and `~/.bashrc`.
+- In `hybrid-wsl`, those files are typically inside the WSL home directory.
+- In `posix-local`, those files live in the local Linux or macOS home directory.
 - If those rc files are reset, merged, or replaced, restore the WezTerm integration before relying on tmux cwd-aware UI or WezTerm-side cwd actions; `Alt+o` falls back to the pane's own handling when WezTerm only sees the WSL host path.
 
 ### `~/.zshrc`

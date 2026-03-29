@@ -20,7 +20,7 @@ waka_json=""
 
 if [[ -f "$WAKA_CACHE" ]]; then
   cached_time="$(head -n 1 "$WAKA_CACHE" 2>/dev/null || printf '0')"
-  cached_day="$(date -d "@${cached_time}" +%Y-%m-%d 2>/dev/null || true)"
+  cached_day="$(epoch_to_day "$cached_time" 2>/dev/null || true)"
   today="$(date +%Y-%m-%d)"
 
   if [[ "$cached_day" == "$today" ]]; then
@@ -34,7 +34,7 @@ now="$(date +%s)"
 age=$(( now - cached_time ))
 
 if [[ -f "$WAKA_LOCK" ]]; then
-  lock_mtime="$(stat -c %Y "$WAKA_LOCK" 2>/dev/null || printf '0')"
+  lock_mtime="$(file_mtime "$WAKA_LOCK" 2>/dev/null || printf '0')"
   lock_age=$(( now - lock_mtime ))
   if (( lock_age >= 300 )); then
     rm -f "$WAKA_LOCK"

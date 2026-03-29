@@ -2,6 +2,62 @@ local wezterm = require 'wezterm'
 local runtime_dir = wezterm.config_dir .. '/.wezterm-x'
 local helpers = dofile(runtime_dir .. '/lua/helpers.lua')
 
+local function detect_host_os()
+  local triple = wezterm.target_triple or ''
+
+  if triple:find('windows', 1, true) then
+    return 'windows'
+  end
+
+  if triple:find('darwin', 1, true) or triple:find('apple', 1, true) then
+    return 'macos'
+  end
+
+  return 'linux'
+end
+
+local function default_runtime_mode(host_os)
+  if host_os == 'windows' then
+    return 'hybrid-wsl'
+  end
+
+  return 'posix-local'
+end
+
+local function default_window_font(host_os)
+  if host_os == 'windows' then
+    return wezterm.font { family = 'Segoe UI', weight = 'Bold' }
+  end
+
+  if host_os == 'macos' then
+    return wezterm.font { family = 'SF Pro Text', weight = 'Bold' }
+  end
+
+  return wezterm.font { family = 'Noto Sans', weight = 'Bold' }
+end
+
+local function default_launch_menu(host_os)
+  if host_os ~= 'windows' then
+    return {}
+  end
+
+  return {
+    {
+      label = 'Windows PowerShell',
+      args = { 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe', '-NoLogo' },
+      domain = { DomainName = 'local' },
+    },
+  }
+end
+
+local function default_diagnostics_file(host_os)
+  if host_os == 'windows' then
+    return wezterm.home_dir .. '\\.wezterm-x\\wezterm-debug.log'
+  end
+
+  return wezterm.home_dir .. '/.wezterm-x/wezterm-debug.log'
+end
+
 local function read_repo_root_override()
   local override_path = runtime_dir .. '/repo-root.txt'
   local file = io.open(override_path, 'r')
@@ -17,16 +73,19 @@ local function read_repo_root_override()
 end
 
 local local_constants = helpers.load_optional_table(runtime_dir .. '/local/constants.lua') or {}
+local host_os = detect_host_os()
 
 local base_constants = {
+  host_os = host_os,
+  runtime_mode = default_runtime_mode(host_os),
   repo_root = nil,
   default_domain = nil,
-  windows_cmd = 'cmd.exe',
-  windows_powershell = 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
-  windows_runtime_dir = wezterm.home_dir .. '\\.wezterm-x',
+  shell = {
+    program = nil,
+  },
   fonts = {
     terminal = wezterm.font 'Fira Code Retina',
-    window = wezterm.font { family = 'Segoe UI', weight = 'Bold' },
+    window = default_window_font(host_os),
   },
   palette = {
     background = '#f1f0e9',
@@ -72,11 +131,31 @@ local base_constants = {
     tab_edge = '#ddd8cd',
     tab_accent = '#b07d48',
   },
-  launch_menu = {
-    {
-      label = 'Windows PowerShell',
-      args = { 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe', '-NoLogo' },
-      domain = { DomainName = 'local' },
+  launch_menu = default_launch_menu(host_os),
+  integrations = {
+    vscode = {
+      hybrid_wsl_command = { 'wsl.exe' },
+      posix_command = { 'code' },
+    },
+    chrome_debug = {
+      cmd = 'cmd.exe',
+      powershell = 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
+      runtime_dir = wezterm.home_dir .. '\\.wezterm-x',
+      script = 'scripts\\focus-or-start-debug-chrome.ps1',
+    },
+  },
+  managed_cli = {
+    default_profile = 'codex',
+    ui_variant = 'light',
+    profiles = {
+      codex = {
+        bootstrap = 'nvm',
+        command = { 'codex' },
+        variants = {
+          light = { 'codex', '-c', 'tui.theme="github"' },
+          dark = { 'codex' },
+        },
+      },
     },
   },
   chrome_debug_browser = {
@@ -88,7 +167,7 @@ local base_constants = {
     wezterm = {
       enabled = false,
       level = 'info',
-      file = wezterm.home_dir .. '\\.wezterm-x\\wezterm-debug.log',
+      file = default_diagnostics_file(host_os),
       debug_key_events = false,
       categories = {},
     },

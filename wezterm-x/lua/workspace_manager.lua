@@ -27,11 +27,50 @@ function M.new(opts)
       return 'Managed workspaces require a synced repo root. Run the wezterm-runtime-sync skill first.'
     end
 
-    if not config.default_domain or config.default_domain == '' then
+    if constants.runtime_mode == 'hybrid-wsl' and (not config.default_domain or config.default_domain == '') then
       return 'Managed workspaces require default_domain in wezterm-x/local/constants.lua.'
     end
 
     return nil
+  end
+
+  local function managed_launcher_command(profile_name)
+    if not profile_name or profile_name == '' then
+      return nil
+    end
+
+    if not constants.repo_root or constants.repo_root == '' then
+      return nil, 'Managed launcher "' .. profile_name .. '" requires a synced repo root.'
+    end
+
+    local managed_cli = constants.managed_cli or {}
+    local profiles = managed_cli.profiles or {}
+    local profile = profiles[profile_name]
+    if not profile then
+      return nil, 'Unknown managed launcher profile: ' .. profile_name
+    end
+
+    local variant = managed_cli.ui_variant or 'light'
+    local command = helpers.copy_array(profile.command)
+    if profile.variants and profile.variants[variant] then
+      command = helpers.copy_array(profile.variants[variant])
+    end
+
+    if not command or #command == 0 then
+      return nil, 'Managed launcher profile has no command: ' .. profile_name
+    end
+
+    local wrapped = { constants.repo_root .. '/scripts/runtime/run-managed-command.sh' }
+    if profile.bootstrap and profile.bootstrap ~= '' then
+      wrapped[#wrapped + 1] = '--bootstrap'
+      wrapped[#wrapped + 1] = profile.bootstrap
+    end
+
+    for _, part in ipairs(command) do
+      wrapped[#wrapped + 1] = part
+    end
+
+    return wrapped
   end
 
   local function workspace_items(name)
@@ -48,7 +87,16 @@ function M.new(opts)
       local normalized = type(item) == 'string' and { cwd = item } or { cwd = item.cwd }
 
       if normalized.cwd then
-        normalized.command = helpers.copy_array(item.command or defaults.command)
+        local raw_command = item.command or defaults.command
+        local launcher = item.launcher or defaults.launcher
+
+        normalized.command = helpers.copy_array(raw_command)
+        normalized.launcher = launcher
+
+        if not normalized.command and launcher then
+          normalized.command, normalized.command_error = managed_launcher_command(launcher)
+        end
+
         items[#items + 1] = normalized
       end
     end
@@ -67,11 +115,7 @@ function M.new(opts)
       command[#command + 1] = part
     end
 
-    return {
-      '/bin/zsh',
-      '-lc',
-      wezterm.shell_join_args(command),
-    }
+    return command
   end
 
   local function workspace_windows(name)
@@ -135,6 +179,10 @@ function M.new(opts)
   end
 
   local function domain_name()
+    if not config.default_domain or config.default_domain == '' then
+      return nil
+    end
+
     return { DomainName = config.default_domain }
   end
 
@@ -220,6 +268,19 @@ function M.new(opts)
       })
       window:toast_notification('WezTerm', 'No directories configured for workspace: ' .. name, nil, 3000)
       return
+    end
+
+    for _, item in ipairs(items) do
+      if item.command_error then
+        logger.warn('workspace', 'workspace item launcher resolution failed', {
+          cwd = item.cwd,
+          error = item.command_error,
+          launcher = item.launcher,
+          workspace = name,
+        })
+        window:toast_notification('WezTerm', item.command_error, nil, 4000)
+        return
+      end
     end
 
     if #workspace_windows(name) > 0 then

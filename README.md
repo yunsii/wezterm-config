@@ -1,11 +1,18 @@
 # WezTerm Config
 
-This repository is the source of truth for the Windows WezTerm setup.
+This repository is the source of truth for the managed WezTerm runtime.
 
-Generated runtime targets:
+Supported runtime modes:
 
-- `%USERPROFILE%\.wezterm.lua`
-- `%USERPROFILE%\.wezterm-x\...`
+- `hybrid-wsl`: Windows desktop WezTerm plus WSL/tmux runtime
+- `posix-local`: Linux desktop or macOS local runtime
+
+Generated runtime targets live under the chosen user home:
+
+- `$HOME/.wezterm.lua`
+- `$HOME/.wezterm-x/...`
+
+On Windows hybrid setups, `$HOME` is typically `%USERPROFILE%`.
 
 The `wezterm-runtime-sync` skill owns runtime sync. Its implementation lives under `skills/wezterm-runtime-sync/scripts/`, prompts once for the target user directory, caches the choice in `.sync-target`, and writes runtime metadata such as `repo-root.txt` into the target `.wezterm-x` folder so the synced runtime can still find the source repo.
 

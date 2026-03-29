@@ -27,3 +27,25 @@ style() {
   local text="$2"
   printf '#[%s]%s#[default]' "$spec" "$text"
 }
+
+epoch_to_day() {
+  local value="$1"
+
+  if date -d "@$value" +%Y-%m-%d >/dev/null 2>&1; then
+    date -d "@$value" +%Y-%m-%d
+    return
+  fi
+
+  date -r "$value" +%Y-%m-%d
+}
+
+file_mtime() {
+  local path="$1"
+
+  if stat -c %Y "$path" >/dev/null 2>&1; then
+    stat -c %Y "$path"
+    return
+  fi
+
+  stat -f %m "$path"
+}

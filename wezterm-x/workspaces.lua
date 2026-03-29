@@ -3,24 +3,21 @@ local runtime_dir = wezterm.config_dir .. '/.wezterm-x'
 local constants = dofile(runtime_dir .. '/lua/constants.lua')
 local helpers = dofile(runtime_dir .. '/lua/helpers.lua')
 
-local managed_command = nil
-if constants.repo_root then
-  managed_command = {
-    constants.repo_root .. '/scripts/runtime/run-managed-command.sh',
-    'codex-github-theme',
-  }
+local managed_launcher = nil
+if constants.managed_cli and constants.managed_cli.default_profile then
+  managed_launcher = constants.managed_cli.default_profile
 end
 
 local public_workspaces = {
   work = {
     defaults = {
-      command = managed_command,
+      launcher = managed_launcher,
     },
     items = {},
   },
   config = {
     defaults = {
-      command = managed_command,
+      launcher = managed_launcher,
     },
     items = constants.repo_root and {
       { cwd = constants.repo_root },

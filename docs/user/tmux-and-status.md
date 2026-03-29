@@ -14,12 +14,14 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 ## Tmux Behavior
 
 - tmux status follows the active pane working directory.
-- WezTerm cwd-dependent actions inside tmux still rely on shell integration emitting `OSC 7` from the interactive WSL shell, except for `Alt+o` fallback handling.
-- Managed workspace creation also depends on `default_domain` being configured in `wezterm-x/local/constants.lua`.
-- The shell integration currently lives in WSL user rc files: `~/.zshrc` and `~/.bashrc`.
-- `Alt+o` uses WezTerm's current-pane cwd plus `wsl.exe --cd ... code .` when WezTerm has a usable WSL cwd.
-- If WezTerm only sees the WSL host fallback path such as `/C:/Users/...`, it forwards `Alt+o` to the pane instead; tmux then launches `code .` from `#{pane_current_path}`.
+- WezTerm cwd-dependent actions inside tmux still rely on shell integration emitting `OSC 7` from the interactive runtime shell, except for `Alt+o` fallback handling.
+- Managed workspace creation only requires `default_domain` in `hybrid-wsl` mode.
+- The shell integration currently lives in the runtime shell rc files such as `~/.zshrc` and `~/.bashrc`.
+- In `hybrid-wsl`, `Alt+o` uses WezTerm's current-pane cwd plus `wsl.exe --cd ... code .` when WezTerm has a usable WSL cwd.
+- In `posix-local`, `Alt+o` launches the configured local VS Code opener directly with the current directory path.
+- If WezTerm only sees the WSL host fallback path such as `/C:/Users/...` in `hybrid-wsl`, it forwards `Alt+o` to the pane instead; tmux then launches `code .` from `#{pane_current_path}`.
 - If WezTerm only reports `/`, managed workspace tabs still fall back to the tab's configured project directory instead of opening the WSL root.
+- `Alt+b` remains a `hybrid-wsl`-only integration because it targets the Windows desktop Chrome launcher.
 - The first tmux line can render repo, branch, combined git change counts, tracked-branch sync markers (`^N` ahead, `vN` behind, `=0` synced, `x0` no upstream configured), and Node.js version.
 - The second tmux line renders whenever the WakaTime toggle is enabled.
 - Any enabled status section keeps a stable on-screen slot. If live data is unavailable, that section renders placeholder text instead of disappearing, which avoids status-bar flicker.
@@ -36,5 +38,5 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 - Node.js version lookup includes an `nvm` fallback so it still renders outside an interactive login shell.
 - `scripts/runtime/open-project-session.sh` remains the stable execution layer for managed project tabs.
 - If tmux is reloaded outside the helper scripts, `tmux.conf` derives `@wezterm_repo_root` from the path of the loaded config file so the status commands can still locate the repository scripts.
-- If the WSL shell rc changes, reload the shell or recreate affected tmux sessions before expecting WezTerm cwd tracking to update.
+- If the runtime shell rc changes, reload the shell or recreate affected tmux sessions before expecting WezTerm cwd tracking to update.
 - If `~/.zshrc` or `~/.bashrc` is replaced or reset, re-apply the `OSC 7` integration or WezTerm will fall back to incorrect cwd inference inside tmux.

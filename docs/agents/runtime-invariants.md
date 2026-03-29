@@ -10,7 +10,8 @@ Use this doc when you are changing runtime behavior.
 
 ## Stable Behavior
 
-- Managed `codex` startup currently forces `tui.theme=github`; preserve that unless the tmux/background issue is intentionally changed.
+- Managed launcher profiles live in `wezterm-x/lua/constants.lua` and resolve to concrete startup commands before tmux session creation.
+- The tracked `codex` launcher keeps the default dark theme behavior and forces `tui.theme=github` only when `managed_cli.ui_variant` is `light`.
 - The tmux layout is the stable execution layer: left pane runs the configured primary command and right pane remains a shell in the same directory.
 - tmux status may render one or two lines depending on whether the WakaTime line is enabled and non-empty.
 - WezTerm tab titles remain the primary cross-workspace navigation layer.
