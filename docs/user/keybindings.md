@@ -11,7 +11,7 @@ Use this doc when you need shortcut behavior.
 - `Alt+v`: split vertically
 - `Alt+s`: split horizontally
 - `Alt+o`: open the current WSL working directory in VS Code; when WezTerm only sees the WSL host fallback path, it forwards `Alt+o` to the pane so tmux or the shell can resolve the real cwd
-- `Alt+b`: open the Chrome debug browser on the configured port/profile from `wezterm-x/local/constants.lua`, or focus the existing one if it is already running
+- `Alt+b`: open the configured Chrome debug browser profile from `wezterm-x/local/constants.lua`; in `hybrid-wsl` it uses the synced Windows launcher, and in `posix-local` it uses the synced shell launcher
 - `Ctrl+LeftClick`: open the link under the mouse cursor in the system browser
 - `Ctrl+c`: copy selection, otherwise send normal `Ctrl+c`
 - `Ctrl+v`: paste from clipboard

@@ -21,7 +21,8 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 - In `posix-local`, `Alt+o` launches the configured local VS Code opener directly with the current directory path.
 - If WezTerm only sees the WSL host fallback path such as `/C:/Users/...` in `hybrid-wsl`, it forwards `Alt+o` to the pane instead; tmux then launches `code .` from `#{pane_current_path}`.
 - If WezTerm only reports `/`, managed workspace tabs still fall back to the tab's configured project directory instead of opening the WSL root.
-- `Alt+b` remains a `hybrid-wsl`-only integration because it targets the Windows desktop Chrome launcher.
+- In `hybrid-wsl`, `Alt+b` uses the synced Windows PowerShell launcher for the debug Chrome profile.
+- In `posix-local`, `Alt+b` uses the synced shell launcher at `wezterm-x/scripts/focus-or-start-debug-chrome.sh`.
 - The first tmux line can render repo, branch, combined git change counts, tracked-branch sync markers (`^N` ahead, `vN` behind, `=0` synced, `x0` no upstream configured), and Node.js version.
 - The second tmux line renders whenever the WakaTime toggle is enabled.
 - Any enabled status section keeps a stable on-screen slot. If live data is unavailable, that section renders placeholder text instead of disappearing, which avoids status-bar flicker.

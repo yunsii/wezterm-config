@@ -11,7 +11,7 @@ Use this doc when you need the minimum setup and navigation context.
 ## Local Setup
 
 1. Copy `wezterm-x/local.example/` to `wezterm-x/local/`.
-2. Edit `wezterm-x/local/constants.lua` for your `runtime_mode`, runtime shell, managed CLI theme variant, and any optional OS-specific integrations such as `default_domain` or Chrome debug profile path.
+2. Edit `wezterm-x/local/constants.lua` for your `runtime_mode`, runtime shell, managed CLI theme variant, and any optional OS-specific integrations such as `default_domain` or Chrome debug profile path. `Alt+b` uses the synced launcher scripts under `wezterm-x/scripts/` and requires `chrome_debug_browser.user_data_dir`.
 3. Edit `wezterm-x/local/workspaces.lua` for your private project directories.
 
  ## Repo Entry Points
@@ -25,7 +25,7 @@ Use this doc when you need the minimum setup and navigation context.
 - `tmux.conf`: tmux layout and status line rendering
 - `scripts/runtime/open-project-session.sh`: tmux session bootstrap for managed project tabs
 - `scripts/runtime/run-managed-command.sh`: launcher for managed workspace startup commands
-- `wezterm-x/scripts/`: Windows launcher scripts synced for `hybrid-wsl` integrations
+- `wezterm-x/scripts/`: runtime launcher scripts synced for Chrome and other desktop integrations
 - `scripts/dev/`: repo-local maintenance helpers
 - `skills/wezterm-runtime-sync/scripts/sync-runtime.sh`: skill-owned sync implementation; the public workflow is to use the `wezterm-runtime-sync` skill
 

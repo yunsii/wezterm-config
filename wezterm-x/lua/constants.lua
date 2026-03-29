@@ -36,6 +36,18 @@ local function default_window_font(host_os)
   return wezterm.font { family = 'Noto Sans', weight = 'Bold' }
 end
 
+local function default_chrome_debug_executable(host_os)
+  if host_os == 'windows' then
+    return 'chrome.exe'
+  end
+
+  if host_os == 'macos' then
+    return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+  end
+
+  return 'google-chrome'
+end
+
 local function default_launch_menu(host_os)
   if host_os ~= 'windows' then
     return {}
@@ -159,7 +171,7 @@ local base_constants = {
     },
   },
   chrome_debug_browser = {
-    executable = 'chrome.exe',
+    executable = default_chrome_debug_executable(host_os),
     remote_debugging_port = 9222,
     user_data_dir = nil,
   },

@@ -166,44 +166,56 @@ local function open_current_dir_in_vscode(wezterm, window, pane, constants, work
 end
 
 local function open_debug_chrome(wezterm, window, constants, logger)
-  if constants.runtime_mode ~= 'hybrid-wsl' then
-    logger.warn('chrome', 'chrome debug launcher is unavailable in this runtime mode', {
-      runtime_mode = constants.runtime_mode,
-    })
-    window:toast_notification('WezTerm', 'Alt+b is only available in hybrid-wsl mode', nil, 3000)
-    return
-  end
+  local chrome = constants.chrome_debug_browser or {}
+  local runtime_mode = constants.runtime_mode or 'hybrid-wsl'
+  local integration = constants.integrations and constants.integrations.chrome_debug or {}
+  local command
 
-  local chrome = constants.chrome_debug_browser
-  if not chrome or not chrome.user_data_dir or chrome.user_data_dir == '' then
-    logger.warn('chrome', 'missing chrome debug browser user_data_dir', {})
+  if not chrome.user_data_dir or chrome.user_data_dir == '' then
+    logger.warn('chrome', 'missing chrome debug browser user_data_dir', {
+      runtime_mode = runtime_mode,
+    })
     window:toast_notification('WezTerm', 'Alt+b failed: configure chrome_debug_browser.user_data_dir in wezterm-x/local/constants.lua', nil, 4000)
     return
   end
 
-  local integration = constants.integrations and constants.integrations.chrome_debug or {}
-  local runtime_dir = integration.runtime_dir or (wezterm.home_dir .. '\\.wezterm-x')
-  local script_path = integration.script or 'scripts\\focus-or-start-debug-chrome.ps1'
-  local command = {
-    integration.cmd or 'cmd.exe',
-    '/c',
-    integration.powershell or 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
-    '-NoProfile',
-    '-NonInteractive',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-File',
-    runtime_dir .. '\\' .. script_path,
-    '-ChromePath',
-    chrome.executable,
-    '-RemoteDebuggingPort',
-    tostring(chrome.remote_debugging_port),
-    '-UserDataDir',
-    chrome.user_data_dir,
-  }
+  if runtime_mode == 'hybrid-wsl' then
+    local runtime_dir = integration.runtime_dir or (wezterm.home_dir .. '\\.wezterm-x')
+    local script_path = integration.script or 'scripts\\focus-or-start-debug-chrome.ps1'
+    command = {
+      integration.cmd or 'cmd.exe',
+      '/c',
+      integration.powershell or 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      runtime_dir .. '\\' .. script_path,
+      '-ChromePath',
+      chrome.executable,
+      '-RemoteDebuggingPort',
+      tostring(chrome.remote_debugging_port),
+      '-UserDataDir',
+      chrome.user_data_dir,
+    }
+  else
+    local runtime_dir = integration.posix_runtime_dir or (wezterm.home_dir .. '/.wezterm-x')
+    local script_path = integration.posix_script or 'scripts/focus-or-start-debug-chrome.sh'
+    command = {
+      integration.posix_shell or '/bin/sh',
+      runtime_dir .. '/' .. script_path,
+      chrome.executable,
+      tostring(chrome.remote_debugging_port),
+      chrome.user_data_dir,
+    }
+  end
+
   logger.info('chrome', 'opening or focusing debug chrome', {
+    command = table.concat(command, ' '),
     executable = chrome.executable,
     port = chrome.remote_debugging_port,
+    runtime_mode = runtime_mode,
     user_data_dir = chrome.user_data_dir,
   })
   local ok, err = pcall(wezterm.background_child_process, command)

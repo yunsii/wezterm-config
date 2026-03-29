@@ -23,7 +23,7 @@ Use this doc when you need ownership boundaries or file entry points.
 - `scripts/runtime/open-current-dir-in-vscode.sh`: pane-aware VS Code launcher used by tmux `Alt+o`
 - `scripts/runtime/open-project-session.sh`: tmux bootstrap for managed project tabs
 - `scripts/runtime/run-managed-command.sh`: managed startup command launcher
-- `wezterm-x/scripts/`: Windows-only launcher scripts copied by the runtime sync skill
+- `wezterm-x/scripts/`: runtime launcher scripts copied by the runtime sync skill
 - `scripts/dev/`: repo-local helper scripts that are not synced to Windows
 - `tmux.conf`: tmux layout and status rendering
 

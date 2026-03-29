@@ -8,7 +8,10 @@ return {
     ui_variant = 'light',
   },
   chrome_debug_browser = {
-    user_data_dir = 'C:\\path\\to\\chrome-profile',
+    -- Override executable if your browser binary is not on PATH.
+    -- executable = 'google-chrome',
+    -- Use a Windows path in hybrid-wsl and a local path in posix-local.
+    user_data_dir = '/path/to/chrome-profile',
   },
   diagnostics = {
     wezterm = {
