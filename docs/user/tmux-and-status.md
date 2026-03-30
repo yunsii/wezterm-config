@@ -41,12 +41,15 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 - `Alt+g` opens a centered tmux popup worktree picker for the current repo family, and `Alt+Shift+g` cycles to the next linked worktree in that same tmux session.
 - The `Alt+g` picker runs inside its own tmux popup pane instead of a `display-menu`, which keeps the picker stable even while the active pane is doing full-screen redraws.
 - Successful worktree switches update the active tmux window silently instead of showing a transient tmux banner.
-- WakaTime refresh is cache-backed: tmux repaints every few seconds, while the script reuses cached data for up to 60 seconds and refreshes asynchronously.
+- tmux status refresh is hybrid: focus and pane/window change hooks refresh immediately, and a 30-second `status-interval` acts as a low-frequency fallback poll.
+- `Alt+g` and other tmux worktree switches force an immediate status refresh after selecting the target window, so repo, branch, and git-change state do not wait for the fallback poll.
+- WakaTime refresh is cache-backed: the status script reuses cached data for up to 60 seconds and refreshes asynchronously.
 - WakaTime status sources `wezterm-x/local/shared.env`, and WezTerm Lua also reads that same file for shared scalar values; both sides currently use it for `WAKATIME_API_KEY`.
 - WakaTime status no longer depends on WezTerm injecting the API key into the WSL shell environment; reloading tmux is enough after updating `shared.env`.
 - The first tmux line still shows the active git branch; the second line only distinguishes the current worktree as `primary` or `linked` to avoid repeating the branch or worktree name.
 - Each status section has its own toggle. If a section is disabled, tmux skips that section's script entirely.
 - `@tmux_status_render_repo`, `@tmux_status_render_worktree`, `@tmux_status_render_branch`, `@tmux_status_render_git_changes`, `@tmux_status_render_node`, and `@tmux_status_render_wakatime` all default to `1`.
+- `@tmux_status_poll_interval` defaults to `30`, matching the low-frequency fallback poll.
 - Enabled sections use placeholders when needed: the worktree line shows `no-worktree` outside git worktrees, branch shows `no-branch`, git changes shows `no-git`, Node.js shows `Node unavailable`, and WakaTime stays visible with placeholder text until real data becomes available.
 - Node.js version lookup includes an `nvm` fallback so it still renders outside an interactive login shell.
 - `scripts/runtime/open-project-session.sh` remains the stable execution layer for managed project tabs.

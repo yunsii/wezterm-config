@@ -69,3 +69,4 @@ else
 fi
 
 tmux select-window -t "$window_id"
+bash "$script_dir/tmux-status-refresh.sh" --window "$window_id" --force --refresh-client >/dev/null 2>&1 || true
