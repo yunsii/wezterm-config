@@ -54,6 +54,17 @@ local function default_chrome_debug_executable(host_os)
   return 'google-chrome'
 end
 
+local function default_vscode_command(host_os)
+  if host_os == 'windows' then
+    local local_app_data = os.getenv 'LOCALAPPDATA'
+    if local_app_data and local_app_data ~= '' then
+      return { local_app_data .. '\\Programs\\Microsoft VS Code\\Code.exe' }
+    end
+  end
+
+  return { 'code' }
+end
+
 local function default_launch_menu(host_os)
   if host_os ~= 'windows' then
     return {}
@@ -186,7 +197,7 @@ local base_constants = {
   launch_menu = default_launch_menu(host_os),
   integrations = {
     vscode = {
-      hybrid_wsl_command = { 'wsl.exe' },
+      hybrid_wsl_command = default_vscode_command(host_os),
       posix_command = { 'code' },
     },
     chrome_debug = {

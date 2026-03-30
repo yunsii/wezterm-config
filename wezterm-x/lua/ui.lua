@@ -47,6 +47,17 @@ local function copy_args(values)
   return result
 end
 
+local function uri_encode(value, keep_slash)
+  if not value or value == '' then
+    return ''
+  end
+
+  local pattern = keep_slash and '([^%w%-%._~/])' or '([^%w%-%._~])'
+  return (value:gsub(pattern, function(char)
+    return string.format('%%%02X', string.byte(char))
+  end))
+end
+
 local function trim(value)
   if not value then
     return nil
@@ -214,15 +225,17 @@ local function open_current_dir_in_vscode(wezterm, window, pane, constants, work
     local hybrid_command = constants.integrations
       and constants.integrations.vscode
       and constants.integrations.vscode.hybrid_wsl_command
-      or { 'wsl.exe' }
+      or { 'code' }
+
+    local folder_uri = string.format(
+      'vscode-remote://wsl+%s%s',
+      uri_encode(distro, false),
+      uri_encode(cwd, true)
+    )
 
     command = copy_args(hybrid_command)
-    command[#command + 1] = '--distribution'
-    command[#command + 1] = distro
-    command[#command + 1] = '--cd'
-    command[#command + 1] = cwd
-    command[#command + 1] = 'code'
-    command[#command + 1] = '.'
+    command[#command + 1] = '--folder-uri'
+    command[#command + 1] = folder_uri
   else
     local posix_command = constants.integrations
       and constants.integrations.vscode
