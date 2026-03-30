@@ -47,43 +47,6 @@ local function copy_args(values)
   return result
 end
 
-local function uri_encode(value, keep_slash)
-  if not value or value == '' then
-    return ''
-  end
-
-  local pattern = keep_slash and '([^%w%-%._~/])' or '([^%w%-%._~])'
-  return (value:gsub(pattern, function(char)
-    return string.format('%%%02X', string.byte(char))
-  end))
-end
-
-local function trim(value)
-  if not value then
-    return nil
-  end
-
-  return (value:gsub('^%s+', ''):gsub('%s+$', ''))
-end
-
-local function dirname(path)
-  if not path or path == '' then
-    return nil
-  end
-
-  local normalized = path:gsub('[/\\]+$', '')
-  if normalized == '' then
-    return path
-  end
-
-  local parent = normalized:match('^(.*)[/\\][^/\\]+$')
-  if parent == '' then
-    return path:sub(1, 1) == '/' and '/' or normalized
-  end
-
-  return parent or normalized
-end
-
 local function is_windows_host_path(path)
   if not path or path == '' then
     return false
@@ -132,56 +95,6 @@ local function wsl_distro_from_domain(domain_name)
   return domain_name:match '^WSL:(.+)$'
 end
 
-local function resolve_primary_worktree_cwd(wezterm, cwd, runtime_mode, domain_name, constants, logger)
-  if not cwd or cwd == '' then
-    return cwd
-  end
-
-  local command
-  if runtime_mode == 'hybrid-wsl' then
-    local distro = wsl_distro_from_domain(domain_name) or wsl_distro_from_domain(constants.default_domain)
-    if not distro then
-      return cwd
-    end
-
-    command = { 'wsl.exe', '--distribution', distro, '--cd', cwd, 'git', 'rev-parse', '--path-format=absolute', '--git-common-dir' }
-  else
-    command = { 'git', '-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir' }
-  end
-
-  local ok, success, stdout, stderr = pcall(wezterm.run_child_process, command)
-  if not ok then
-    logger.warn('alt_o', 'failed to resolve primary worktree cwd', {
-      cwd = cwd,
-      error = success,
-      runtime_mode = runtime_mode,
-    })
-    return cwd
-  end
-
-  if not success then
-    logger.info('alt_o', 'cwd is not part of a git worktree family; keeping current directory', {
-      cwd = cwd,
-      error = trim(stderr),
-      runtime_mode = runtime_mode,
-    })
-    return cwd
-  end
-
-  local common_dir = trim(stdout)
-  local main_root = dirname(common_dir)
-  if not main_root or main_root == '' then
-    return cwd
-  end
-
-  logger.info('alt_o', 'resolved primary worktree cwd', {
-    cwd = cwd,
-    main_root = main_root,
-    runtime_mode = runtime_mode,
-  })
-  return main_root
-end
-
 local function open_current_dir_in_vscode(wezterm, window, pane, constants, workspace, logger)
   local raw_cwd = pane:get_current_working_dir()
   local cwd = file_path_from_cwd(raw_cwd)
@@ -189,6 +102,7 @@ local function open_current_dir_in_vscode(wezterm, window, pane, constants, work
   local mux_window = window:mux_window()
   local workspace_name = mux_window and mux_window:get_workspace() or window:active_workspace()
   local runtime_mode = constants.runtime_mode or 'hybrid-wsl'
+  local integration = constants.integrations and constants.integrations.vscode or {}
 
   if not cwd or cwd == '/' then
     cwd = managed_workspace_cwd_fallback(window, workspace_name, workspace)
@@ -208,8 +122,6 @@ local function open_current_dir_in_vscode(wezterm, window, pane, constants, work
     return
   end
 
-  cwd = resolve_primary_worktree_cwd(wezterm, cwd, runtime_mode, domain_name, constants, logger)
-
   local command
   if runtime_mode == 'hybrid-wsl' then
     local distro = wsl_distro_from_domain(domain_name) or wsl_distro_from_domain(constants.default_domain)
@@ -222,27 +134,48 @@ local function open_current_dir_in_vscode(wezterm, window, pane, constants, work
       return
     end
 
-    local hybrid_command = constants.integrations
-      and constants.integrations.vscode
-      and constants.integrations.vscode.hybrid_wsl_command
-      or { 'code' }
+    local hybrid_command = copy_args(integration.hybrid_wsl_command)
+    if not hybrid_command or #hybrid_command == 0 then
+      hybrid_command = { 'code' }
+    end
 
-    local folder_uri = string.format(
-      'vscode-remote://wsl+%s%s',
-      uri_encode(distro, false),
-      uri_encode(cwd, true)
-    )
+    local runtime_dir = integration.runtime_dir or (wezterm.config_dir .. '\\.wezterm-x')
+    local script_path = integration.script or 'scripts\\open-current-dir-in-vscode.ps1'
+    command = {
+      integration.powershell or 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      runtime_dir .. '\\' .. script_path,
+      '-RequestedDir',
+      cwd,
+      '-Distro',
+      distro,
+    }
 
-    command = copy_args(hybrid_command)
-    command[#command + 1] = '--folder-uri'
-    command[#command + 1] = folder_uri
+    for _, part in ipairs(hybrid_command) do
+      command[#command + 1] = '-CodeArg'
+      command[#command + 1] = part
+    end
   else
-    local posix_command = constants.integrations
-      and constants.integrations.vscode
-      and constants.integrations.vscode.posix_command
-      or { 'code' }
+    local posix_command = copy_args(integration.posix_command)
+    if not posix_command or #posix_command == 0 then
+      posix_command = { 'code' }
+    end
 
-    command = copy_args(posix_command)
+    command = {
+      integration.posix_shell or '/bin/bash',
+      integration.posix_script or (wezterm.config_dir .. '/scripts/runtime/open-current-dir-in-vscode.sh'),
+      '--code-command',
+    }
+
+    for _, part in ipairs(posix_command) do
+      command[#command + 1] = part
+    end
+
+    command[#command + 1] = '--'
     command[#command + 1] = cwd
   end
 

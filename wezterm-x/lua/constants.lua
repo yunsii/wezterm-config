@@ -199,6 +199,11 @@ local base_constants = {
     vscode = {
       hybrid_wsl_command = default_vscode_command(host_os),
       posix_command = { 'code' },
+      powershell = 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
+      runtime_dir = wezterm.config_dir .. '\\.wezterm-x',
+      script = 'scripts\\open-current-dir-in-vscode.ps1',
+      posix_shell = '/bin/bash',
+      posix_script = wezterm.config_dir .. '/scripts/runtime/open-current-dir-in-vscode.sh',
     },
     chrome_debug = {
       cmd = 'cmd.exe',

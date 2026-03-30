@@ -37,6 +37,17 @@ tmux_worktree_abs_path() {
   )
 }
 
+tmux_worktree_file_mtime() {
+  local path="${1:?missing path}"
+
+  if stat -c %Y "$path" >/dev/null 2>&1; then
+    stat -c %Y "$path"
+    return
+  fi
+
+  stat -f %m "$path"
+}
+
 tmux_worktree_in_git_repo() {
   local cwd="${1:-$PWD}"
   git -C "$cwd" rev-parse --show-toplevel >/dev/null 2>&1
@@ -288,6 +299,26 @@ tmux_worktree_set_window_metadata() {
 
   tmux set-option -q -w -t "$window_target" @wezterm_worktree_root "$worktree_root"
   tmux set-option -q -w -t "$window_target" @wezterm_worktree_label "$worktree_label"
+}
+
+tmux_worktree_ensure_tmux_config_loaded() {
+  local tmux_conf="${1:?missing tmux conf}"
+  local repo_root="${2:?missing repo root}"
+  local desired_mtime=""
+  local current_repo_root=""
+  local current_mtime=""
+
+  desired_mtime="$(tmux_worktree_file_mtime "$tmux_conf" 2>/dev/null || printf '0')"
+  current_repo_root="$(tmux show -gv @wezterm_repo_root 2>/dev/null || true)"
+  current_mtime="$(tmux show -gv @wezterm_tmux_conf_mtime 2>/dev/null || true)"
+
+  if [[ "$current_repo_root" == "$repo_root" && "$current_mtime" == "$desired_mtime" ]]; then
+    return 0
+  fi
+
+  tmux set-option -g @wezterm_repo_root "$repo_root"
+  tmux source-file "$tmux_conf"
+  tmux set-option -gq @wezterm_tmux_conf_mtime "$desired_mtime"
 }
 
 tmux_worktree_find_window() {

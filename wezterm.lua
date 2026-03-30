@@ -30,7 +30,6 @@ local workspace = workspace_manager.new {
 
 titles.register {
   wezterm = wezterm,
-  mux = wezterm.mux,
   palette = constants.palette,
 }
 

@@ -210,8 +210,7 @@ tmux_worktree_set_window_metadata "$window_id" "$worktree_root" "$worktree_label
 tmux rename-window -t "$window_id" "$worktree_label"
 tmux_worktree_ensure_window_panes "$window_id" "$worktree_root"
 
-tmux set-option -g @wezterm_repo_root "$(repo_root_path)"
-tmux source-file "$TMUX_CONF"
+tmux_worktree_ensure_tmux_config_loaded "$TMUX_CONF" "$(repo_root_path)"
 
 printf 'session_name=%s\n' "$session_name"
 printf 'window_id=%s\n' "$window_id"

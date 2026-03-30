@@ -263,9 +263,8 @@ if (( has_ai_block )); then
   fi
 
   if (( ${#hard_parts[@]} > 0 )); then
-    message+="- hard-parts:"$'\n'
     for item in "${hard_parts[@]}"; do
-      message+="  - $item"$'\n'
+      message+="- hard-parts: $item"$'\n'
     done
   fi
 

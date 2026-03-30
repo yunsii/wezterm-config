@@ -18,8 +18,8 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 - WezTerm cwd-dependent actions inside tmux still rely on shell integration emitting `OSC 7` from the interactive runtime shell, except for `Alt+o` fallback handling.
 - Managed workspace creation only requires `default_domain` in `hybrid-wsl` mode.
 - The shell integration currently lives in the runtime shell rc files such as `~/.zshrc` and `~/.bashrc`.
-- In `hybrid-wsl`, `Alt+o` resolves the current pane into the repo family's primary worktree and then opens it from the Windows side with VS Code's `--folder-uri vscode-remote://wsl+<distro>/...` entrypoint when WezTerm has a usable WSL cwd.
-- In `posix-local`, `Alt+o` resolves the current pane into the repo family's primary worktree and then launches the configured local VS Code opener there.
+- In `hybrid-wsl`, `Alt+o` hands the current pane directory to the synced Windows PowerShell launcher, which resolves the repo family's primary worktree and then opens it with VS Code's `--folder-uri vscode-remote://wsl+<distro>/...` entrypoint.
+- In `posix-local`, `Alt+o` hands the current pane directory to the runtime-side VS Code launcher, which resolves the repo family's primary worktree and then launches the configured local VS Code opener there.
 - Outside git worktrees, `Alt+o` still opens the current directory.
 - If WezTerm only sees the WSL host fallback path such as `/C:/Users/...` in `hybrid-wsl`, it forwards `Alt+o` to the pane instead; tmux then resolves `#{pane_current_path}` to the primary worktree before launching `code .`.
 - If WezTerm only reports `/`, managed workspace tabs still fall back to the tab's configured project directory instead of opening the WSL root.
@@ -41,9 +41,9 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 - `Alt+g` opens a centered tmux popup worktree picker for the current repo family, and `Alt+Shift+g` cycles to the next linked worktree in that same tmux session.
 - The `Alt+g` picker runs inside its own tmux popup pane instead of a `display-menu`, which keeps the picker stable even while the active pane is doing full-screen redraws.
 - Successful worktree switches update the active tmux window silently instead of showing a transient tmux banner.
-- tmux status refresh is hybrid: focus and pane/window change hooks refresh immediately, and a 30-second `status-interval` acts as a low-frequency fallback poll.
-- `Alt+g` and other tmux worktree switches force an immediate status refresh after selecting the target window, so repo, branch, and git-change state do not wait for the fallback poll.
-- WakaTime refresh is cache-backed: the status script reuses cached data for up to 60 seconds and refreshes asynchronously.
+- tmux status refresh is hybrid: the draw path reads cached lines, focus and pane/window change hooks trigger debounced background refreshes, and a 30-second `status-interval` acts as a low-frequency fallback poll.
+- `Alt+g` and other tmux worktree switches request a fresh status recompute after selecting the target window, so repo, branch, and git-change state usually update without waiting for the fallback poll.
+- WakaTime refresh is cache-backed: the status script reuses cached summary data for up to 60 seconds, refreshes asynchronously, and upgrades older JSON cache entries to the current compact summary format.
 - WakaTime status sources `wezterm-x/local/shared.env`, and WezTerm Lua also reads that same file for shared scalar values; both sides currently use it for `WAKATIME_API_KEY`.
 - WakaTime status no longer depends on WezTerm injecting the API key into the WSL shell environment; reloading tmux is enough after updating `shared.env`.
 - The first tmux line still shows the active git branch; the second line only distinguishes the current worktree as `primary` or `linked` to avoid repeating the branch or worktree name.
@@ -51,7 +51,7 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 - `@tmux_status_render_repo`, `@tmux_status_render_worktree`, `@tmux_status_render_branch`, `@tmux_status_render_git_changes`, `@tmux_status_render_node`, and `@tmux_status_render_wakatime` all default to `1`.
 - `@tmux_status_poll_interval` defaults to `30`, matching the low-frequency fallback poll.
 - Enabled sections use placeholders when needed: the worktree line shows `no-worktree` outside git worktrees, branch shows `no-branch`, git changes shows `no-git`, Node.js shows `Node unavailable`, and WakaTime stays visible with placeholder text until real data becomes available.
-- Node.js version lookup includes an `nvm` fallback so it still renders outside an interactive login shell.
+- Node.js version lookup includes an `nvm` fallback so it still renders outside an interactive login shell, and the resolved version is cached to avoid repeated shell bootstrap on every status refresh.
 - `scripts/runtime/open-project-session.sh` remains the stable execution layer for managed project tabs.
 - If tmux is reloaded outside the helper scripts, `tmux.conf` derives `@wezterm_repo_root` from the path of the loaded config file so the status commands can still locate the repository scripts.
 - If the runtime shell rc changes, reload the shell or recreate affected tmux sessions before expecting WezTerm cwd tracking to update.

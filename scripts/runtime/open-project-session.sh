@@ -134,8 +134,7 @@ else
   tmux_worktree_ensure_window_panes "$window_id" "$worktree_root"
 fi
 
-tmux set-option -g @wezterm_repo_root "$(repo_root_path)"
-tmux source-file "$TMUX_CONF"
+tmux_worktree_ensure_tmux_config_loaded "$TMUX_CONF" "$(repo_root_path)"
 tmux select-window -t "$window_id"
 
 runtime_log_info workspace "attaching tmux session" "session_name=$session_name" "window_id=$window_id"

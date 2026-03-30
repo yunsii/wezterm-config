@@ -17,8 +17,8 @@ local M = {}
 
 function M.register(opts)
   local wezterm = opts.wezterm
-  local mux = opts.mux
   local palette = opts.palette
+  local workspace_label_cache = {}
 
   local function workspace_badge_style(name)
     local badges = palette.workspace_badges or {}
@@ -35,14 +35,20 @@ function M.register(opts)
   end
 
   local function format_workspace_label(name)
-    local style = workspace_badge_style(name)
+    if workspace_label_cache[name] then
+      return workspace_label_cache[name]
+    end
 
-    return wezterm.format {
+    local style = workspace_badge_style(name)
+    local label = wezterm.format {
       { Background = { Color = style.bg } },
       { Foreground = { Color = style.fg } },
       { Attribute = { Intensity = 'Bold' } },
       { Text = ' ' .. name .. ' ' },
     }
+
+    workspace_label_cache[name] = label
+    return label
   end
 
   wezterm.on('format-window-title', function(tab, pane, tabs, panes, config_overrides)
@@ -55,14 +61,12 @@ function M.register(opts)
   end)
 
   wezterm.on('format-tab-title', function(tab, tabs, panes, config_overrides, hover, max_width)
+    local pane_infos = panes or {}
+    local width = math.max(max_width - 2, 1)
     local title
-    if tab.tab_title and tab.tab_title ~= '' then
-      local pane_count = 0
-      local mux_tab = mux.get_tab(tab.tab_id)
-      if mux_tab then
-        pane_count = #mux_tab:panes_with_info()
-      end
 
+    if tab.tab_title and tab.tab_title ~= '' then
+      local pane_count = #pane_infos
       local summary = tab.tab_title
       if pane_count > 1 then
         summary = summary .. ' +' .. (pane_count - 1)
@@ -70,17 +74,15 @@ function M.register(opts)
 
       title = summary
     else
-      local mux_tab = mux.get_tab(tab.tab_id)
-      local dirs = mux_tab and helpers.unique_dirs_from_panes(mux_tab:panes_with_info()) or {}
-
+      local dirs = helpers.unique_dirs_from_panes(pane_infos)
       if #dirs > 0 then
-        title = helpers.summarize_dirs(dirs, math.max(max_width - 2, 1))
+        title = helpers.summarize_dirs(dirs, width)
       else
         title = tab.active_pane.title
       end
     end
 
-    title = wezterm.truncate_right(title, math.max(max_width - 2, 1))
+    title = wezterm.truncate_right(title, width)
 
     local bg = palette.tab_inactive_bg
     local fg = palette.tab_inactive_fg

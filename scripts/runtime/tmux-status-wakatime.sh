@@ -28,7 +28,30 @@ is_wakatime_available() {
   [[ -n "$api_key" ]] && command -v python3 >/dev/null 2>&1
 }
 
-fetch_wakatime_today_json() {
+emit_wakatime_summary_from_json() {
+  python3 - <<'PY'
+import json
+import os
+import sys
+
+try:
+    payload = json.loads(os.environ.get("WAKA_JSON", ""))
+except json.JSONDecodeError:
+    raise SystemExit(1)
+
+categories = {}
+for item in payload.get("data", {}).get("categories", []) or []:
+    name = item.get("name")
+    text = item.get("text")
+    if isinstance(name, str) and isinstance(text, str):
+        categories[name] = text
+
+print(f"AI\t{categories.get('AI Coding', '')}")
+print(f"CODE\t{categories.get('Coding', '')}")
+PY
+}
+
+fetch_wakatime_summary() {
   WAKATIME_API_URL="$WAKA_API_URL" TMUX_STATUS_WAKATIME_API_KEY="$api_key" python3 - <<'PY'
 import base64
 import json
@@ -59,18 +82,62 @@ try:
 except (OSError, urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError):
     raise SystemExit(1)
 
-json.dump(payload, sys.stdout, separators=(",", ":"))
+categories = {}
+for item in payload.get("data", {}).get("categories", []) or []:
+    name = item.get("name")
+    text = item.get("text")
+    if isinstance(name, str) and isinstance(text, str):
+        categories[name] = text
+
+print(f"AI\t{categories.get('AI Coding', '')}")
+print(f"CODE\t{categories.get('Coding', '')}")
 PY
+}
+
+write_wakatime_cache() {
+  local timestamp="$1"
+  local summary="$2"
+
+  printf '%s\n%s\n' "$timestamp" "$summary" > "$WAKA_CACHE"
 }
 
 refresh_wakatime_cache() {
   touch "$WAKA_LOCK"
-  local result=""
-  result="$(fetch_wakatime_today_json 2>/dev/null || true)"
-  if [[ -n "$result" ]]; then
-    printf '%s\n%s' "$(date +%s)" "$result" > "$WAKA_CACHE"
+  local summary=""
+  summary="$(fetch_wakatime_summary 2>/dev/null || true)"
+  if [[ -n "$summary" ]]; then
+    write_wakatime_cache "$(date +%s)" "$summary"
   fi
   rm -f "$WAKA_LOCK"
+}
+
+load_cached_summary() {
+  local cached_time="$1"
+  local line2=""
+  local line3=""
+  local legacy_json=""
+  local legacy_summary=""
+
+  line2="$(sed -n '2p' "$WAKA_CACHE" 2>/dev/null || true)"
+  line3="$(sed -n '3p' "$WAKA_CACHE" 2>/dev/null || true)"
+
+  if [[ "$line2" == $'AI\t'* ]] && [[ "$line3" == $'CODE\t'* ]]; then
+    printf 'AI=%s\n' "${line2#$'AI\t'}"
+    printf 'CODE=%s\n' "${line3#$'CODE\t'}"
+    return 0
+  fi
+
+  legacy_json="$(tail -n +2 "$WAKA_CACHE" 2>/dev/null || true)"
+  [[ -n "$legacy_json" ]] || return 1
+
+  legacy_summary="$(WAKA_JSON="$legacy_json" emit_wakatime_summary_from_json 2>/dev/null || true)"
+  [[ -n "$legacy_summary" ]] || return 1
+
+  write_wakatime_cache "$cached_time" "$legacy_summary"
+  printf '%s\n' "$legacy_summary" | awk -F '\t' '
+    $1 == "AI" { printf "AI=%s\n", substr($0, 4) }
+    $1 == "CODE" { printf "CODE=%s\n", substr($0, 6) }
+  '
 }
 
 if [[ "${TMUX_STATUS_WAKATIME_REFRESH_ONLY:-0}" == "1" ]]; then
@@ -86,7 +153,8 @@ if ! is_wakatime_available; then
 fi
 
 cached_time=0
-waka_json=""
+ai=""
+code=""
 
 if [[ -f "$WAKA_CACHE" ]]; then
   cached_time="$(head -n 1 "$WAKA_CACHE" 2>/dev/null || printf '0')"
@@ -94,7 +162,16 @@ if [[ -f "$WAKA_CACHE" ]]; then
   today="$(date +%Y-%m-%d)"
 
   if [[ "$cached_day" == "$today" ]]; then
-    waka_json="$(tail -n +2 "$WAKA_CACHE" 2>/dev/null || true)"
+    while IFS='=' read -r key value; do
+      case "$key" in
+        AI)
+          ai="$value"
+          ;;
+        CODE)
+          code="$value"
+          ;;
+      esac
+    done < <(load_cached_summary "$cached_time" || true)
   else
     cached_time=0
   fi
@@ -115,39 +192,13 @@ if (( age >= 60 )) && [[ ! -f "$WAKA_LOCK" ]]; then
   TMUX_STATUS_WAKATIME_REFRESH_ONLY=1 nohup bash "$script_path" >/dev/null 2>&1 &
 fi
 
-if [[ -z "$waka_json" ]]; then
+if [[ -z "$ai" && -z "$code" ]]; then
   printf '%s%s%s' \
     "$padding" \
     "$(style 'fg=#7f7a72' 'WakaTime:')" \
     "$(style 'fg=#7f7a72' ' Ready to roll')"
   exit 0
 fi
-
-mapfile -t wakatime_categories < <(
-  WAKA_JSON="$waka_json" python3 - <<'PY'
-import json
-import os
-import sys
-
-try:
-    payload = json.loads(os.environ.get("WAKA_JSON", ""))
-except json.JSONDecodeError:
-    raise SystemExit(0)
-
-categories = {}
-for item in payload.get("data", {}).get("categories", []) or []:
-    name = item.get("name")
-    text = item.get("text")
-    if isinstance(name, str) and isinstance(text, str):
-        categories[name] = text
-
-print(categories.get("AI Coding", ""))
-print(categories.get("Coding", ""))
-PY
-)
-
-ai="${wakatime_categories[0]:-}"
-code="${wakatime_categories[1]:-}"
 
 parts=()
 
