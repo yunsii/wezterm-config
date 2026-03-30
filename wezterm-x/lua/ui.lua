@@ -429,12 +429,34 @@ function M.apply(opts)
   config.mouse_bindings = {
     {
       event = { Up = { streak = 1, button = 'Left' } },
+      mods = 'NONE',
+      action = wezterm.action.CompleteSelection 'ClipboardAndPrimarySelection',
+    },
+    {
+      event = { Up = { streak = 1, button = 'Left' } },
+      mods = 'SHIFT',
+      action = wezterm.action.CompleteSelection 'ClipboardAndPrimarySelection',
+    },
+    {
+      event = { Up = { streak = 1, button = 'Left' } },
       mods = 'CTRL',
       action = wezterm.action.OpenLinkAtMouseCursor,
     },
     {
       event = { Down = { streak = 1, button = 'Left' } },
       mods = 'CTRL',
+      action = wezterm.action.Nop,
+    },
+    {
+      event = { Up = { streak = 1, button = 'Left' } },
+      mods = 'CTRL',
+      mouse_reporting = true,
+      action = wezterm.action.OpenLinkAtMouseCursor,
+    },
+    {
+      event = { Down = { streak = 1, button = 'Left' } },
+      mods = 'CTRL',
+      mouse_reporting = true,
       action = wezterm.action.Nop,
     },
   }

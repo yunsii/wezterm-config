@@ -14,6 +14,7 @@ Use this doc when you need shortcut behavior.
 - `Alt+g`: open a centered tmux popup worktree picker for the current repo family; selecting an unopened worktree creates its tmux window on demand
 - `Alt+Shift+g`: cycle to the next git worktree in the current repo family, creating the tmux window on demand when needed
 - `Alt+b`: open the configured Chrome debug browser profile from `wezterm-x/local/constants.lua`; in `hybrid-wsl` it uses the synced Windows launcher, and in `posix-local` it uses the synced shell launcher
+- `LeftClick`: complete selection only; links do not open unless `Ctrl` is held
 - `Ctrl+LeftClick`: open the link under the mouse cursor in the system browser
 - `Ctrl+c`: copy selection, otherwise send normal `Ctrl+c`
 - `Ctrl+v`: paste from clipboard
