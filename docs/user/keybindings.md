@@ -14,9 +14,12 @@ Use this doc when you need shortcut behavior.
 - `Alt+g`: open a centered tmux popup worktree picker for the current repo family; selecting an unopened worktree creates its tmux window on demand
 - `Alt+Shift+g`: cycle to the next git worktree in the current repo family, creating the tmux window on demand when needed
 - `Alt+b`: open the configured Chrome debug browser profile from `wezterm-x/local/constants.lua`; in `hybrid-wsl` it uses the synced Windows launcher, and in `posix-local` it uses the synced shell launcher
-- `LeftClick`: complete selection only; links do not open unless `Ctrl` is held
+- `LeftClick`: use the default terminal click behavior; inside tmux and other mouse-aware TUIs it passes through so panes and in-terminal inputs focus on the first click
+- `Shift+LeftDrag`: start a tmux copy-mode selection inside the current pane without crossing into neighboring tmux panes; press `Ctrl+c` or `Enter` to copy and exit copy-mode
+- `Alt+LeftDrag`: bypass tmux mouse reporting and use WezTerm's terminal-wide text selection when you intentionally want to select across pane boundaries; copy it with `Ctrl+Shift+c`
 - `Ctrl+LeftClick`: open the link under the mouse cursor in the system browser
-- `Ctrl+c`: copy selection, otherwise send normal `Ctrl+c`
+- `Ctrl+c`: if the current WezTerm pane has a terminal selection, copy it to the system clipboard and clear the selection; otherwise send a normal terminal `Ctrl+c`, which in tmux copy-mode copies the current tmux selection and exits copy-mode
+- `Ctrl+Shift+c`: copy the current WezTerm selection to the system clipboard
 - `Ctrl+v`: smart paste; in Windows-hosted `hybrid-wsl`, if the current Windows clipboard content is a bitmap image, export it to a temporary `.png` on the Windows host and paste its WSL path into the active pane; otherwise do a normal clipboard paste
 - `Ctrl+Shift+v`: force a normal clipboard paste without the image-export helper
 - `Enter` in tmux copy-mode: copy the current tmux selection to the system clipboard and leave copy-mode

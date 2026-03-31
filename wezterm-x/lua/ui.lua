@@ -362,6 +362,9 @@ function M.apply(opts)
   config.notification_handling = 'NeverShow'
   config.audible_bell = 'Disabled'
   config.visual_bell = { fade_in_duration_ms = 0, fade_out_duration_ms = 0 }
+  config.bypass_mouse_reporting_modifiers = 'ALT'
+  config.swallow_mouse_click_on_window_focus = false
+  config.swallow_mouse_click_on_pane_focus = false
   config.launch_menu = constants.launch_menu or {}
   local set_environment_variables = {
     COLORFGBG = '0;15',
@@ -499,7 +502,20 @@ function M.apply(opts)
           window:perform_action(wezterm.action.CopyTo 'Clipboard', pane)
           window:perform_action(wezterm.action.ClearSelection, pane)
         else
-          window:perform_action(wezterm.action.SendKey { key = 'c', mods = 'CTRL' }, pane)
+          window:perform_action(wezterm.action.SendString '\003', pane)
+        end
+      end),
+    },
+    {
+      key = 'c',
+      mods = 'CTRL|SHIFT',
+      action = wezterm.action_callback(function(window, pane)
+        local has_selection = window:get_selection_text_for_pane(pane) ~= ''
+        if has_selection then
+          window:perform_action(wezterm.action.CopyTo 'Clipboard', pane)
+          window:perform_action(wezterm.action.ClearSelection, pane)
+        else
+          window:perform_action(wezterm.action.SendKey { key = 'c', mods = 'CTRL|SHIFT' }, pane)
         end
       end),
     },
@@ -518,16 +534,6 @@ function M.apply(opts)
   }
 
   config.mouse_bindings = {
-    {
-      event = { Up = { streak = 1, button = 'Left' } },
-      mods = 'NONE',
-      action = wezterm.action.CompleteSelection 'ClipboardAndPrimarySelection',
-    },
-    {
-      event = { Up = { streak = 1, button = 'Left' } },
-      mods = 'SHIFT',
-      action = wezterm.action.CompleteSelection 'ClipboardAndPrimarySelection',
-    },
     {
       event = { Up = { streak = 1, button = 'Left' } },
       mods = 'CTRL',
