@@ -20,28 +20,15 @@ worktree_kind=""
 list_root="$cwd"
 linked_count=""
 worktree_root=""
+context=""
 
-if [[ -n "$session_name" ]]; then
-  main_worktree_root="$(tmux_worktree_session_option "$session_name" @worktree_task_main_root)"
-fi
-
-if [[ -n "$window_id" ]]; then
-  worktree_root="$(tmux_worktree_window_option "$window_id" @worktree_task_root)"
-fi
-
-if [[ -z "$worktree_root" ]] && tmux_worktree_in_git_repo "$cwd"; then
-  worktree_root="$(tmux_worktree_repo_root "$cwd")"
-fi
-
-if [[ -n "$worktree_root" && -z "$main_worktree_root" ]] && tmux_worktree_in_git_repo "$worktree_root"; then
-  main_worktree_root="$(tmux_worktree_main_root "$(tmux_worktree_common_dir "$worktree_root")" || true)"
+context="$(tmux_worktree_context_for_path "$cwd" || true)"
+if [[ -n "$context" ]]; then
+  IFS=$'\t' read -r worktree_root _ main_worktree_root _ <<< "$context"
 fi
 
 if [[ -n "$worktree_root" && -n "$main_worktree_root" ]]; then
   worktree_kind="$(tmux_worktree_kind_for_root "$worktree_root" "$main_worktree_root")"
-fi
-
-if [[ -n "$main_worktree_root" ]]; then
   list_root="$main_worktree_root"
 fi
 

@@ -10,26 +10,25 @@ source "$script_dir/tmux-worktree-lib.sh"
 session_name="${1:-}"
 current_window_id="${2:-}"
 cwd="${3:-$PWD}"
+context=""
+current_worktree_root=""
+repo_common_dir=""
+main_worktree_root=""
+list_root=""
 
 if [[ -z "$session_name" ]]; then
   tmux display-message 'Worktree cycle failed: missing tmux session'
   exit 1
 fi
 
-repo_common_dir="$(tmux_worktree_session_option "$session_name" @worktree_task_repo_common_dir)"
-main_worktree_root="$(tmux_worktree_session_option "$session_name" @worktree_task_main_root)"
-if [[ -z "$repo_common_dir" ]]; then
-  tmux display-message 'Current session is not a git worktree session'
+context="$(tmux_worktree_context_for_context "$current_window_id" "$cwd" || true)"
+if [[ -z "$context" ]]; then
+  tmux display-message 'Current pane is not inside a git worktree'
   exit 0
 fi
 
-current_worktree_root=""
-current_worktree_root="$(tmux_worktree_current_root_for_context "$current_window_id" "$cwd")"
-
-list_root="$cwd"
-if [[ -n "$main_worktree_root" ]]; then
-  list_root="$main_worktree_root"
-fi
+IFS=$'\t' read -r current_worktree_root repo_common_dir main_worktree_root _ <<< "$context"
+list_root="$main_worktree_root"
 
 mapfile -t worktree_paths < <(tmux_worktree_list "$list_root" | awk -F '\t' '{print $2}')
 
@@ -48,4 +47,4 @@ done
 
 next_worktree_root="${worktree_paths[$target_index]}"
 runtime_log_info worktree "cycling worktree window" "session_name=$session_name" "current_worktree_root=$current_worktree_root" "next_worktree_root=$next_worktree_root"
-bash "$script_dir/tmux-worktree-open.sh" "$session_name" "$next_worktree_root"
+bash "$script_dir/tmux-worktree-open.sh" "$session_name" "$next_worktree_root" "$current_window_id" "$cwd"

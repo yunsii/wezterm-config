@@ -25,6 +25,6 @@ if git -C "$REPO_ROOT" rev-parse --show-toplevel >/dev/null 2>&1; then
   fi
 fi
 
-tmux set-option -g @worktree_task_repo_root "$REPO_ROOT"
+tmux set-option -g @wezterm_runtime_root "$REPO_ROOT"
 tmux source-file "$TMUX_CONF"
 printf 'Reloaded tmux config: %s\n' "$TMUX_CONF"

@@ -131,24 +131,25 @@ session_name="$(tmux_worktree_session_name_for_path "$workspace" "$cwd")"
 runtime_log_info workspace "open-project-session invoked" "workspace=$workspace" "cwd=$cwd" "session_name=$session_name" "worktree_root=$worktree_root" "arg_count=$#"
 
 window_id=""
+session_created=0
 if ! tmux has-session -t "$session_name" 2>/dev/null; then
   runtime_log_info workspace "creating tmux session" "session_name=$session_name" "worktree_root=$worktree_root"
   window_id="$(tmux new-session -d -P -F '#{window_id}' -s "$session_name" -c "$worktree_root" "$primary_shell_command")"
+  session_created=1
 else
   runtime_log_info workspace "reusing tmux session" "session_name=$session_name" "worktree_root=$worktree_root"
   window_id="$(tmux_worktree_find_window "$session_name" "$worktree_root" || true)"
 fi
-
-tmux_worktree_set_session_metadata "$session_name" "$repo_common_dir" "$repo_label" "$main_worktree_root" "$primary_shell_command"
 
 if [[ -z "$window_id" ]]; then
   runtime_log_info worktree "creating worktree window" "session_name=$session_name" "worktree_root=$worktree_root" "worktree_label=$worktree_label"
   window_id="$(tmux_worktree_create_window "$session_name" "$worktree_root" "$primary_shell_command" "$worktree_label")"
 else
   runtime_log_info worktree "reusing worktree window" "session_name=$session_name" "window_id=$window_id" "worktree_root=$worktree_root" "worktree_label=$worktree_label"
-  tmux_worktree_set_window_metadata "$window_id" "$worktree_root" "$worktree_label"
   tmux rename-window -t "$window_id" "$worktree_label"
-  tmux_worktree_ensure_window_panes "$window_id" "$worktree_root"
+  if (( session_created )); then
+    tmux_worktree_ensure_window_panes "$window_id" "$worktree_root"
+  fi
 fi
 
 tmux_worktree_ensure_tmux_config_loaded "$TMUX_CONF" "$(repo_root_path)"

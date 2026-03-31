@@ -197,7 +197,7 @@ provider_build_pane_command() {
 
 provider_apply_tmux_config() {
   if [[ -n "${WT_PROVIDER_TMUX_CONFIG_FILE_ABS:-}" && -f "${WT_PROVIDER_TMUX_CONFIG_FILE_ABS:-}" ]]; then
-    tmux set-option -g @worktree_task_repo_root "$WT_MAIN_WORKTREE_ROOT"
+    tmux set-option -g @wezterm_runtime_root "$WT_MAIN_WORKTREE_ROOT"
     tmux source-file "$WT_PROVIDER_TMUX_CONFIG_FILE_ABS"
   fi
 }

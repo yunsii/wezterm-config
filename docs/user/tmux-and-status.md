@@ -34,12 +34,15 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 - tmux now emits terminal focus-in and focus-out events to applications, which helps mouse-aware TUIs recover cleanly when the WezTerm window regains focus.
 - The first tmux line renders repo, branch, combined git change counts, tracked-branch sync markers (`^N` ahead, `vN` behind, `=0` synced, `x0` no upstream configured), and Node.js version.
 - The second tmux line renders the repo family's linked worktree count plus the current worktree role, for example `linked:2 · primary` in the main worktree or `linked:2 · linked` in a linked worktree.
+- The worktree line derives its repo family and current role from the active pane's live git state instead of stored tmux worktree metadata.
 - The third tmux line renders whenever the WakaTime toggle is enabled.
 - Any enabled status section keeps a stable on-screen slot. If live data is unavailable, that section renders placeholder text instead of disappearing, which avoids status-bar flicker.
 - A section only disappears completely when its toggle is disabled. If an entire line has no enabled sections, that line does not reserve a status row.
 - Managed git project tabs keep one tmux session per repo family and use tmux windows, not WezTerm tabs, to switch between linked worktrees.
+- `Alt+g` and `Alt+Shift+g` work for any tmux window whose current pane or active window layout still resolves to a git worktree, including linked worktrees created outside the managed launcher flow.
 - The `config` workspace stays anchored to the repo family's primary worktree tab, even when the synced runtime came from a linked worktree checkout.
 - If a synced linked checkout disappears after a reclaim, tmux status and `Alt` worktree helpers fall back to that repo family's primary worktree scripts automatically.
+- When `Alt+g` opens a linked worktree that does not already have a tmux window, tmux clones the current window's pane layout and remaps pane directories into the target worktree instead of relying on stored per-session startup metadata.
 - The `worktree-task` skill reuses the current repo family's tmux session for new linked task worktrees and applies the cleaned-up task prompt only to the newly created window.
 
 ## Notes
@@ -61,6 +64,6 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 - Enabled sections use placeholders when needed: the worktree line shows `no-worktree` outside git worktrees, branch shows `no-branch`, git changes shows `no-git`, Node.js shows `Node unavailable`, and WakaTime stays visible with placeholder text until real data becomes available.
 - Node.js version lookup includes an `nvm` fallback so it still renders outside an interactive login shell, and the resolved version is cached to avoid repeated shell bootstrap on every status refresh.
 - `scripts/runtime/open-project-session.sh` remains the stable execution layer for managed project tabs.
-- If tmux is reloaded outside the helper scripts, `tmux.conf` derives `@worktree_task_repo_root` from the path of the loaded config file so the status commands can still locate the repository scripts.
+- If tmux is reloaded outside the helper scripts, `tmux.conf` derives `@wezterm_runtime_root` from the path of the loaded config file so the status commands can still locate the synced runtime scripts.
 - If the runtime shell rc changes, reload the shell or recreate affected tmux sessions before expecting WezTerm cwd tracking to update.
 - If `~/.zshrc` or `~/.bashrc` is replaced or reset, re-apply the `OSC 7` integration or WezTerm will fall back to incorrect cwd inference inside tmux.

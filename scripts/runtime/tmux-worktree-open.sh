@@ -9,6 +9,15 @@ source "$script_dir/tmux-worktree-lib.sh"
 
 session_name="${1:-}"
 worktree_root="${2:-}"
+source_window_id="${3:-}"
+cwd="${4:-$PWD}"
+target_common_dir=""
+context=""
+source_worktree_root=""
+main_worktree_root=""
+worktree_label=""
+window_id=""
+template_window=""
 
 if [[ -z "$session_name" || -z "$worktree_root" ]]; then
   tmux display-message 'Worktree switch failed: missing session or worktree path'
@@ -22,12 +31,6 @@ if ! tmux has-session -t "$session_name" 2>/dev/null; then
   exit 1
 fi
 
-repo_common_dir="$(tmux_worktree_session_option "$session_name" @worktree_task_repo_common_dir)"
-if [[ -z "$repo_common_dir" ]]; then
-  tmux display-message 'Current session is not a git worktree session'
-  exit 0
-fi
-
 if [[ ! -d "$worktree_root" ]]; then
   tmux display-message "Worktree path is unavailable: $worktree_root"
   exit 1
@@ -38,34 +41,35 @@ if ! tmux_worktree_in_git_repo "$worktree_root"; then
   exit 1
 fi
 
-candidate_common_dir="$(tmux_worktree_common_dir "$worktree_root" || true)"
-if [[ "$candidate_common_dir" != "$repo_common_dir" ]]; then
+target_common_dir="$(tmux_worktree_common_dir "$worktree_root" || true)"
+if [[ -z "$target_common_dir" ]]; then
+  tmux display-message "Target path is not a git worktree: $worktree_root"
+  exit 0
+fi
+
+context="$(tmux_worktree_context_for_context "$source_window_id" "$cwd" || true)"
+if [[ -z "$context" ]]; then
+  tmux display-message 'Current pane is not inside a git worktree'
+  exit 0
+fi
+
+IFS=$'\t' read -r source_worktree_root repo_common_dir _ _ <<< "$context"
+if [[ "$target_common_dir" != "$repo_common_dir" ]]; then
   tmux display-message 'Target path is not part of the current repo family'
   exit 1
 fi
 
-primary_shell_command="$(tmux_worktree_session_option "$session_name" @worktree_task_primary_command)"
-if [[ -z "$primary_shell_command" ]]; then
-  tmux display-message 'Worktree switch failed: missing session startup command'
-  exit 1
-fi
-
-main_worktree_root="$(tmux_worktree_session_option "$session_name" @worktree_task_main_root)"
-if [[ -z "$main_worktree_root" ]]; then
-  main_worktree_root="$(tmux_worktree_main_root "$repo_common_dir" || true)"
-fi
-
+main_worktree_root="$(tmux_worktree_main_root "$repo_common_dir" || true)"
 worktree_label="$(tmux_worktree_label_for_root "$worktree_root" "$main_worktree_root")"
 window_id="$(tmux_worktree_find_window "$session_name" "$worktree_root" || true)"
 
 if [[ -z "$window_id" ]]; then
   runtime_log_info worktree "creating worktree window" "session_name=$session_name" "worktree_root=$worktree_root" "worktree_label=$worktree_label"
-  window_id="$(tmux_worktree_create_window "$session_name" "$worktree_root" "$primary_shell_command" "$worktree_label")"
+  template_window="$(tmux_worktree_template_window "$session_name" "$source_window_id" || true)"
+  window_id="$(tmux_worktree_create_window_from_template "$session_name" "$worktree_root" "$worktree_label" "$template_window" "$source_worktree_root")"
 else
   runtime_log_info worktree "selecting existing worktree window" "session_name=$session_name" "window_id=$window_id" "worktree_root=$worktree_root" "worktree_label=$worktree_label"
-  tmux_worktree_set_window_metadata "$window_id" "$worktree_root" "$worktree_label"
   tmux rename-window -t "$window_id" "$worktree_label"
-  tmux_worktree_ensure_window_panes "$window_id" "$worktree_root"
 fi
 
 tmux select-window -t "$window_id"
