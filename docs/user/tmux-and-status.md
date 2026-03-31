@@ -39,6 +39,7 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 - A section only disappears completely when its toggle is disabled. If an entire line has no enabled sections, that line does not reserve a status row.
 - Managed git project tabs keep one tmux session per repo family and use tmux windows, not WezTerm tabs, to switch between linked worktrees.
 - The `config` workspace stays anchored to the repo family's primary worktree tab, even when the synced runtime came from a linked worktree checkout.
+- If a synced linked checkout disappears after a reclaim, tmux status and `Alt` worktree helpers fall back to that repo family's primary worktree scripts automatically.
 - The `worktree-task` skill reuses the current repo family's tmux session for new linked task worktrees and applies the cleaned-up task prompt only to the newly created window.
 
 ## Notes

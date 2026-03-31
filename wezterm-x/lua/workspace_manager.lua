@@ -28,8 +28,63 @@ function M.new(opts)
 
   local Workspace = {}
 
+  local function runtime_script_roots()
+    local roots = {}
+    local seen = {}
+
+    for _, root in ipairs {
+      constants.repo_root,
+      constants.main_repo_root,
+    } do
+      if root and root ~= '' and not seen[root] then
+        roots[#roots + 1] = root
+        seen[root] = true
+      end
+    end
+
+    return roots
+  end
+
+  local function runtime_script_command(script_rel_path, script_args)
+    local roots = runtime_script_roots()
+    local primary_script = roots[1] and (roots[1] .. '/' .. script_rel_path) or ''
+    local fallback_script = roots[2] and (roots[2] .. '/' .. script_rel_path) or ''
+    local command = {
+      '/bin/sh',
+      '-lc',
+      [[
+primary_script="$1"
+fallback_script="$2"
+shift 2
+
+if [ -n "$primary_script" ] && [ -f "$primary_script" ]; then
+  exec bash "$primary_script" "$@"
+fi
+
+if [ -n "$fallback_script" ] && [ -f "$fallback_script" ]; then
+  exec bash "$fallback_script" "$@"
+fi
+
+printf 'Managed workspace runtime script is unavailable: %s\n' "$primary_script" >&2
+if [ -n "$fallback_script" ]; then
+  printf 'Fallback runtime script is unavailable: %s\n' "$fallback_script" >&2
+fi
+exit 1
+      ]],
+      'sh',
+      primary_script,
+      fallback_script,
+    }
+
+    for _, value in ipairs(script_args or {}) do
+      command[#command + 1] = value
+    end
+
+    return command
+  end
+
   local function managed_workspace_prereq_error()
-    if not constants.repo_root or constants.repo_root == '' then
+    if #runtime_script_roots() == 0 then
       return 'Managed workspaces require a synced repo root. Run the wezterm-runtime-sync skill first.'
     end
 
@@ -45,7 +100,7 @@ function M.new(opts)
       return nil
     end
 
-    if not constants.repo_root or constants.repo_root == '' then
+    if #runtime_script_roots() == 0 then
       return nil, 'Managed launcher "' .. profile_name .. '" requires a synced repo root.'
     end
 
@@ -66,7 +121,7 @@ function M.new(opts)
       return nil, 'Managed launcher profile has no command: ' .. profile_name
     end
 
-    local wrapped = { constants.repo_root .. '/scripts/runtime/run-managed-command.sh' }
+    local wrapped = runtime_script_command('scripts/runtime/run-managed-command.sh')
     if profile.bootstrap and profile.bootstrap ~= '' then
       wrapped[#wrapped + 1] = '--bootstrap'
       wrapped[#wrapped + 1] = profile.bootstrap
@@ -111,11 +166,10 @@ function M.new(opts)
   end
 
   local function project_session_args(workspace_name, item)
-    local command = {
-      constants.repo_root .. '/scripts/runtime/open-project-session.sh',
+    local command = runtime_script_command('scripts/runtime/open-project-session.sh', {
       workspace_name,
       item.cwd,
-    }
+    })
 
     for _, part in ipairs(item.command or {}) do
       command[#command + 1] = part

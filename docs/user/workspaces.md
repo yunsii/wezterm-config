@@ -33,7 +33,8 @@ WezTerm workspaces are the top-level session unit.
 - `wezterm-x/local/workspaces.lua` is the gitignored private override file for your real project directories.
 - `wezterm-x/local.example/workspaces.lua` is the tracked template you should copy before editing local values.
 - `config` is defined in the tracked baseline and points at the primary worktree root for the synced repo family.
-- The managed launcher scripts still run from the synced checkout, so testing a linked worktree does not add that linked worktree as another top-level WezTerm tab.
+- The managed launcher scripts still run from the synced checkout while it exists, so testing a linked worktree does not add that linked worktree as another top-level WezTerm tab.
+- If that synced linked checkout is later reclaimed, managed workspace launchers fall back to the repo family's primary worktree automatically.
 - `work` is intentionally empty in the tracked baseline until you define your private directories in `wezterm-x/local/workspaces.lua`.
 
 ## Update Workspaces

@@ -51,10 +51,27 @@ EOF
 ensure_tmux_support
 
 repo_root_path() {
-  (
+  local repo_root=""
+  local common_dir=""
+  local main_root=""
+
+  repo_root="$(
     cd "$SCRIPT_DIR/../.."
     pwd -P
-  )
+  )"
+
+  if tmux_worktree_in_git_repo "$repo_root"; then
+    common_dir="$(tmux_worktree_common_dir "$repo_root" || true)"
+    if [[ -n "$common_dir" ]]; then
+      main_root="$(tmux_worktree_main_root "$common_dir" || true)"
+      if [[ -n "$main_root" && -d "$main_root" ]]; then
+        printf '%s\n' "$main_root"
+        return 0
+      fi
+    fi
+  fi
+
+  printf '%s\n' "$repo_root"
 }
 
 resolve_login_shell() {
