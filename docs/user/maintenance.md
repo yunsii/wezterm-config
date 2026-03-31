@@ -81,6 +81,7 @@ Reclaim only removes skill-managed linked worktrees under `.worktrees/`. By defa
 - Runtime shell diagnostics are configured separately in `wezterm-x/local/runtime-logging.sh`, starting from `wezterm-x/local.example/runtime-logging.sh`.
 - Keep both logging systems disabled by default; enable them only while investigating a problem.
 - When `diagnostics.wezterm.enabled = true`, WezTerm writes structured lines to the configured `file` and also shows them in the Debug Overlay.
+- Current WezTerm-side diagnostics categories include `workspace`, `alt_o`, `chrome`, and `clipboard`.
 - Set `diagnostics.wezterm.debug_key_events = true` only for keybinding investigations; it is intentionally noisy.
 - When `WEZTERM_RUNTIME_LOG_ENABLED=1`, the runtime scripts append structured lines to `WEZTERM_RUNTIME_LOG_FILE`.
 - Leave `WEZTERM_RUNTIME_LOG_CATEGORIES` empty to capture all runtime categories, or set a comma-separated list such as `alt_o,workspace,worktree`.

@@ -47,6 +47,14 @@ local function copy_args(values)
   return result
 end
 
+local function trim_text(value)
+  if not value then
+    return nil
+  end
+
+  return (value:gsub('^%s+', ''):gsub('%s+$', ''))
+end
+
 local function is_windows_host_path(path)
   if not path or path == '' then
     return false
@@ -93,6 +101,82 @@ local function wsl_distro_from_domain(domain_name)
   end
 
   return domain_name:match '^WSL:(.+)$'
+end
+
+local function paste_clipboard_or_image_path(wezterm, window, pane, constants, logger)
+  local runtime_mode = constants.runtime_mode or 'hybrid-wsl'
+  if runtime_mode ~= 'hybrid-wsl' then
+    window:perform_action(wezterm.action.PasteFrom 'Clipboard', pane)
+    return
+  end
+
+  local domain_name = pane:get_domain_name()
+  local distro = wsl_distro_from_domain(domain_name) or wsl_distro_from_domain(constants.default_domain)
+  if not distro then
+    logger.info('clipboard', 'falling back to plain clipboard paste outside WSL', {
+      domain = domain_name,
+      runtime_mode = runtime_mode,
+    })
+    window:perform_action(wezterm.action.PasteFrom 'Clipboard', pane)
+    return
+  end
+
+  local integration = constants.integrations and constants.integrations.clipboard_image or {}
+  local runtime_dir = integration.runtime_dir or (wezterm.config_dir .. '\\.wezterm-x')
+  local script_path = integration.script or 'scripts\\export-clipboard-image-to-wsl.ps1'
+  local command = {
+    integration.powershell or 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
+    '-NoProfile',
+    '-NonInteractive',
+    '-STA',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    runtime_dir .. '\\' .. script_path,
+    '-WslDistro',
+    distro,
+  }
+
+  if integration.output_dir and integration.output_dir ~= '' then
+    command[#command + 1] = '-OutputDir'
+    command[#command + 1] = integration.output_dir
+  end
+
+  logger.info('clipboard', 'checking clipboard image export helper', {
+    command = table.concat(command, ' '),
+    distro = distro,
+    domain = domain_name,
+  })
+
+  local ok, stdout, stderr = wezterm.run_child_process(command)
+  local image_path = trim_text(stdout and stdout:gsub('\r', ''))
+  local error_text = trim_text(stderr and stderr:gsub('\r', ''))
+
+  if ok and image_path and image_path ~= '' and image_path ~= 'NO_IMAGE' then
+    pane:send_paste(image_path)
+    logger.info('clipboard', 'pasted exported clipboard image path', {
+      distro = distro,
+      domain = domain_name,
+      image_path = image_path,
+    })
+    return
+  end
+
+  if not ok or (error_text and error_text ~= '') then
+    logger.warn('clipboard', 'clipboard image export failed, falling back to plain paste', {
+      distro = distro,
+      domain = domain_name,
+      error = error_text,
+      helper_output = image_path,
+    })
+  else
+    logger.info('clipboard', 'no clipboard image found, falling back to plain paste', {
+      distro = distro,
+      domain = domain_name,
+    })
+  end
+
+  window:perform_action(wezterm.action.PasteFrom 'Clipboard', pane)
 end
 
 local function open_current_dir_in_vscode(wezterm, window, pane, constants, workspace, logger)
@@ -422,6 +506,13 @@ function M.apply(opts)
     {
       key = 'v',
       mods = 'CTRL',
+      action = wezterm.action_callback(function(window, pane)
+        paste_clipboard_or_image_path(wezterm, window, pane, constants, logger)
+      end),
+    },
+    {
+      key = 'v',
+      mods = 'CTRL|SHIFT',
       action = wezterm.action.PasteFrom 'Clipboard',
     },
   }

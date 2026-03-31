@@ -17,4 +17,6 @@ Use this doc when you need shortcut behavior.
 - `LeftClick`: complete selection only; links do not open unless `Ctrl` is held
 - `Ctrl+LeftClick`: open the link under the mouse cursor in the system browser
 - `Ctrl+c`: copy selection, otherwise send normal `Ctrl+c`
-- `Ctrl+v`: paste from clipboard
+- `Ctrl+v`: smart paste; in Windows-hosted `hybrid-wsl`, if the current Windows clipboard content is a bitmap image, export it to a temporary `.png` on the Windows host and paste its WSL path into the active pane; otherwise do a normal clipboard paste
+- `Ctrl+Shift+v`: force a normal clipboard paste without the image-export helper
+- `Enter` in tmux copy-mode: copy the current tmux selection to the system clipboard and leave copy-mode

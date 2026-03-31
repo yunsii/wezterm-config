@@ -211,6 +211,12 @@ local base_constants = {
       runtime_dir = wezterm.config_dir .. '\\.wezterm-x',
       script = 'scripts\\focus-or-start-debug-chrome.ps1',
     },
+    clipboard_image = {
+      powershell = 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
+      runtime_dir = wezterm.config_dir .. '\\.wezterm-x',
+      script = 'scripts\\export-clipboard-image-to-wsl.ps1',
+      output_dir = nil,
+    },
   },
   managed_cli = {
     default_profile = 'codex',

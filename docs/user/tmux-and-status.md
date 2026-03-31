@@ -25,6 +25,8 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 - If WezTerm only reports `/`, managed workspace tabs still fall back to the tab's configured project directory instead of opening the WSL root.
 - In `hybrid-wsl`, `Alt+b` uses the synced Windows PowerShell launcher for the debug Chrome profile.
 - In `posix-local`, `Alt+b` uses the synced shell launcher at `wezterm-x/scripts/focus-or-start-debug-chrome.sh`.
+- Mouse drag selection inside tmux copy-mode no longer writes to the system clipboard on release; keep the selection and press `Enter` to copy explicitly instead.
+- A plain click inside the pane exits tmux copy-mode without copying, so you do not need to use `Esc` just to return to normal interaction.
 - The first tmux line renders repo, branch, combined git change counts, tracked-branch sync markers (`^N` ahead, `vN` behind, `=0` synced, `x0` no upstream configured), and Node.js version.
 - The second tmux line renders the repo family's linked worktree count plus the current worktree role, for example `linked:2 · primary` in the main worktree or `linked:2 · linked` in a linked worktree.
 - The third tmux line renders whenever the WakaTime toggle is enabled.
