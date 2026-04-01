@@ -22,10 +22,10 @@ options:
   --branch VALUE        Explicit branch name. Default: WT_POLICY_BRANCH_PREFIX + slug
   --base-ref VALUE      Base ref for the new branch. Default: primary worktree HEAD
   --prompt-file FILE    Read the cleaned-up task prompt from FILE instead of stdin
-  --provider VALUE      Provider name or path. Builtins: none, tmux-codex
+  --provider VALUE      Provider name or path. Builtins: none, tmux-agent
   --provider-mode MODE  off, auto, or required
   --workspace NAME      Provider workspace/session namespace override
-  --session-name NAME   Force a specific tmux session name for tmux-codex
+  --session-name NAME   Force a specific tmux session name for tmux-agent
   --variant MODE        Provider variant override: auto, light, or dark
   --no-attach           Prepare the runtime target without switching/attaching
 EOF
@@ -40,11 +40,10 @@ options:
   --cwd PATH            Repository or task worktree path. Default: current directory
   --task-slug VALUE     Reclaim WT_POLICY_WORKTREE_DIR/VALUE from the resolved repo family
   --worktree-root PATH  Reclaim a specific linked task worktree
-  --provider VALUE      Provider name or path. Builtins: none, tmux-codex
+  --provider VALUE      Provider name or path. Builtins: none, tmux-agent
   --provider-mode MODE  off, auto, or required
   --force               Reclaim even when the task worktree has local changes
   --keep-branch         Keep the task branch even if it is already merged
-  --keep-prompt         Keep the archived task prompt file
 EOF
 }
 
@@ -127,14 +126,22 @@ wt_core_apply_reclaim_overrides() {
 }
 
 wt_core_resolve_policy_paths() {
-  WT_POLICY_WORKTREE_DIR_ABS="$(wt_config_resolve_under_main_root "$WT_POLICY_WORKTREE_DIR")"
-  WT_POLICY_PROMPT_DIR_ABS="$(wt_config_resolve_under_main_root "$WT_POLICY_PROMPT_DIR")"
-  WT_POLICY_METADATA_DIR_ABS="$(wt_config_resolve_under_main_root "$WT_POLICY_METADATA_DIR")"
+  WT_POLICY_WORKTREE_DIR_ABS="$(wt_config_resolve_under_repo_parent "$(wt_config_expand_repo_tokens "$WT_POLICY_WORKTREE_DIR")")"
+  WT_POLICY_METADATA_DIR_ABS="$(wt_config_resolve_under_repo_parent "$(wt_config_expand_repo_tokens "$WT_POLICY_METADATA_DIR")")"
 
   WT_PROVIDER_TMUX_CONFIG_FILE_ABS=""
   if [[ -n "$WT_PROVIDER_TMUX_CONFIG_FILE" ]]; then
     WT_PROVIDER_TMUX_CONFIG_FILE_ABS="$(wt_config_resolve_under_main_root "$WT_PROVIDER_TMUX_CONFIG_FILE")"
   fi
+}
+
+wt_core_provider_prompt_dir() {
+  printf '%s/worktree-task-prompts\n' "${TMPDIR:-/tmp}"
+}
+
+wt_core_provider_prompt_path() {
+  local task_slug="${1:?missing task slug}"
+  printf '%s/%s-%s.txt\n' "$(wt_core_provider_prompt_dir)" "$(wt_hash "$WT_REPO_COMMON_DIR")" "$task_slug"
 }
 
 wt_core_provider_command() {
@@ -154,7 +161,11 @@ wt_core_export_provider_env() {
   export WT_RUNTIME_VARIANT
   export WT_RUNTIME_ATTACH
   export WT_PROVIDER_TMUX_CONFIG_FILE_ABS
-  export WT_PROVIDER_CODEX_BOOTSTRAP
+  export WT_PROVIDER_AGENT_BOOTSTRAP
+  export WT_PROVIDER_AGENT_COMMAND
+  export WT_PROVIDER_AGENT_COMMAND_LIGHT
+  export WT_PROVIDER_AGENT_COMMAND_DARK
+  export WT_PROVIDER_AGENT_PROMPT_FLAG
   export WT_PROVIDER_LOGIN_SHELL
   export WT_PROVIDER_SESSION_NAME_OVERRIDE
   export WT_PROVIDER_SESSION_NAME
@@ -238,7 +249,7 @@ wt_core_run_launch_provider() {
 wt_core_rollback_launch_failure() {
   local worktree_created="${1:-0}"
   local branch_created="${2:-0}"
-  local prompt_created="${3:-0}"
+  local provider_prompt_created="${3:-0}"
 
   rm -f "$WT_MANIFEST_FILE" 2>/dev/null || true
 
@@ -246,7 +257,7 @@ wt_core_rollback_launch_failure() {
     wt_core_run_provider "$WT_SELECTED_PROVIDER" cleanup >/dev/null 2>&1 || true
   fi
 
-  if [[ "$prompt_created" == "1" && -f "$WT_PROMPT_FILE" ]]; then
+  if [[ "$provider_prompt_created" == "1" && -n "${WT_PROMPT_FILE:-}" && -f "$WT_PROMPT_FILE" ]]; then
     rm -f "$WT_PROMPT_FILE"
   fi
 
@@ -259,7 +270,6 @@ wt_core_rollback_launch_failure() {
   fi
 
   rmdir "$WT_POLICY_METADATA_DIR_ABS" 2>/dev/null || true
-  rmdir "$WT_POLICY_PROMPT_DIR_ABS" 2>/dev/null || true
   rmdir "$WT_POLICY_WORKTREE_DIR_ABS" 2>/dev/null || true
 }
 
@@ -285,7 +295,6 @@ wt_core_read_prompt() {
 wt_core_emit_launch_result() {
   printf 'branch_name=%s\n' "$WT_BRANCH_NAME"
   printf 'worktree_path=%s\n' "$WT_WORKTREE_PATH"
-  printf 'prompt_file=%s\n' "$WT_PROMPT_FILE"
   printf 'manifest_file=%s\n' "$WT_MANIFEST_FILE"
   printf 'provider=%s\n' "$WT_SELECTED_PROVIDER"
   if [[ -n "$WT_PROVIDER_RESULT_SESSION_NAME" ]]; then
@@ -299,12 +308,10 @@ wt_core_emit_launch_result() {
 wt_core_emit_reclaim_result() {
   printf 'worktree_path=%s\n' "$WT_WORKTREE_PATH"
   printf 'branch_name=%s\n' "$WT_BRANCH_NAME"
-  printf 'prompt_file=%s\n' "$WT_PROMPT_FILE"
   printf 'manifest_file=%s\n' "$WT_MANIFEST_FILE"
   printf 'provider=%s\n' "$WT_SELECTED_PROVIDER"
   printf 'provider_cleanup_status=%s\n' "$WT_PROVIDER_CLEANUP_STATUS"
   printf 'tmux_windows_closed=%s\n' "${WT_PROVIDER_RESULT_WINDOWS_CLOSED:-0}"
-  printf 'prompt_deleted=%s\n' "$WT_PROMPT_DELETED"
   printf 'branch_deleted=%s\n' "$WT_BRANCH_DELETED"
   printf 'branch_delete_reason=%s\n' "$WT_BRANCH_DELETE_REASON"
 }
@@ -329,8 +336,7 @@ wt_core_launch() {
   local path_suffix=1
   local worktree_created=0
   local branch_created=0
-  local prompt_existed=0
-  local prompt_created=0
+  local provider_prompt_created=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -443,9 +449,8 @@ wt_core_launch() {
 
   WT_TASK_SLUG="$resolved_slug"
   WT_WORKTREE_PATH="$WT_POLICY_WORKTREE_DIR_ABS/$WT_TASK_SLUG"
-  WT_PROMPT_FILE="$WT_POLICY_PROMPT_DIR_ABS/$WT_TASK_SLUG.md"
+  WT_PROMPT_FILE=""
   WT_MANIFEST_FILE="$(wt_manifest_path "$WT_POLICY_METADATA_DIR_ABS" "$WT_TASK_SLUG")"
-  [[ -f "$WT_PROMPT_FILE" ]] && prompt_existed=1
 
   WT_RUNTIME_WORKSPACE="$WT_PROVIDER_WORKSPACE"
   WT_RUNTIME_VARIANT="$WT_PROVIDER_DEFAULT_VARIANT"
@@ -455,7 +460,7 @@ wt_core_launch() {
 
   wt_core_prepare_launch_provider
 
-  mkdir -p "$WT_POLICY_WORKTREE_DIR_ABS" "$WT_POLICY_PROMPT_DIR_ABS" "$WT_POLICY_METADATA_DIR_ABS"
+  mkdir -p "$WT_POLICY_WORKTREE_DIR_ABS" "$WT_POLICY_METADATA_DIR_ABS"
 
   if [[ -d "$WT_WORKTREE_PATH" ]]; then
     if ! wt_git_in_repo "$WT_WORKTREE_PATH"; then
@@ -475,16 +480,23 @@ wt_core_launch() {
     fi
   fi
 
-  printf '%s\n' "$prompt_content" > "$WT_PROMPT_FILE"
-  if [[ "$prompt_existed" != "1" ]]; then
-    prompt_created=1
+  if [[ "$WT_SELECTED_PROVIDER" != "none" ]]; then
+    WT_PROMPT_FILE="$(wt_core_provider_prompt_path "$WT_TASK_SLUG")"
+    mkdir -p "$(wt_core_provider_prompt_dir)"
+    printf '%s\n' "$prompt_content" > "$WT_PROMPT_FILE"
+    provider_prompt_created=1
   fi
 
   if wt_core_run_launch_provider; then
     :
   else
-    wt_core_rollback_launch_failure "$worktree_created" "$branch_created" "$prompt_created"
+    wt_core_rollback_launch_failure "$worktree_created" "$branch_created" "$provider_prompt_created"
     wt_die "provider launch failed: $WT_SELECTED_PROVIDER"
+  fi
+
+  if [[ "$WT_SELECTED_PROVIDER" == "none" && -n "${WT_PROMPT_FILE:-}" && -f "$WT_PROMPT_FILE" ]]; then
+    rm -f "$WT_PROMPT_FILE"
+    WT_PROMPT_FILE=""
   fi
 
   if [[ -n "$WT_PROVIDER_RESULT_SESSION_NAME" ]]; then
@@ -501,7 +513,6 @@ wt_core_launch() {
     "$WT_MAIN_WORKTREE_ROOT" \
     "$WT_WORKTREE_PATH" \
     "$WT_BRANCH_NAME" \
-    "$WT_PROMPT_FILE" \
     "$WT_SELECTED_PROVIDER" \
     "$WT_PROVIDER_RESULT_SESSION_NAME" \
     "$WT_PROVIDER_RESULT_WINDOW_ID"
@@ -521,10 +532,8 @@ wt_core_reclaim() {
   local provider_mode_override=""
   local force_mode="0"
   local keep_branch="0"
-  local keep_prompt="0"
   local context_path=""
   local manifest_provider=""
-  local manifest_prompt_file=""
   local manifest_session_name=""
   local manifest_window_id=""
 
@@ -561,10 +570,6 @@ wt_core_reclaim() {
         ;;
       --keep-branch)
         keep_branch="1"
-        shift
-        ;;
-      --keep-prompt)
-        keep_prompt="1"
         shift
         ;;
       -h|--help)
@@ -621,19 +626,14 @@ wt_core_reclaim() {
   fi
 
   WT_TASK_SLUG="$(basename "$WT_WORKTREE_PATH")"
-  WT_PROMPT_FILE="$WT_POLICY_PROMPT_DIR_ABS/$WT_TASK_SLUG.md"
+  WT_PROMPT_FILE="$(wt_core_provider_prompt_path "$WT_TASK_SLUG")"
   WT_MANIFEST_FILE="$(wt_manifest_path "$WT_POLICY_METADATA_DIR_ABS" "$WT_TASK_SLUG")"
   WT_BRANCH_NAME="$(git -C "$WT_WORKTREE_PATH" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
 
   if [[ -f "$WT_MANIFEST_FILE" ]]; then
     manifest_provider="$(wt_manifest_read_field "$WT_MANIFEST_FILE" provider || true)"
-    manifest_prompt_file="$(wt_manifest_read_field "$WT_MANIFEST_FILE" prompt_file || true)"
     manifest_session_name="$(wt_manifest_read_field "$WT_MANIFEST_FILE" provider_session_name || true)"
     manifest_window_id="$(wt_manifest_read_field "$WT_MANIFEST_FILE" provider_window_id || true)"
-  fi
-
-  if [[ -n "$manifest_prompt_file" ]]; then
-    WT_PROMPT_FILE="$manifest_prompt_file"
   fi
 
   if [[ "$force_mode" != "1" ]]; then
@@ -686,10 +686,8 @@ wt_core_reclaim() {
     git -C "$WT_MAIN_WORKTREE_ROOT" worktree remove "$WT_WORKTREE_PATH"
   fi
 
-  WT_PROMPT_DELETED="no"
-  if [[ "$keep_prompt" != "1" && -f "$WT_PROMPT_FILE" ]]; then
+  if [[ -f "$WT_PROMPT_FILE" ]]; then
     rm -f "$WT_PROMPT_FILE"
-    WT_PROMPT_DELETED="yes"
   fi
 
   if [[ -f "$WT_MANIFEST_FILE" ]]; then
@@ -697,7 +695,6 @@ wt_core_reclaim() {
   fi
 
   rmdir "$WT_POLICY_METADATA_DIR_ABS" 2>/dev/null || true
-  rmdir "$WT_POLICY_PROMPT_DIR_ABS" 2>/dev/null || true
   rmdir "$WT_POLICY_WORKTREE_DIR_ABS" 2>/dev/null || true
 
   WT_BRANCH_DELETED="no"

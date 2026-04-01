@@ -20,7 +20,7 @@ WezTerm workspaces are the top-level session unit.
 - Each managed git project tab now attaches to one tmux session per repo family, even when that repo has multiple linked worktrees.
 - Inside that tmux session, each git worktree gets its own tmux window.
 - Worktree switching inside that tmux session now follows the live git state of the current pane or window layout, so manually created linked worktrees are discoverable without prewritten tmux metadata.
-- The `worktree-task` skill creates linked task worktrees under the primary worktree's `.worktrees/` directory and opens them as additional tmux windows inside that same repo-family session.
+- The `worktree-task` skill creates linked task worktrees under the repository parent's `.worktrees/<repo>/` directory and opens them as additional tmux windows inside that same repo-family session.
 - The left pane runs the configured primary command.
 - The right pane stays as a shell in the same directory.
 - `work` and `config` default to the managed launcher profile from `managed_cli.default_profile`.

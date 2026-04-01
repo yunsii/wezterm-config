@@ -1,4 +1,4 @@
 interface:
   display_name: "Worktree Task"
   short_description: "Create or reclaim linked task worktrees with optional runtime provider launch."
-  default_prompt: "Use this skill to create or reclaim a linked git task worktree, keep the cleaned-up prompt under the primary worktree's .worktrees folder, optionally launch it through a built-in or custom provider such as tmux-codex, and clean up runtime state, prompt archives, and merged branches safely during reclaim."
+  default_prompt: "Use this skill to create or reclaim a linked git task worktree, optionally launch it through a built-in or custom provider such as tmux-agent, and clean up runtime state and merged branches safely during reclaim."

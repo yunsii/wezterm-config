@@ -39,12 +39,15 @@ For WakaTime key changes in `wezterm-x/local/shared.env`, a tmux reload is suffi
 
 ## Worktree Task Skill
 
-Use the `worktree-task` skill when you want a fresh Codex implementation session in a linked worktree instead of continuing in the current worktree.
+Use the `worktree-task` skill when you want a fresh agent CLI implementation session in a linked worktree instead of continuing in the current worktree.
 
-- Run it from the existing managed tmux/Codex window for the target repository when possible so the new task window can reuse the current repo-family tmux session directly.
-- The skill creates linked worktrees under the primary worktree root's `.worktrees/` directory and stores the cleaned-up task prompt under `.worktrees/.codex-prompts/`.
-- This repository's tracked worktree-task profile lives at `.codex/worktree-task.env`. It enables the built-in `tmux-codex` provider and sources `tmux.conf` for repo-local status and worktree keybindings.
-- This repository ignores `.worktrees/`, so prompt archives and linked worktree folders do not pollute `git status`.
+- Run it from the existing managed tmux agent window for the target repository when possible so the new task window can reuse the current repo-family tmux session directly from live git context.
+- The skill creates linked worktrees under the repository parent's `.worktrees/<repo>/` directory.
+- This repository's tracked worktree-task profile lives at `.worktree-task/config.env`. It enables the built-in `tmux-agent` provider, configures the default agent CLI commands, and sources `tmux.conf` for repo-local status and worktree keybindings.
+- The built-in `tmux-agent` provider derives session reuse, existing task-window discovery, and reclaim cleanup from live git context instead of stored tmux worktree metadata.
+- Switch the launched agent CLI by editing `WT_PROVIDER_AGENT_COMMAND`, `WT_PROVIDER_AGENT_COMMAND_LIGHT`, `WT_PROVIDER_AGENT_COMMAND_DARK`, and optional `WT_PROVIDER_AGENT_PROMPT_FLAG` in `.worktree-task/config.env` or the user override config.
+- Runtime launch uses a temporary prompt file only long enough for the new pane to start; the repository does not keep a prompt archive.
+- Linked worktree folders live outside the repository working tree, so they do not pollute `git status`.
 
 Example:
 
@@ -59,7 +62,7 @@ Useful options:
 - `--provider <name|custom:name|/absolute/path>` to override the selected runtime provider
 - `--provider-mode <off|auto|required>` to disable runtime launch, allow fallback, or require provider success
 - `--session-name <name>` to target an already running tmux session for that repo family when launching from outside tmux
-- `--variant light|dark|auto` to choose the Codex UI variant for the new window
+- `--variant light|dark|auto` to choose the agent CLI UI variant for the new window
 - `--no-attach` to prepare the worktree and tmux window without switching the current client, including the first time that task window is created
 
 Reclaim a finished task:
@@ -70,15 +73,14 @@ skills/worktree-task/scripts/worktree-task reclaim
 
 Useful reclaim options:
 
-- `--task-slug <slug>` to reclaim `.worktrees/<slug>` from the current repo family
+- `--task-slug <slug>` to reclaim `.worktrees/<repo>/<slug>` from the current repo family
 - `--worktree-root <path>` to reclaim a specific linked task worktree
 - `--provider <name|custom:name|/absolute/path>` to override the provider used for cleanup
 - `--provider-mode <off|auto|required>` to disable runtime cleanup, allow fallback, or require provider success
 - `--force` to discard local changes and pass `-f` to `git worktree remove`
 - `--keep-branch` to keep the task branch even when it is already merged
-- `--keep-prompt` to keep the archived prompt file
 
-Reclaim only removes skill-managed linked worktrees under `.worktrees/`. By default it refuses to remove a dirty worktree, deletes the archived prompt file, closes tmux windows for that worktree, and deletes the task branch only when that branch is already merged into the primary worktree `HEAD`.
+Reclaim only removes skill-managed linked worktrees under the repository parent's `.worktrees/<repo>/`. By default it refuses to remove a dirty worktree, closes tmux windows whose live pane layout still resolves to that worktree, and deletes the task branch only when that branch is already merged into the primary worktree `HEAD`.
 
 ## Diagnostics
 

@@ -44,7 +44,7 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 - The `config` workspace stays anchored to the repo family's primary worktree tab, even when the synced runtime came from a linked worktree checkout.
 - If a synced linked checkout disappears after a reclaim, tmux status and `Alt` worktree helpers fall back to that repo family's primary worktree scripts automatically.
 - When `Alt+g` opens a linked worktree that does not already have a tmux window, tmux clones the current window's pane layout and remaps pane directories into the target worktree instead of relying on stored per-session startup metadata.
-- The `worktree-task` skill reuses the current repo family's tmux session for new linked task worktrees and applies the cleaned-up task prompt only to the newly created window.
+- The `worktree-task` skill reuses the current repo family's tmux session and finds reclaim cleanup windows from live git context, and it still applies the cleaned-up task prompt only to the newly created window while keeping the launched agent CLI configurable.
 
 ## Notes
 

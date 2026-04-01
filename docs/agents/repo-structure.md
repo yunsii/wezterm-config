@@ -18,7 +18,7 @@ Use this doc when you need ownership boundaries or file entry points.
 - `wezterm-x/lua/logger.lua`: WezTerm-side structured diagnostics helper
 - `wezterm-x/local.example/`: tracked templates for machine-local overrides
 - `wezterm-x/local/`: gitignored machine-local overrides copied by the sync skill when present
-- `.codex/worktree-task.env`: tracked repo profile for the self-contained `worktree-task` skill
+- `.worktree-task/config.env`: tracked repo profile for the self-contained `worktree-task` skill
 - `skills/wezterm-runtime-sync/`: skill-owned runtime sync workflow, prompt rendering, and prompt regression scripts
 - `skills/worktree-task/`: self-contained linked worktree task skill with unified CLI, core libraries, and built-in providers
 - `scripts/runtime/runtime-log-lib.sh`: shared runtime logging helper for WSL-side scripts

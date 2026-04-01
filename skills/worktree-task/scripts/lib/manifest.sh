@@ -13,10 +13,9 @@ wt_manifest_write() {
   local main_worktree_root="${4:?missing main worktree root}"
   local worktree_path="${5:?missing worktree path}"
   local branch_name="${6:-}"
-  local prompt_file="${7:-}"
-  local provider="${8:-none}"
-  local provider_session_name="${9:-}"
-  local provider_window_id="${10:-}"
+  local provider="${7:-none}"
+  local provider_session_name="${8:-}"
+  local provider_window_id="${9:-}"
 
   cat > "$manifest_path" <<EOF
 {
@@ -26,7 +25,6 @@ wt_manifest_write() {
   "main_worktree_root": "$(wt_json_escape "$main_worktree_root")",
   "worktree_path": "$(wt_json_escape "$worktree_path")",
   "branch_name": "$(wt_json_escape "$branch_name")",
-  "prompt_file": "$(wt_json_escape "$prompt_file")",
   "provider": "$(wt_json_escape "$provider")",
   "provider_session_name": "$(wt_json_escape "$provider_session_name")",
   "provider_window_id": "$(wt_json_escape "$provider_window_id")"

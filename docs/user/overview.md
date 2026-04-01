@@ -23,10 +23,10 @@ Use this doc when you need the minimum setup and navigation context.
 - `wezterm-x/local.example/`: tracked templates for private machine-local overrides
 - `wezterm-x/local.example/shared.env`: tracked template for simple shared scalar values used by both Lua and shell runtime code
 - `wezterm-x/local/`: gitignored machine-local overrides that are still copied by the sync skill
-- `.codex/worktree-task.env`: tracked repo profile for the self-contained worktree-task skill
+- `.worktree-task/config.env`: tracked repo profile for the self-contained worktree-task skill
 - `wezterm-x/lua/`: WezTerm Lua modules synced under the target home directory's `.wezterm-x`
 - `skills/wezterm-runtime-sync/`: Codex skill and scripts that own runtime sync and prompt regression checks
-- `skills/worktree-task/`: Codex skill, core libraries, and built-in providers for linked task worktrees
+- `skills/worktree-task/`: agent skill, core libraries, and built-in providers for linked task worktrees
 - `tmux.conf`: tmux layout and status line rendering
 - `scripts/runtime/open-project-session.sh`: tmux session bootstrap for managed project tabs
 - `scripts/runtime/run-managed-command.sh`: launcher for managed workspace startup commands
@@ -34,7 +34,7 @@ Use this doc when you need the minimum setup and navigation context.
 - `wezterm-x/scripts/`: runtime launcher scripts synced for Chrome and other desktop integrations
 - `scripts/dev/`: repo-local maintenance helpers
 - `skills/wezterm-runtime-sync/scripts/sync-runtime.sh`: skill-owned sync implementation; the public workflow is to use the `wezterm-runtime-sync` skill
-- `skills/worktree-task/scripts/providers/tmux-codex.sh`: built-in tmux/Codex provider for linked task worktrees
+- `skills/worktree-task/scripts/providers/tmux-agent.sh`: built-in tmux agent provider for linked task worktrees
 
 ## Read Next
 
