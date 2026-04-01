@@ -43,11 +43,34 @@ Use the `worktree-task` skill when you want a fresh agent CLI implementation ses
 
 - Run it from the existing managed tmux agent window for the target repository when possible so the new task window can reuse the current repo-family tmux session directly from live git context.
 - The skill creates linked worktrees under the repository parent's `.worktrees/<repo>/` directory.
-- This repository's tracked worktree-task profile lives at `.worktree-task/config.env`. It enables the built-in `tmux-agent` provider, configures the default agent CLI commands, and sources `tmux.conf` for repo-local status and worktree keybindings.
+- `WEZTERM_CONFIG_REPO` is required. On first use in an agent workflow, the agent should ask which tracked `wezterm-config` repo or derived repo you want, then run `skills/worktree-task/scripts/worktree-task configure --repo /absolute/path` to save the result into `~/.config/worktree-task/config.env`.
+- This repository's tracked worktree-task profile lives at `.worktree-task/config.env`. It enables the built-in `tmux-agent` provider, configures the default agent CLI commands, and points `WEZTERM_CONFIG_REPO=.` back at this repo so shared task-launch conventions are collected explicitly instead of guessed from the target repo.
+- Config collection order is: configured `wezterm-config` repo profile, then `~/.config/worktree-task/config.env`, then the target repo's own `.worktree-task/config.env`.
+- Relative repo-managed paths such as `WT_PROVIDER_TMUX_CONFIG_FILE=tmux.conf` resolve against the configured `wezterm-config` repo or derived repo, not against the task repo where you launch the command.
+- Use `configure --repo` as the stable first-use path; `launch` often consumes stdin for the task prompt, so configuration should not depend on waiting for input on that same stream.
 - The built-in `tmux-agent` provider derives session reuse, existing task-window discovery, and reclaim cleanup from live git context instead of stored tmux worktree metadata.
 - Switch the launched agent CLI by editing `WT_PROVIDER_AGENT_COMMAND`, `WT_PROVIDER_AGENT_COMMAND_LIGHT`, `WT_PROVIDER_AGENT_COMMAND_DARK`, and optional `WT_PROVIDER_AGENT_PROMPT_FLAG` in `.worktree-task/config.env` or the user override config.
 - Runtime launch uses a temporary prompt file only long enough for the new pane to start; the repository does not keep a prompt archive.
 - Linked worktree folders live outside the repository working tree, so they do not pollute `git status`.
+
+If you installed the skill globally and want other repositories to reuse this repo's conventions, point your user config at a `wezterm-config` repo or one of its derived repos:
+
+```bash
+mkdir -p ~/.config/worktree-task
+cat > ~/.config/worktree-task/config.env <<'EOF'
+WEZTERM_CONFIG_REPO=/absolute/path/to/wezterm-config
+EOF
+```
+
+For a repo that is itself a `wezterm-config` repo or a derived repo carrying the same conventions, keep `WEZTERM_CONFIG_REPO=.` in that repo's tracked `.worktree-task/config.env`.
+
+If you run `launch` or `reclaim` before configuring `WEZTERM_CONFIG_REPO`, the command now stops with an explicit error telling you to run `skills/worktree-task/scripts/worktree-task configure --repo /absolute/path/to/wezterm-config` first.
+
+First-use setup example:
+
+```bash
+skills/worktree-task/scripts/worktree-task configure --repo /absolute/path/to/wezterm-config
+```
 
 Example:
 

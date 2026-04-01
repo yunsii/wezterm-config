@@ -26,6 +26,9 @@ wt_config_set_defaults() {
 
   WT_CONFIG_USER_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/worktree-task/config.env"
   WT_CONFIG_REPO_FILE="$WT_MAIN_WORKTREE_ROOT/.worktree-task/config.env"
+  WEZTERM_CONFIG_REPO="${WEZTERM_CONFIG_REPO:-${WT_CONFIG_WEZTERM_REPO:-}}"
+  WEZTERM_CONFIG_REPO_ROOT=""
+  WEZTERM_CONFIG_REPO_FILE=""
 }
 
 wt_config_parse_value() {
@@ -41,6 +44,18 @@ wt_config_parse_value() {
   printf '%s\n' "$value"
 }
 
+wt_config_is_wezterm_repo_root() {
+  local repo_root="${1:-}"
+  [[ -n "$repo_root" ]] || return 1
+  [[ -d "$repo_root" && -f "$repo_root/wezterm.lua" && -d "$repo_root/wezterm-x" ]]
+}
+
+wt_config_is_wezterm_profile_repo_root() {
+  local repo_root="${1:-}"
+  wt_config_is_wezterm_repo_root "$repo_root" || return 1
+  [[ -f "$repo_root/.worktree-task/config.env" ]]
+}
+
 wt_config_apply_setting() {
   local key="${1:?missing key}"
   local value="${2-}"
@@ -48,6 +63,9 @@ wt_config_apply_setting() {
   case "$key" in
     WT_POLICY_WORKTREE_DIR|WT_POLICY_METADATA_DIR|WT_POLICY_BRANCH_PREFIX|WT_POLICY_BASE_REF_STRATEGY|WT_POLICY_SLUG_FALLBACK|WT_POLICY_RECLAIM_DIRTY|WT_POLICY_RECLAIM_DELETE_BRANCH|WT_PROVIDER_MODE|WT_PROVIDER|WT_PROVIDER_SEARCH_PATHS|WT_PROVIDER_WORKSPACE|WT_PROVIDER_DEFAULT_VARIANT|WT_PROVIDER_ATTACH_DEFAULT|WT_PROVIDER_SESSION_NAME_OVERRIDE|WT_PROVIDER_TMUX_CONFIG_FILE|WT_PROVIDER_AGENT_BOOTSTRAP|WT_PROVIDER_AGENT_COMMAND|WT_PROVIDER_AGENT_COMMAND_LIGHT|WT_PROVIDER_AGENT_COMMAND_DARK|WT_PROVIDER_AGENT_PROMPT_FLAG|WT_PROVIDER_LOGIN_SHELL)
       printf -v "$key" '%s' "$value"
+      ;;
+    WEZTERM_CONFIG_REPO|WT_CONFIG_WEZTERM_REPO)
+      printf -v WEZTERM_CONFIG_REPO '%s' "$value"
       ;;
     *)
       ;;
@@ -77,10 +95,155 @@ wt_config_load_file() {
   done < "$file"
 }
 
+wt_config_base_dir_for_file() {
+  local file="${1:?missing config file}"
+  local parent_dir=""
+
+  parent_dir="$(dirname "$file")"
+  if [[ "$(basename "$parent_dir")" == ".worktree-task" ]]; then
+    dirname "$parent_dir"
+    return 0
+  fi
+
+  printf '%s\n' "$parent_dir"
+}
+
+wt_config_find_wezterm_repo_in_file() {
+  local file="${1:?missing config file}"
+  local line=""
+  local trimmed=""
+  local key=""
+  local value=""
+  local found=1
+
+  [[ -f "$file" ]] || return 1
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    trimmed="$(wt_trim "$line")"
+    [[ -n "$trimmed" ]] || continue
+    if [[ "$trimmed" == \#* || "$trimmed" == \;* ]]; then
+      continue
+    fi
+    [[ "$trimmed" == *=* ]] || continue
+
+    key="$(wt_trim "${trimmed%%=*}")"
+    case "$key" in
+      WEZTERM_CONFIG_REPO|WT_CONFIG_WEZTERM_REPO)
+        value="$(wt_config_parse_value "${trimmed#*=}")"
+        found=0
+        ;;
+    esac
+  done < "$file"
+
+  if [[ "$found" -eq 0 ]]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+
+  return 1
+}
+
+wt_config_validate_wezterm_repo_root() {
+  local repo_root="${1:?missing repo root}"
+
+  [[ -d "$repo_root" ]] || wt_die "wezterm config repo does not exist: $repo_root"
+  wt_config_is_wezterm_profile_repo_root "$repo_root" || wt_die "wezterm config repo is missing wezterm.lua, wezterm-x, or .worktree-task/config.env: $repo_root"
+}
+
+wt_config_resolve_wezterm_repo_root() {
+  local base_dir="${1:?missing base dir}"
+  local repo_value="${2:?missing repo value}"
+  local candidate=""
+
+  candidate="$(wt_resolve_path "$base_dir" "$repo_value")"
+  [[ -d "$candidate" ]] || wt_die "wezterm config repo does not exist: $candidate"
+  candidate="$(wt_abs_path "$candidate")"
+  wt_config_validate_wezterm_repo_root "$candidate"
+  printf '%s\n' "$candidate"
+}
+
+wt_config_save_user_wezterm_repo() {
+  local repo_root="${1:?missing repo root}"
+  local user_file="${WT_CONFIG_USER_FILE:?missing user config file}"
+  local tmp_file=""
+  local line=""
+  local trimmed=""
+  local key=""
+  local replaced=0
+
+  mkdir -p "$(dirname "$user_file")"
+  tmp_file="$(mktemp "${TMPDIR:-/tmp}/worktree-task-config.XXXXXX")"
+
+  if [[ -f "$user_file" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      trimmed="$(wt_trim "$line")"
+      if [[ -n "$trimmed" && "$trimmed" == *=* ]]; then
+        key="$(wt_trim "${trimmed%%=*}")"
+        case "$key" in
+          WEZTERM_CONFIG_REPO|WT_CONFIG_WEZTERM_REPO)
+            if [[ "$replaced" -eq 0 ]]; then
+              printf 'WEZTERM_CONFIG_REPO=%s\n' "$repo_root" >> "$tmp_file"
+              replaced=1
+            fi
+            continue
+            ;;
+        esac
+      fi
+      printf '%s\n' "$line" >> "$tmp_file"
+    done < "$user_file"
+  fi
+
+  if [[ "$replaced" -eq 0 ]]; then
+    [[ ! -s "$tmp_file" ]] || printf '\n' >> "$tmp_file"
+    printf 'WEZTERM_CONFIG_REPO=%s\n' "$repo_root" >> "$tmp_file"
+  fi
+
+  mv "$tmp_file" "$user_file"
+}
+
+wt_config_discover_wezterm_repo() {
+  local repo_value=""
+  local base_dir=""
+
+  WEZTERM_CONFIG_REPO_ROOT=""
+  WEZTERM_CONFIG_REPO_FILE=""
+
+  if [[ -n "${WEZTERM_CONFIG_REPO:-}" ]]; then
+    WEZTERM_CONFIG_REPO_ROOT="$(wt_config_resolve_wezterm_repo_root "$PWD" "$WEZTERM_CONFIG_REPO")"
+  fi
+
+  if repo_value="$(wt_config_find_wezterm_repo_in_file "$WT_CONFIG_USER_FILE" 2>/dev/null || true)"; then
+    if [[ -n "$repo_value" ]]; then
+      base_dir="$(wt_config_base_dir_for_file "$WT_CONFIG_USER_FILE")"
+      WEZTERM_CONFIG_REPO_ROOT="$(wt_config_resolve_wezterm_repo_root "$base_dir" "$repo_value")"
+    fi
+  fi
+
+  if repo_value="$(wt_config_find_wezterm_repo_in_file "$WT_CONFIG_REPO_FILE" 2>/dev/null || true)"; then
+    if [[ -n "$repo_value" ]]; then
+      base_dir="$(wt_config_base_dir_for_file "$WT_CONFIG_REPO_FILE")"
+      WEZTERM_CONFIG_REPO_ROOT="$(wt_config_resolve_wezterm_repo_root "$base_dir" "$repo_value")"
+    fi
+  fi
+
+  if [[ -n "$WEZTERM_CONFIG_REPO_ROOT" ]]; then
+    WEZTERM_CONFIG_REPO_FILE="$WEZTERM_CONFIG_REPO_ROOT/.worktree-task/config.env"
+    [[ -f "$WEZTERM_CONFIG_REPO_FILE" ]] || wt_die "wezterm config repo is missing .worktree-task/config.env: $WEZTERM_CONFIG_REPO_ROOT"
+    return 0
+  fi
+
+  wt_die "WEZTERM_CONFIG_REPO is required for worktree-task; run 'worktree-task configure --repo /absolute/path/to/wezterm-config' or set it in $WT_CONFIG_USER_FILE"
+}
+
 wt_config_load() {
   wt_config_set_defaults
+  wt_config_discover_wezterm_repo
+  wt_config_load_file "$WEZTERM_CONFIG_REPO_FILE"
   wt_config_load_file "$WT_CONFIG_USER_FILE"
   wt_config_load_file "$WT_CONFIG_REPO_FILE"
+  if [[ -n "$WEZTERM_CONFIG_REPO_ROOT" ]]; then
+    WEZTERM_CONFIG_REPO="$WEZTERM_CONFIG_REPO_ROOT"
+  fi
 }
 
 wt_config_expand_repo_tokens() {
@@ -91,6 +254,18 @@ wt_config_expand_repo_tokens() {
 
 wt_config_resolve_under_main_root() {
   wt_resolve_path "$WT_MAIN_WORKTREE_ROOT" "${1:?missing relative path}"
+}
+
+wt_config_resolve_under_wezterm_repo() {
+  local path="${1:?missing relative path}"
+
+  if [[ "$path" == /* ]]; then
+    printf '%s\n' "$path"
+    return 0
+  fi
+
+  [[ -n "${WEZTERM_CONFIG_REPO_ROOT:-}" ]] || wt_die "relative repo-managed path requires WEZTERM_CONFIG_REPO to point at a wezterm-config repo"
+  wt_resolve_path "$WEZTERM_CONFIG_REPO_ROOT" "$path"
 }
 
 wt_config_resolve_under_repo_parent() {

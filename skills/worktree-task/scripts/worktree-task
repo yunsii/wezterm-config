@@ -19,6 +19,9 @@ command="${1:-}"
 shift || true
 
 case "$command" in
+  configure)
+    wt_core_configure "$@"
+    ;;
   launch)
     wt_core_launch "$@"
     ;;

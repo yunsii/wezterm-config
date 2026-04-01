@@ -14,11 +14,12 @@ The skill-owned scripts are the source of truth for task naming, prompt-file pla
 
 ## Launch Workflow
 
-1. Summarize the user request into a compact task prompt that is ready to hand to a fresh agent CLI session.
-2. Pick a short task title that can be slugified into a branch and worktree name.
-3. Run the skill script from inside the target repository so it can create the linked worktree under the repository parent's `.worktrees/<repo>/` directory.
-4. Let the selected provider open or prepare the new task target. The built-in `tmux-agent` provider reuses the current repo-family tmux session when the current pane or window layout still resolves to that repo family through live git context.
-5. Report the resulting branch name, worktree path, and tmux session to the user.
+1. If `WEZTERM_CONFIG_REPO` is not configured yet, ask the user which tracked `wezterm-config` repo or derived repo should be used, then run `worktree-task configure --repo /absolute/path` to save it before continuing.
+2. Summarize the user request into a compact task prompt that is ready to hand to a fresh agent CLI session.
+3. Pick a short task title that can be slugified into a branch and worktree name.
+4. Run the skill script from inside the target repository so it can create the linked worktree under the repository parent's `.worktrees/<repo>/` directory.
+5. Let the selected provider open or prepare the new task target. The built-in `tmux-agent` provider reuses the current repo-family tmux session when the current pane or window layout still resolves to that repo family through live git context.
+6. Report the resulting branch name, worktree path, and tmux session to the user.
 
 Launch command:
 
@@ -65,10 +66,15 @@ Useful options:
 ## Rules
 
 - Prefer running this skill from the existing managed tmux agent window for the target repo. That gives the script enough context to reuse the current repo-family tmux session directly.
+- `WEZTERM_CONFIG_REPO` is required. On first use, ask the user which tracked `wezterm-config` repo or derived repo to use, then save that choice with `worktree-task configure --repo /absolute/path`.
+- Prefer `worktree-task configure --repo` as the stable first-use path in agent sessions. `launch` often reads the task prompt from stdin, so config discovery should not depend on waiting for input on that same stream.
 - Keep the cleaned-up task prompt concise and action-oriented. Include acceptance criteria or constraints only when they materially affect the implementation.
 - Do not ask the user to type into an interactive shell prompt. Pass the prompt through stdin or a prompt file.
 - The script does not archive task prompts under the repository. Runtime launch uses a temporary prompt file only long enough for the new tmux pane to start.
 - The skill is self-contained. Repo-specific behavior should come from tracked config such as `.worktree-task/config.env`, not from hard-coded relative paths into the target repository.
+- Set `WEZTERM_CONFIG_REPO` when you want the installed skill to reuse a tracked `wezterm-config` repo or a derived repo as the source of shared worktree-task conventions.
+- Config collection now follows the tracked `wezterm-config` repo profile first, then the user override config, then the target repo override config.
+- Relative repo-managed paths such as `WT_PROVIDER_TMUX_CONFIG_FILE=tmux.conf` resolve against the configured `wezterm-config` repo, not against the target task repository.
 - If the requested slug already exists, the script automatically appends a numeric suffix unless the user forced an explicit branch name.
 - If you need a non-default branch base, pass `--base-ref` explicitly instead of assuming the current linked worktree branch is correct.
 - Reclaim only skill-managed task worktrees under the repository parent's `.worktrees/<repo>/`; do not silently remove the primary worktree or unrelated linked worktrees.
@@ -76,6 +82,7 @@ Useful options:
 - Delete the task branch only when it is already merged into the primary worktree `HEAD`; otherwise keep it and report that clearly.
 - The built-in `tmux-agent` provider derives session reuse, existing task-window discovery, and reclaim cleanup from live git context instead of stored tmux worktree metadata.
 - Configure the built-in tmux agent launcher with `WT_PROVIDER_AGENT_BOOTSTRAP`, `WT_PROVIDER_AGENT_COMMAND`, `WT_PROVIDER_AGENT_COMMAND_LIGHT`, `WT_PROVIDER_AGENT_COMMAND_DARK`, and optional `WT_PROVIDER_AGENT_PROMPT_FLAG` in `.worktree-task/config.env` or the user config override file.
+- Repos that are themselves a `wezterm-config` repo, or a derived repo that carries the same conventions, should track `WEZTERM_CONFIG_REPO=.` in `.worktree-task/config.env`.
 - Built-in providers currently include `none` and `tmux-agent`. External providers can be selected by absolute path or `custom:name` when discoverable through `WT_PROVIDER_SEARCH_PATHS`.
 
 ## Script
@@ -84,4 +91,10 @@ Unified entry point:
 
 ```bash
 bash {{skill_path}}/scripts/worktree-task --help
+```
+
+First-use config command:
+
+```bash
+bash {{skill_path}}/scripts/worktree-task configure --repo /absolute/path/to/wezterm-config
 ```

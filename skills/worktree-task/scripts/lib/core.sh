@@ -6,8 +6,12 @@ usage:
   worktree-task <command> [options]
 
 commands:
+  configure Configure or update WEZTERM_CONFIG_REPO for worktree-task
   launch    Create a linked task worktree and optionally open it in tmux
   reclaim   Remove a linked task worktree created by this skill
+
+environment:
+  WEZTERM_CONFIG_REPO  Required wezterm-config repo root; when missing, configure it first with worktree-task configure --repo /absolute/path
 EOF
 }
 
@@ -28,6 +32,17 @@ options:
   --session-name NAME   Force a specific tmux session name for tmux-agent
   --variant MODE        Provider variant override: auto, light, or dark
   --no-attach           Prepare the runtime target without switching/attaching
+EOF
+}
+
+wt_core_configure_usage() {
+  cat <<'EOF'
+usage:
+  worktree-task configure [options]
+
+options:
+  --cwd PATH   Target repository path used to discover candidate wezterm-config repos. Default: current directory
+  --repo PATH  Explicit wezterm-config repo path to save
 EOF
 }
 
@@ -131,7 +146,7 @@ wt_core_resolve_policy_paths() {
 
   WT_PROVIDER_TMUX_CONFIG_FILE_ABS=""
   if [[ -n "$WT_PROVIDER_TMUX_CONFIG_FILE" ]]; then
-    WT_PROVIDER_TMUX_CONFIG_FILE_ABS="$(wt_config_resolve_under_main_root "$WT_PROVIDER_TMUX_CONFIG_FILE")"
+    WT_PROVIDER_TMUX_CONFIG_FILE_ABS="$(wt_config_resolve_under_wezterm_repo "$WT_PROVIDER_TMUX_CONFIG_FILE")"
   fi
 }
 
@@ -314,6 +329,45 @@ wt_core_emit_reclaim_result() {
   printf 'tmux_windows_closed=%s\n' "${WT_PROVIDER_RESULT_WINDOWS_CLOSED:-0}"
   printf 'branch_deleted=%s\n' "$WT_BRANCH_DELETED"
   printf 'branch_delete_reason=%s\n' "$WT_BRANCH_DELETE_REASON"
+}
+
+wt_core_configure() {
+  local cwd="$PWD"
+  local repo_override=""
+  local selected_repo=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --cwd)
+        [[ $# -ge 2 ]] || { wt_core_configure_usage; exit 1; }
+        cwd="$2"
+        shift 2
+        ;;
+      --repo)
+        [[ $# -ge 2 ]] || { wt_core_configure_usage; exit 1; }
+        repo_override="$2"
+        shift 2
+        ;;
+      -h|--help)
+        wt_core_configure_usage
+        exit 0
+        ;;
+      *)
+        wt_core_configure_usage
+        exit 1
+        ;;
+    esac
+  done
+
+  wt_core_resolve_repo_context "$cwd"
+  wt_config_set_defaults
+
+  [[ -n "$repo_override" ]] || wt_die "configure requires --repo /absolute/path/to/wezterm-config"
+  selected_repo="$(wt_config_resolve_wezterm_repo_root "$PWD" "$repo_override")"
+
+  wt_config_save_user_wezterm_repo "$selected_repo"
+  printf 'wezterm_config_repo=%s\n' "$selected_repo"
+  printf 'user_config_file=%s\n' "$WT_CONFIG_USER_FILE"
 }
 
 wt_core_launch() {
