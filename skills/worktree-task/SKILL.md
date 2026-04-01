@@ -14,7 +14,7 @@ The skill-owned scripts are the source of truth for task naming, prompt-file pla
 
 ## Launch Workflow
 
-1. If `WEZTERM_CONFIG_REPO` is not configured yet, ask the user which tracked `wezterm-config` repo or derived repo should be used, then run `worktree-task configure --repo /absolute/path` to save it before continuing.
+1. Before `launch` or `reclaim`, check whether `WEZTERM_CONFIG_REPO` is configured. If it is missing, ask the user which tracked `wezterm-config` repo or derived repo should be used, then run `worktree-task configure --repo /absolute/path` before continuing.
 2. Summarize the user request into a compact task prompt that is ready to hand to a fresh agent CLI session.
 3. Pick a short task title that can be slugified into a branch and worktree name.
 4. Run the skill script from inside the target repository so it can create the linked worktree under the repository parent's `.worktrees/<repo>/` directory.
@@ -66,8 +66,8 @@ Useful options:
 ## Rules
 
 - Prefer running this skill from the existing managed tmux agent window for the target repo. That gives the script enough context to reuse the current repo-family tmux session directly.
-- `WEZTERM_CONFIG_REPO` is required. On first use, ask the user which tracked `wezterm-config` repo or derived repo to use, then save that choice with `worktree-task configure --repo /absolute/path`.
-- Prefer `worktree-task configure --repo` as the stable first-use path in agent sessions. `launch` often reads the task prompt from stdin, so config discovery should not depend on waiting for input on that same stream.
+- `WEZTERM_CONFIG_REPO` is required. Every time you use this skill, check whether it is configured first; if it is missing, ask the user which tracked `wezterm-config` repo or derived repo to use, then save that choice with `worktree-task configure --repo /absolute/path`.
+- Prefer `worktree-task configure --repo` as the stable recovery path whenever `WEZTERM_CONFIG_REPO` is missing. `launch` often reads the task prompt from stdin, so config discovery should not depend on waiting for input on that same stream.
 - Keep the cleaned-up task prompt concise and action-oriented. Include acceptance criteria or constraints only when they materially affect the implementation.
 - Do not ask the user to type into an interactive shell prompt. Pass the prompt through stdin or a prompt file.
 - The script does not archive task prompts under the repository. Runtime launch uses a temporary prompt file only long enough for the new tmux pane to start.
@@ -93,7 +93,7 @@ Unified entry point:
 bash {{skill_path}}/scripts/worktree-task --help
 ```
 
-First-use config command:
+Config command:
 
 ```bash
 bash {{skill_path}}/scripts/worktree-task configure --repo /absolute/path/to/wezterm-config

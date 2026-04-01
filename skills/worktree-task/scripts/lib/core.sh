@@ -11,7 +11,7 @@ commands:
   reclaim   Remove a linked task worktree created by this skill
 
 environment:
-  WEZTERM_CONFIG_REPO  Required wezterm-config repo root; when missing, configure it first with worktree-task configure --repo /absolute/path
+  WEZTERM_CONFIG_REPO  Required wezterm-config repo root; if it is missing, configure it first with worktree-task configure --repo /absolute/path
 EOF
 }
 
@@ -41,7 +41,7 @@ usage:
   worktree-task configure [options]
 
 options:
-  --cwd PATH   Target repository path used to discover candidate wezterm-config repos. Default: current directory
+  --cwd PATH   Target repository path used to resolve a relative --repo path. Default: current directory
   --repo PATH  Explicit wezterm-config repo path to save
 EOF
 }
