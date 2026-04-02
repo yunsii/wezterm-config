@@ -7,7 +7,7 @@ Use this doc when you changed runtime config or need release workflow rules.
 After runtime config changes:
 
 1. Run the `wezterm-runtime-sync` skill from the repo root. If repo-root `.sync-target` already points at a valid target, `skills/wezterm-runtime-sync/scripts/sync-runtime.sh` is enough; otherwise use `--target-home /absolute/path` after the target has been confirmed.
-2. Reload config in WezTerm with `Ctrl+Shift+R`.
+2. Let WezTerm auto-reload the synced config by default. Use `Ctrl+Shift+R` only to force a reload when needed; current WezTerm versions watch the loaded config file and `require`-loaded Lua modules automatically.
 3. Reload tmux config or recreate tmux sessions if tmux styling or startup behavior changed.
 4. Verify workspace shortcuts still match [`../user/keybindings.md`](../user/keybindings.md).
 5. When task-worktree launch behavior changes, verify a new linked task worktree opens as another tmux window in the same repo-family session and that later worktree windows still fall back to the session default launcher instead of replaying the one-shot task prompt.

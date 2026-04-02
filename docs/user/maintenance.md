@@ -27,7 +27,8 @@ skills/wezterm-runtime-sync/scripts/sync-runtime.sh --target-home /mnt/c/Users/y
 
 Run those commands from the repo root, or set `WEZTERM_CONFIG_REPO=/absolute/path/to/repo` before invoking the script from elsewhere.
 
-3. Reload WezTerm with `Ctrl+Shift+R`.
+3. Let WezTerm auto-reload the synced config changes.
+   In current WezTerm versions, `automatically_reload_config` defaults to `true`: the loaded config file is watched, `require`-loaded Lua files are also watched, and the majority of options take effect automatically. Use `Ctrl+Shift+R` only to force a reload when needed.
 4. If tmux styling or startup behavior changed, reload tmux config:
 
 ```bash
@@ -36,7 +37,16 @@ scripts/dev/reload-tmux.sh
 
 Recreate affected sessions only if a simple reload is not enough.
 For WakaTime key changes in `wezterm-x/local/shared.env`, a tmux reload is sufficient; that path no longer depends on WezTerm injecting environment variables into WSL.
-6. If runtime shell rc files changed, reload the interactive shell in affected tmux panes or recreate those sessions.
+5. If runtime shell rc files changed, reload the interactive shell in affected tmux panes or recreate those sessions.
+
+## Renderer Backend
+
+- The tracked config currently sets `front_end = 'WebGpu'` in `wezterm-x/lua/ui.lua`.
+- `WebGpu` and `OpenGL` use the same terminal/parser/shaping pipeline; the practical difference is the final GUI renderer and its driver stack.
+- `WebGpu` usually maps to the platform-native modern graphics API through `wgpu` and may offer better throughput, but it is also more sensitive to driver- and compositor-specific bugs.
+- `OpenGL` is the compatibility fallback. If you see stale frames, missing redraws, or a window that only visibly refreshes after focus returns, test `OpenGL` before assuming the bug is elsewhere.
+- If `OpenGL` refreshes correctly even while the window is unfocused, treat that as a backend/driver compatibility clue rather than a workspace or tmux problem.
+- After changing `front_end`, prefer a full WezTerm restart over relying on auto reload or `Ctrl+Shift+R`; most config edits hot-reload, but renderer changes should be verified in a new GUI process.
 
 ## Worktree Task Skill
 
