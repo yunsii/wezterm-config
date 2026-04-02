@@ -15,12 +15,14 @@ Use this doc when you need the minimum setup and navigation context.
 2. Edit `wezterm-x/local/constants.lua` for your `runtime_mode`, runtime shell, managed CLI theme variant, and any optional OS-specific integrations such as `default_domain` or Chrome debug profile path. `Alt+b` uses the synced launcher scripts under `wezterm-x/scripts/` and requires `chrome_debug_browser.user_data_dir`.
 3. Edit `wezterm-x/local/shared.env` for shared scalar values that both Lua and shell scripts need, such as `WAKATIME_API_KEY`.
 4. Edit `wezterm-x/local/workspaces.lua` for your private project directories.
+5. Optionally edit `wezterm-x/local/command-panel.sh` for machine-local `Ctrl+k` command panel entries.
 
  ## Repo Entry Points
 
 - `wezterm.lua`: main WezTerm config
 - `wezterm-x/workspaces.lua`: shared public workspace baseline and per-project startup defaults
 - `wezterm-x/local.example/`: tracked templates for private machine-local overrides
+- `wezterm-x/local.example/command-panel.sh`: tracked template for private machine-local `Ctrl+k` command panel items
 - `wezterm-x/local.example/shared.env`: tracked template for simple shared scalar values used by both Lua and shell runtime code
 - `wezterm-x/local/`: gitignored machine-local overrides that are still copied by the sync skill
 - `.worktree-task/config.env`: tracked repo profile for the self-contained worktree-task skill, including the explicit `wezterm-config` repo pointer used to collect shared task-launch conventions

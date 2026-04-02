@@ -514,6 +514,25 @@ function M.apply(opts)
         open_debug_chrome(wezterm, window, constants, logger)
       end),
     },
+    {
+      key = 'k',
+      mods = 'CTRL',
+      action = wezterm.action_callback(function(window, pane)
+        local workspace_name = active_workspace_name(window)
+        local foreground_process = foreground_process_basename(pane)
+
+        if is_managed_workspace(workspace_name) or foreground_process == 'tmux' then
+          forward_shortcut_to_pane(wezterm, window, pane, 'Ctrl+k', '\x0b', logger, 'command_panel', workspace_name)
+          return
+        end
+
+        logger.warn('command_panel', 'shortcut requires tmux in current pane', {
+          foreground_process = foreground_process,
+          workspace = workspace_name,
+        })
+        window:toast_notification('WezTerm', 'Ctrl+k is only available when the current pane is running tmux', nil, 3000)
+      end),
+    },
     workspace_keybinding(wezterm, workspace, 'w', 'work'),
     {
       key = 'd',

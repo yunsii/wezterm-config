@@ -20,6 +20,7 @@ return {
       debug_key_events = false,
       categories = {
         alt_o = true,
+        command_panel = true,
         chrome = true,
         workspace = true,
       },

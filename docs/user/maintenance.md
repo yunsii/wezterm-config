@@ -9,6 +9,7 @@ Use this doc when you need to apply or verify changes.
 
 Private machine/project config should live in `wezterm-x/local/`, starting from the tracked templates in `wezterm-x/local.example/`.
 Keep simple cross-language values in `wezterm-x/local/shared.env`, and keep Lua-only structured settings in `wezterm-x/local/constants.lua`.
+Optional machine-local `Ctrl+k` quick actions belong in `wezterm-x/local/command-panel.sh`.
 Use `wezterm-x/local.example/shared.env` as the tracked starting point for shared scalar values such as `WAKATIME_API_KEY`.
 
 The skill's implementation lives under `skills/wezterm-runtime-sync/scripts/`. If repo-root `.sync-target` already points at a valid home, you can sync directly:
@@ -111,11 +112,11 @@ Reclaim only removes skill-managed linked worktrees under the repository parent'
 - Runtime shell diagnostics are configured separately in `wezterm-x/local/runtime-logging.sh`, starting from `wezterm-x/local.example/runtime-logging.sh`.
 - Keep both logging systems disabled by default; enable them only while investigating a problem.
 - When `diagnostics.wezterm.enabled = true`, WezTerm writes structured lines to the configured `file` and also shows them in the Debug Overlay.
-- Current WezTerm-side diagnostics categories include `workspace`, `alt_o`, `chrome`, and `clipboard`.
+- Current WezTerm-side diagnostics categories include `workspace`, `alt_o`, `chrome`, `clipboard`, and `command_panel`.
 - Set `diagnostics.wezterm.debug_key_events = true` only for keybinding investigations; it is intentionally noisy.
 - When `WEZTERM_RUNTIME_LOG_ENABLED=1`, the runtime scripts append structured lines to `WEZTERM_RUNTIME_LOG_FILE`.
 - Leave `WEZTERM_RUNTIME_LOG_CATEGORIES` empty to capture all runtime categories, or set a comma-separated list such as `alt_o,workspace,worktree`.
-- Current runtime categories include `alt_o`, `workspace`, `worktree`, and `managed_command`.
+- Current runtime categories include `alt_o`, `workspace`, `worktree`, `managed_command`, and `command_panel`.
 
 ## Shell Integration
 

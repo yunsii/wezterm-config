@@ -14,6 +14,7 @@ Use this doc when you need shortcut behavior.
 - `Alt+g`: only in non-default managed workspaces, open a centered tmux popup worktree picker for the current repo family; selecting an unopened worktree creates its tmux window on demand
 - `Alt+Shift+g`: only in non-default managed workspaces, cycle to the next git worktree in the current repo family, creating the tmux window on demand when needed
 - `Alt+b`: open the configured Chrome debug browser profile from `wezterm-x/local/constants.lua`; in `hybrid-wsl` it uses the synced Windows launcher, and in `posix-local` it uses the synced shell launcher
+- `Ctrl+k`: when the current pane is running tmux, open a centered tmux popup command panel with repo-shared commands plus optional machine-local extensions from `wezterm-x/local/command-panel.sh`; the shared `hybrid-wsl` entry force-closes all VS Code windows on the Windows host
 - `LeftClick`: inside tmux, use the click only to focus the pane under the mouse; it does not start tmux selection and is not forwarded as a mouse click into the pane application
 - `Shift+LeftDrag`: start a tmux copy-mode selection inside the current pane without crossing into neighboring tmux panes; press `Ctrl+c` or `Enter` to copy and exit copy-mode
 - `LeftDrag`: outside tmux copy-mode, plain drag does not start selection; use `Shift+LeftDrag` for tmux pane-local selection or `Alt+LeftDrag` for WezTerm terminal-wide selection
