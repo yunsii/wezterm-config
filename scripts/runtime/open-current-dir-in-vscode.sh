@@ -10,15 +10,21 @@ source "$SCRIPT_DIR/tmux-worktree-lib.sh"
 usage() {
   cat <<'EOF' >&2
 usage:
-  open-current-dir-in-vscode.sh [--code-command ARG ... --] [target_dir]
+  open-current-dir-in-vscode.sh [--window WINDOW_ID] [--code-command ARG ... --] [target_dir]
 EOF
 }
 
 code_command=()
+tmux_window_id=""
+window_root=""
 start_ms="$(runtime_log_now_ms)"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --window)
+      tmux_window_id="${2:-}"
+      shift 2
+      ;;
     --code-command)
       shift
       while [[ $# -gt 0 ]]; do
@@ -49,7 +55,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 target_dir="${1:-$PWD}"
-runtime_log_info alt_o "open-current-dir-in-vscode invoked" "requested_dir=$target_dir"
+requested_dir="$target_dir"
 
 if [[ "$target_dir" != /* ]]; then
   runtime_log_error alt_o "expected absolute path" "requested_dir=$target_dir"
@@ -61,33 +67,45 @@ if [[ ! -d "$target_dir" ]]; then
   exit 1
 fi
 
-if repo_root="$(tmux_worktree_repo_root "$target_dir" 2>/dev/null || true)" && [[ -n "$repo_root" ]]; then
+if [[ -n "$tmux_window_id" ]]; then
+  window_root="$(tmux_worktree_current_root_for_window "$tmux_window_id" || true)"
+  if [[ -n "$window_root" ]]; then
+    target_dir="$window_root"
+  fi
+fi
+
+if [[ -z "$target_dir" ]]; then
+  target_dir="$requested_dir"
+fi
+
+if [[ -z "$window_root" ]] && repo_root="$(tmux_worktree_repo_root "$target_dir" 2>/dev/null || true)" && [[ -n "$repo_root" ]]; then
   target_dir="$repo_root"
 fi
 
-runtime_log_info alt_o "resolved Alt+o target directory" "effective_target_dir=$target_dir"
-
 if (( ${#code_command[@]} == 0 )); then
   code_bin="$(command -v code || true)"
-  runtime_log_info alt_o "resolved code binary" "code_bin=${code_bin:-missing}"
   if [[ -z "$code_bin" ]]; then
-    runtime_log_error alt_o "code binary was not found" "requested_dir=$target_dir"
+    runtime_log_error alt_o "code binary was not found" "requested_dir=$requested_dir"
     exit 1
   fi
   code_command=("$code_bin")
-else
-  runtime_log_info alt_o "using explicit code command" "code_command=${code_command[*]}"
 fi
 
 cd "$target_dir"
-runtime_log_info alt_o "changed to effective directory" "effective_dir=$PWD"
-
-runtime_log_info alt_o "executing code from current directory" "effective_dir=$PWD" "code_command=${code_command[*]}"
 if "${code_command[@]}" .; then
-  runtime_log_info alt_o "open-current-dir-in-vscode completed" "effective_dir=$PWD" "duration_ms=$(runtime_log_duration_ms "$start_ms")"
+  runtime_log_info alt_o "open-current-dir-in-vscode completed" \
+    "requested_dir=$requested_dir" \
+    "effective_dir=$PWD" \
+    "code_command=${code_command[*]}" \
+    "duration_ms=$(runtime_log_duration_ms "$start_ms")"
   exit 0
 fi
 
 status=$?
-runtime_log_error alt_o "open-current-dir-in-vscode failed" "effective_dir=$PWD" "duration_ms=$(runtime_log_duration_ms "$start_ms")" "exit_code=$status"
+runtime_log_error alt_o "open-current-dir-in-vscode failed" \
+  "requested_dir=$requested_dir" \
+  "effective_dir=$PWD" \
+  "code_command=${code_command[*]}" \
+  "duration_ms=$(runtime_log_duration_ms "$start_ms")" \
+  "exit_code=$status"
 exit "$status"

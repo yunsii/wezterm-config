@@ -48,9 +48,30 @@ tmux_worktree_file_mtime() {
   stat -f %m "$path"
 }
 
+tmux_worktree_find_git_root() {
+  local cwd="${1:-$PWD}"
+  local current=""
+
+  current="$(tmux_worktree_abs_path "$cwd")"
+  while [[ -n "$current" ]]; do
+    if [[ -e "$current/.git" ]]; then
+      printf '%s\n' "$current"
+      return 0
+    fi
+
+    if [[ "$current" == "/" ]]; then
+      break
+    fi
+
+    current="$(dirname "$current")"
+  done
+
+  return 1
+}
+
 tmux_worktree_in_git_repo() {
   local cwd="${1:-$PWD}"
-  git -C "$cwd" rev-parse --show-toplevel >/dev/null 2>&1
+  tmux_worktree_find_git_root "$cwd" >/dev/null 2>&1 || git -C "$cwd" rev-parse --show-toplevel >/dev/null 2>&1
 }
 
 tmux_worktree_git_abs_path() {
@@ -122,6 +143,14 @@ tmux_worktree_git_abs_path() {
 }
 
 tmux_worktree_repo_root() {
+  local root=""
+
+  root="$(tmux_worktree_find_git_root "${1:-$PWD}" || true)"
+  if [[ -n "$root" ]]; then
+    printf '%s\n' "$root"
+    return 0
+  fi
+
   tmux_worktree_git_abs_path "${1:-$PWD}" --show-toplevel
 }
 
@@ -337,6 +366,21 @@ tmux_worktree_context_for_context() {
   fi
 
   return 1
+}
+
+tmux_worktree_current_root_for_window() {
+  local current_window_id="${1:-}"
+  local current_worktree_root=""
+  local context=""
+
+  if [[ -n "$current_window_id" ]]; then
+    context="$(tmux_worktree_window_context "$current_window_id" || true)"
+    if [[ -n "$context" ]]; then
+      IFS=$'\t' read -r current_worktree_root _ <<< "$context"
+    fi
+  fi
+
+  printf '%s\n' "$current_worktree_root"
 }
 
 tmux_worktree_current_root_for_context() {
