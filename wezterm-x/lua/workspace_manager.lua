@@ -483,6 +483,7 @@ exit 1
       spawn_workspace_tab(mux_window, items[i], trace_id)
     end
 
+    initial_tab:activate()
     window:perform_action(wezterm.action.SwitchToWorkspace { name = name }, pane)
   end
 
