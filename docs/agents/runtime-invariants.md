@@ -8,7 +8,7 @@ Use this doc when you are changing runtime behavior.
 - Linked task worktree windows bootstrap through the built-in tmux provider under `skills/worktree-task/scripts/providers/tmux-agent.sh`.
 - The built-in task-worktree tmux provider must derive repo-family session reuse and task-window ownership from live git context instead of stored tmux worktree metadata, and it must keep the launched agent CLI configurable via `WT_PROVIDER_AGENT_COMMAND` instead of hard-coding a specific tool.
 - Keep task-specific tmux session bootstrap inside the skill provider, not duplicated in WezTerm-side lazy setup.
-- Keep managed agent startup routed through a stable login shell. `scripts/runtime/run-managed-command.sh` and the built-in `tmux-agent` provider may wrap command execution and logging, but the actual agent CLI must execute inside the resolved login shell instead of depending on ad hoc environment bootstrapping.
+- `open-project-session.sh` launches managed commands inside an interactive login shell (`-lic`) so the environment matches the right-side shell pane. `run-managed-command.sh` is a thin wrapper that logs and execs the command; it does not perform its own environment setup.
 
 ## Stable Behavior
 
