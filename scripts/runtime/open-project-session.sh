@@ -106,12 +106,12 @@ build_primary_shell_command() {
   if [[ $# -gt 0 ]]; then
     printf -v command_string '%q ' "$@"
     command_string="${command_string% }"
-    command_string="$command_string; exec ${quoted_shell} -l"
-    printf '%s -lc %q' "$quoted_shell" "$command_string"
+    command_string="$command_string; exec ${quoted_shell} -il"
+    printf '%s -ilc %q' "$quoted_shell" "$command_string"
     return
   fi
 
-  printf '%s -l' "$quoted_shell"
+  printf '%s -il' "$quoted_shell"
 }
 
 primary_shell_command="$(build_primary_shell_command "$@")"

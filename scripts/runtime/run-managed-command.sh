@@ -64,7 +64,7 @@ command_string="${command_string% }"
 runtime_log_info managed_command "run-managed-command invoked" "command=$command_name" "arg_count=$#" "login_shell=$login_shell"
 runtime_log_info managed_command "executing managed command" "command=$command_name" "login_shell=$login_shell"
 
-if "$login_shell" -lc "$command_string"; then
+if "$login_shell" -ilc "$command_string"; then
   runtime_log_info managed_command "managed command completed" "command=$command_name" "duration_ms=$(runtime_log_duration_ms "$start_ms")"
   exit 0
 fi

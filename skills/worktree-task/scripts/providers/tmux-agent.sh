@@ -740,7 +740,7 @@ provider_run_pane_command() {
   printf -v command_string '%q ' "${command[@]}"
   command_string="${command_string% }"
 
-  if ! "$login_shell" -lc "$command_string"; then
+  if ! "$login_shell" -ilc "$command_string"; then
     status=$?
     runtime_log_error provider "tmux-agent pane command failed" "variant=$variant" "command_name=${command[0]:-unknown}" "duration_ms=$(runtime_log_duration_ms "$start_ms")" "exit_code=$status"
     printf 'tmux-agent pane command exited with status %s\n' "$status" >&2
@@ -748,7 +748,7 @@ provider_run_pane_command() {
     runtime_log_info provider "tmux-agent pane command completed" "variant=$variant" "command_name=${command[0]:-unknown}" "duration_ms=$(runtime_log_duration_ms "$start_ms")"
   fi
 
-  exec "$login_shell" -l
+  exec "$login_shell" -il
 }
 
 verb="${1:-}"
