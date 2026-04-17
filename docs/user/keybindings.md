@@ -16,11 +16,12 @@ Use this doc when you need shortcut behavior.
 - `Alt+b`: open the configured Chrome debug browser profile from `wezterm-x/local/constants.lua`; in `hybrid-wsl` it uses the synced Windows launcher, and in `posix-local` it uses the synced shell launcher
 - `Ctrl+k`: when the current pane is running tmux, open a centered tmux popup command panel with repo-shared commands plus optional machine-local extensions from `wezterm-x/local/command-panel.sh`; the shared `hybrid-wsl` entry force-closes all VS Code windows on the Windows host
 - `LeftClick`: inside tmux, use the click only to focus the pane under the mouse; it does not start tmux selection and is not forwarded as a mouse click into the pane application
-- `Shift+LeftDrag`: start a tmux copy-mode selection inside the current pane without crossing into neighboring tmux panes; press `Ctrl+c` or `Enter` to copy and exit copy-mode
-- `LeftDrag`: outside tmux copy-mode, plain drag does not start selection; use `Shift+LeftDrag` for tmux pane-local selection or `Alt+LeftDrag` for WezTerm terminal-wide selection
-- `Alt+LeftDrag`: bypass tmux mouse reporting and use WezTerm's terminal-wide text selection when you intentionally want to select across pane boundaries; copy it with `Ctrl+c` or `Ctrl+Shift+c`
+- `Shift+LeftDrag`: start a tmux pane-local selection inside the current pane, including after wheel scrolling has moved tmux into its scrollback mode; press `Ctrl+c` or `Enter` to copy and exit copy-mode
+- `LeftDrag`: plain drag does not start selection, even after wheel scrolling; use `Shift+LeftDrag` for tmux pane-local selection or `Super+LeftDrag` for terminal-wide selection
+- `Super+LeftDrag`: bypass tmux mouse reporting and use WezTerm's terminal-wide text selection when you intentionally want to select across pane boundaries; copy it with `Ctrl+c` or `Ctrl+Shift+c`
+- `LeftClick` after a tmux selection: when copy-mode already has an active selection, a plain click clears that selection without copying if you are still browsing scrollback; if you are already back at the live bottom, the same click exits copy-mode
 - `Ctrl+LeftClick`: open the link under the mouse cursor in the system browser
-- `Ctrl+c`: if the current WezTerm pane has a terminal selection, copy it to the system clipboard and clear the selection; otherwise send a normal terminal `Ctrl+c`, which in tmux copy-mode copies the current tmux selection and exits copy-mode
+- `Ctrl+c`: if the current WezTerm pane has a terminal selection, copy it to the system clipboard and clear the selection; otherwise send a normal terminal `Ctrl+c`. In tmux copy-mode, `Ctrl+c` keeps the current scrollback position when you are still above the live bottom, and only falls back to copy-and-exit once you are back at the bottom
 - `Ctrl+Shift+c`: if the current WezTerm pane has a terminal selection, copy it to the system clipboard and clear the selection; otherwise forward `Ctrl+Shift+c` to the pane
 - `Ctrl+v`: smart paste; in Windows-hosted `hybrid-wsl`, a background Windows clipboard listener keeps a cache of exported bitmap images so normal text paste stays low-latency while clipboard images still paste the exported WSL path into the active pane; if that cache is unavailable, fall back to a normal clipboard paste
 - `Ctrl+Shift+v`: force a normal clipboard paste without the image-export helper

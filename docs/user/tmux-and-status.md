@@ -27,13 +27,16 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 - In `posix-local`, `Alt+b` uses the synced shell launcher at `wezterm-x/scripts/focus-or-start-debug-chrome.sh`.
 - `Ctrl+k` opens a centered tmux popup command panel whenever the current pane is running tmux; repo-shared commands appear alongside any machine-local entries from `wezterm-x/local/command-panel.sh`.
 - The shared `hybrid-wsl` command panel entry force-closes all VS Code windows on the Windows host with `taskkill /IM code.exe /F`.
-- Mouse drag selection inside tmux copy-mode no longer writes to the system clipboard on release; keep the selection and press `Enter` to copy explicitly instead.
-- A plain click inside the pane exits tmux copy-mode without copying, so you do not need to use `Esc` just to return to normal interaction.
+- Copy and paste are intentionally split by layer: tmux owns pane-local text selection and copy, while WezTerm owns the smart system clipboard paste path.
+- tmux explicitly uses `set-clipboard external`, so copying from tmux copy-mode writes to the system clipboard through the terminal's OSC 52 clipboard path instead of keeping a separate terminal-side selection flow.
 - Outside tmux copy-mode, plain left clicks are consumed by tmux only to focus the pane under the mouse; tmux does not turn that click into a selection, and the pane application does not receive it as a mouse click.
-- Hold `Shift` while dragging to start tmux copy-mode selection inside the current pane; the selection stays pane-local, and `Ctrl+c` or `Enter` copies it and exits copy-mode.
-- Outside tmux copy-mode, plain left drag does not start any selection path; use `Shift` for tmux pane-local selection or `Alt` for WezTerm terminal-wide selection.
-- Hold `Alt` while dragging to bypass tmux mouse reporting and use WezTerm's terminal-wide text selection path when you intentionally want to select across pane boundaries; copy that selection with `Ctrl+c` or `Ctrl+Shift+c`.
-- `Ctrl+c` first checks for a WezTerm terminal selection and copies it without forwarding the key; if there is no WezTerm selection, it sends a normal terminal `Ctrl+c`, which lets tmux copy-mode and regular terminal programs handle it normally.
+- Outside tmux copy-mode, plain left drag still does not start any selection path, which avoids accidental cross-pane selections in the default two-pane layout; use `Shift+drag` to start tmux pane-local selection from normal mode.
+- Wheel scrolling may move tmux into its copy-mode-backed scrollback state, but plain left drag still does not start a selection there; `Shift+drag` remains the only tmux pane-local selection entrypoint.
+- Releasing the mouse after a drag does not auto-copy or auto-cancel; keep the selection visible and press `Enter` or `Ctrl+c` to copy explicitly and exit copy-mode.
+- When copy-mode already has an active selection, a plain click clears that selection without copying if the pane is still above the live bottom; once the pane is back at the live bottom, the same click exits copy-mode, which removes the copy-mode cursor and returns to normal interaction.
+- `Ctrl+c` follows the same split: above the live bottom it copies the current tmux selection without leaving scrollback, and at the live bottom it copies and exits copy-mode.
+- This config does not expose a normal WezTerm cross-pane drag-selection path by default; `bypass_mouse_reporting_modifiers` is parked on `SUPER`, so pane-local selection remains the default mental model and terminal-wide selection is still available when you hold that modifier intentionally.
+- `Ctrl+c` first checks for a WezTerm terminal selection and copies it if one exists; otherwise it sends a normal terminal `Ctrl+c`, which means tmux copy-mode copies the current selection and regular shells and TUIs still receive interrupt as usual.
 - In `hybrid-wsl`, `Ctrl+v` smart image paste is cache-backed: a background Windows clipboard listener exports bitmap clipboard content ahead of time, so ordinary text paste does not block on synchronous clipboard image checks.
 - tmux now emits terminal focus-in and focus-out events to applications, which helps mouse-aware TUIs recover cleanly when the WezTerm window regains focus.
 - The first tmux line renders repo, branch, combined git change counts, tracked-branch sync markers (`^N` ahead, `vN` behind, `=0` synced, `x0` no upstream configured), and Node.js version.
