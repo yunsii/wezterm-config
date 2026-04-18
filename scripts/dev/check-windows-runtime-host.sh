@@ -183,6 +183,13 @@ wait_for_log_match() {
   return 1
 }
 
+wait_for_trace_event() {
+  local trace_id="$1"
+  local event_pattern="$2"
+  wait_for_log_match "trace_id=\"${trace_id}\".*${event_pattern}" \
+    || wait_for_log_match "${event_pattern}.*trace_id=\"${trace_id}\""
+}
+
 ensure_helper() {
   powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
     -File "$helper_ensure_win" \
@@ -223,8 +230,8 @@ enqueue_vscode_request() {
     "$(json_escape "$trace_id")" \
     "$(json_escape "$code_exe")" > "$request_path"
   wait_for_request_consumed "$request_path" || return 1
-  wait_for_log_match "trace_id=\"${trace_id}\".*helper processed request" || return 1
-  wait_for_log_match "trace_id=\"${trace_id}\".*(focused cached vscode window|launched vscode)" || return 1
+  wait_for_trace_event "$trace_id" "helper processed request" || return 1
+  wait_for_trace_event "$trace_id" "(focused cached vscode window|launched vscode)" || return 1
 }
 
 enqueue_chrome_request() {
@@ -243,8 +250,8 @@ enqueue_chrome_request() {
     "$(json_escape "chrome.exe")" \
     "$(json_escape "$chrome_profile")" > "$request_path"
   wait_for_request_consumed "$request_path" || return 1
-  wait_for_log_match "trace_id=\"${trace_id}\".*helper processed request" || return 1
-  wait_for_log_match "trace_id=\"${trace_id}\".*(focused cached debug chrome window|launched debug chrome)" || return 1
+  wait_for_trace_event "$trace_id" "helper processed request" || return 1
+  wait_for_trace_event "$trace_id" "(focused cached debug chrome window|launched debug chrome)" || return 1
 }
 
 ensure_helper

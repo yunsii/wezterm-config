@@ -47,178 +47,142 @@ param(
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
 
-. (Join-Path (Split-Path -Parent $PSCommandPath) 'windows-structured-log.ps1')
+$script:HelperScriptRoot = Split-Path -Parent $PSCommandPath
+. (Join-Path $script:HelperScriptRoot 'windows-structured-log.ps1')
+. (Join-Path $script:HelperScriptRoot 'windows-runtime-helper\shared.ps1')
 
-function Set-HelperLogger {
-  Initialize-StructuredLog `
-    -FilePath $DiagnosticsFile `
-    -Enabled $DiagnosticsEnabled `
-    -CategoryEnabled $DiagnosticsCategoryEnabled `
-    -Level $DiagnosticsLevel `
-    -Source 'windows-helper' `
-    -TraceId '' `
-    -MaxBytes $DiagnosticsMaxBytes `
-    -MaxFiles $DiagnosticsMaxFiles
+$script:RuntimeContext = [ordered]@{
+  ScriptRoot = $script:HelperScriptRoot
+  PowerShellExe = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+  Port = $Port
+  StatePath = $StatePath
+  RequestDir = $RequestDir
+  Diagnostics = [ordered]@{
+    Enabled = $DiagnosticsEnabled
+    CategoryEnabled = $DiagnosticsCategoryEnabled
+    Level = $DiagnosticsLevel
+    File = $DiagnosticsFile
+    MaxBytes = $DiagnosticsMaxBytes
+    MaxFiles = $DiagnosticsMaxFiles
+  }
+  Clipboard = [ordered]@{
+    ListenerScriptPath = $ClipboardListenerScriptPath
+    StatePath = $ClipboardStatePath
+    LogPath = $ClipboardLogPath
+    OutputDir = $ClipboardOutputDir
+    WslDistro = $ClipboardWslDistro
+    HeartbeatIntervalSeconds = $ClipboardHeartbeatIntervalSeconds
+    HeartbeatTimeoutSeconds = $ClipboardHeartbeatTimeoutSeconds
+    ImageReadRetryCount = $ClipboardImageReadRetryCount
+    ImageReadRetryDelayMs = $ClipboardImageReadRetryDelayMs
+    CleanupMaxAgeHours = $ClipboardCleanupMaxAgeHours
+    CleanupMaxFiles = $ClipboardCleanupMaxFiles
+  }
 }
 
-function Set-RequestLogger {
+$script:RequestHandlers = @{}
+$script:LifecycleHandlers = @()
+
+function Register-WindowsRuntimeRequestHandler {
   param(
+    [hashtable]$Handler
+  )
+
+  if ($null -eq $Handler) {
+    throw 'request handler cannot be null'
+  }
+
+  $kind = [string]$Handler.Kind
+  if ([string]::IsNullOrWhiteSpace($kind)) {
+    throw 'request handler kind is required'
+  }
+
+  if ($script:RequestHandlers.ContainsKey($kind)) {
+    throw "duplicate request handler kind: $kind"
+  }
+
+  if (-not ($Handler.Handle -is [scriptblock])) {
+    throw "request handler handle callback is required for kind: $kind"
+  }
+
+  $script:RequestHandlers[$kind] = $Handler
+}
+
+function Register-WindowsRuntimeLifecycleHandler {
+  param(
+    [hashtable]$Handler
+  )
+
+  if ($null -eq $Handler) {
+    throw 'lifecycle handler cannot be null'
+  }
+
+  if (-not ($Handler.OnStart -is [scriptblock]) -and -not ($Handler.OnHeartbeat -is [scriptblock])) {
+    throw 'lifecycle handler must define OnStart or OnHeartbeat'
+  }
+
+  $script:LifecycleHandlers += ,$Handler
+}
+
+function Get-WindowsRuntimeRequestKind {
+  param(
+    [object]$Payload
+  )
+
+  if ($null -ne $Payload -and $Payload.kind) {
+    return [string]$Payload.kind
+  }
+
+  return 'vscode_focus_or_open'
+}
+
+function Get-WindowsRuntimeRequestHandler {
+  param(
+    [string]$Kind
+  )
+
+  if ($script:RequestHandlers.ContainsKey($Kind)) {
+    return $script:RequestHandlers[$Kind]
+  }
+
+  return $null
+}
+
+function Invoke-WindowsRuntimeRequest {
+  param(
+    [object]$Payload,
     [string]$TraceId
   )
 
-  Initialize-StructuredLog `
-    -FilePath $DiagnosticsFile `
-    -Enabled $DiagnosticsEnabled `
-    -CategoryEnabled $DiagnosticsCategoryEnabled `
-    -Level $DiagnosticsLevel `
-    -Source 'windows-alt-o' `
-    -TraceId $TraceId `
-    -MaxBytes $DiagnosticsMaxBytes `
-    -MaxFiles $DiagnosticsMaxFiles
-}
-
-function Get-NowEpochMilliseconds {
-  return [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-}
-
-function Ensure-Directory {
-  param(
-    [string]$Path
-  )
-
-  if (-not [string]::IsNullOrWhiteSpace($Path)) {
-    $null = New-Item -ItemType Directory -Force -Path $Path
-  }
-}
-
-function Read-ClipboardListenerState {
-  if ([string]::IsNullOrWhiteSpace($ClipboardStatePath) -or -not (Test-Path -LiteralPath $ClipboardStatePath)) {
-    return $null
+  $kind = Get-WindowsRuntimeRequestKind -Payload $Payload
+  $handler = Get-WindowsRuntimeRequestHandler -Kind $kind
+  if ($null -eq $handler) {
+    throw "unknown request kind: $kind"
   }
 
+  $source = if ([string]::IsNullOrWhiteSpace([string]$handler.Source)) { 'windows-helper' } else { [string]$handler.Source }
+  Set-WindowsRuntimeRequestLogger -RuntimeContext $script:RuntimeContext -TraceId $TraceId -Source $source
   try {
-    $state = @{}
-    foreach ($line in Get-Content -LiteralPath $ClipboardStatePath -ErrorAction Stop) {
-      if ([string]::IsNullOrWhiteSpace($line)) {
-        continue
-      }
-
-      $parts = $line.Split('=', 2)
-      if (@($parts).Length -eq 2) {
-        $state[$parts[0]] = $parts[1]
-      }
-    }
-
-    if (@($state.Keys).Length -eq 0) {
-      return $null
-    }
-
-    return $state
-  } catch {
-    return $null
+    return & $handler.Handle $script:RuntimeContext $Payload $TraceId
+  } finally {
+    Set-WindowsRuntimeHelperLogger -RuntimeContext $script:RuntimeContext
   }
 }
 
-function Get-StandaloneClipboardListenerProcesses {
-  if ([string]::IsNullOrWhiteSpace($ClipboardListenerScriptPath)) {
-    return @()
-  }
-
-  return @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object {
-    if (-not $_.CommandLine) {
-      return $false
-    }
-
-    return $_.CommandLine.Contains("-File $ClipboardListenerScriptPath")
-  })
-}
-
-function Stop-StandaloneClipboardListenerProcesses {
-  $processes = @(Get-StandaloneClipboardListenerProcesses)
-  foreach ($process in $processes) {
-    try {
-      Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
-      Write-StructuredLog -Level 'info' -Category 'clipboard' -Message 'host stopped standalone clipboard listener process' -Fields @{
-        pid = $process.ProcessId
-        listener_script_path = $ClipboardListenerScriptPath
-      }
-    } catch {
-      Write-StructuredLog -Level 'warn' -Category 'clipboard' -Message 'host failed to stop standalone clipboard listener process' -Fields @{
-        pid = $process.ProcessId
-        listener_script_path = $ClipboardListenerScriptPath
-        error = $_.Exception.Message
-      }
-    }
-  }
-}
-
-function ClipboardListenerStateIsFresh {
+function Invoke-WindowsRuntimeLifecycleHook {
   param(
-    [hashtable]$State
+    [string]$HookName
   )
 
-  if ($null -eq $State) {
-    return $false
-  }
+  foreach ($handler in $script:LifecycleHandlers) {
+    $callback = $null
+    if ($handler.ContainsKey($HookName)) {
+      $callback = $handler[$HookName]
+    }
 
-  $heartbeatAtMs = 0
-  [void][long]::TryParse([string]$State.heartbeat_at_ms, [ref]$heartbeatAtMs)
-  if ($heartbeatAtMs -le 0) {
-    return $false
-  }
-
-  if ((Get-NowEpochMilliseconds) - $heartbeatAtMs -gt ($ClipboardHeartbeatTimeoutSeconds * 1000)) {
-    return $false
-  }
-
-  return $true
-}
-
-function Ensure-ClipboardListenerRunning {
-  if ([string]::IsNullOrWhiteSpace($ClipboardListenerScriptPath) -or -not (Test-Path -LiteralPath $ClipboardListenerScriptPath)) {
-    return
-  }
-
-  $state = Read-ClipboardListenerState
-  if (ClipboardListenerStateIsFresh -State $state) {
-    return
-  }
-  Stop-StandaloneClipboardListenerProcesses
-
-  $arguments = @(
-    '-NoProfile',
-    '-NonInteractive',
-    '-STA',
-    '-WindowStyle', 'Hidden',
-    '-ExecutionPolicy', 'Bypass',
-    '-File', $ClipboardListenerScriptPath
-  )
-
-  if (-not [string]::IsNullOrWhiteSpace($ClipboardWslDistro)) {
-    $arguments += @('-WslDistro', $ClipboardWslDistro)
-  }
-  if (-not [string]::IsNullOrWhiteSpace($ClipboardStatePath)) {
-    $arguments += @('-StatePath', $ClipboardStatePath)
-  }
-  if (-not [string]::IsNullOrWhiteSpace($ClipboardLogPath)) {
-    $arguments += @('-LogPath', $ClipboardLogPath)
-  }
-  if (-not [string]::IsNullOrWhiteSpace($ClipboardOutputDir)) {
-    $arguments += @('-OutputDir', $ClipboardOutputDir)
-  }
-  $arguments += @(
-    '-HeartbeatIntervalSeconds', [string]$ClipboardHeartbeatIntervalSeconds,
-    '-ImageReadRetryCount', [string]$ClipboardImageReadRetryCount,
-    '-ImageReadRetryDelayMs', [string]$ClipboardImageReadRetryDelayMs,
-    '-CleanupMaxAgeHours', [string]$ClipboardCleanupMaxAgeHours,
-    '-CleanupMaxFiles', [string]$ClipboardCleanupMaxFiles
-  )
-
-  $child = Start-Process -FilePath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -ArgumentList $arguments -PassThru
-  Write-StructuredLog -Level 'info' -Category 'clipboard' -Message 'host started clipboard listener' -Fields @{
-    child_pid = $child.Id
-    listener_script_path = $ClipboardListenerScriptPath
-    state_path = $ClipboardStatePath
+    if ($callback -is [scriptblock]) {
+      & $callback $script:RuntimeContext
+    }
   }
 }
 
@@ -229,14 +193,14 @@ function Write-HelperState {
   )
 
   $stateDir = Split-Path -Parent $StatePath
-  Ensure-Directory -Path $stateDir
+  Ensure-WindowsRuntimeDirectory -Path $stateDir
 
   $lines = @(
     'version=2',
     "ready=$Ready",
     "pid=$PID",
     "started_at_ms=$script:StartedAtMs",
-    "heartbeat_at_ms=$(Get-NowEpochMilliseconds)",
+    "heartbeat_at_ms=$(Get-WindowsRuntimeEpochMilliseconds)",
     "request_dir=$RequestDir",
     "last_error=$LastError"
   )
@@ -260,6 +224,8 @@ function Remove-RequestFile {
 function Process-PendingRequests {
   $requestFiles = @(Get-ChildItem -LiteralPath $RequestDir -Filter '*.json' -File -ErrorAction SilentlyContinue | Sort-Object Name)
   foreach ($requestFile in $requestFiles) {
+    $requestKind = 'vscode_focus_or_open'
+    $requestCategory = 'alt_o'
     try {
       $requestText = [System.IO.File]::ReadAllText($requestFile.FullName, [System.Text.Encoding]::UTF8)
       if ([string]::IsNullOrWhiteSpace($requestText)) {
@@ -269,9 +235,14 @@ function Process-PendingRequests {
 
       $payload = ConvertFrom-Json -InputObject $requestText
       $requestTraceId = if ($null -ne $payload -and $payload.trace_id) { [string]$payload.trace_id } else { $requestFile.BaseName }
-      $requestKind = if ($null -ne $payload -and $payload.kind) { [string]$payload.kind } else { 'vscode_focus_or_open' }
-      $requestCategory = if ($requestKind -eq 'chrome_focus_or_start') { 'chrome' } else { 'alt_o' }
-      $result = Invoke-HostRequest -Payload $payload
+      $requestKind = Get-WindowsRuntimeRequestKind -Payload $payload
+      $requestHandler = Get-WindowsRuntimeRequestHandler -Kind $requestKind
+      if ($null -eq $requestHandler) {
+        throw "unknown request kind: $requestKind"
+      }
+
+      $requestCategory = if ([string]::IsNullOrWhiteSpace([string]$requestHandler.Category)) { 'alt_o' } else { [string]$requestHandler.Category }
+      $result = Invoke-WindowsRuntimeRequest -Payload $payload -TraceId $requestTraceId
       Write-StructuredLog -Level 'info' -Category $requestCategory -Message 'helper processed request' -Fields @{
         trace_id = $requestTraceId
         request_path = $requestFile.FullName
@@ -281,110 +252,44 @@ function Process-PendingRequests {
       Remove-RequestFile -Path $requestFile.FullName
     } catch {
       Write-HelperState -Ready '1' -LastError $_.Exception.Message
-      $requestCategory = 'alt_o'
-      if ($requestFile.BaseName -match 'chrome') {
-        $requestCategory = 'chrome'
-      }
       Write-StructuredLog -Level 'error' -Category $requestCategory -Message 'helper request failed' -Fields @{
         request_path = $requestFile.FullName
+        kind = $requestKind
         error = $_.Exception.Message
       }
       Remove-RequestFile -Path $requestFile.FullName
-      Set-HelperLogger
+      Set-WindowsRuntimeHelperLogger -RuntimeContext $script:RuntimeContext
     }
   }
 }
 
-function Invoke-VscodeRequest {
-  param(
-    [object]$Payload
-  )
-
-  $traceId = ''
-  if ($null -ne $Payload -and $Payload.trace_id) {
-    $traceId = [string]$Payload.trace_id
-  }
-
-  Set-RequestLogger -TraceId $traceId
-
-  $codeArgs = @()
-  foreach ($item in @($Payload.code_command)) {
-    $codeArgs += [string]$item
-  }
-
-  $scriptPath = Join-Path (Split-Path -Parent $PSCommandPath) 'focus-or-open-vscode.ps1'
-  $result = & $scriptPath `
-    -RequestedDir ([string]$Payload.requested_dir) `
-    -Distro ([string]$Payload.distro) `
-    -CodeArg $codeArgs `
-    -TraceId $traceId `
-    -DiagnosticsEnabled $DiagnosticsEnabled `
-    -DiagnosticsCategoryEnabled $DiagnosticsCategoryEnabled `
-    -DiagnosticsLevel $DiagnosticsLevel `
-    -DiagnosticsFile $DiagnosticsFile `
-    -DiagnosticsMaxBytes $DiagnosticsMaxBytes `
-    -DiagnosticsMaxFiles $DiagnosticsMaxFiles `
-    -ReturnResult
-
-  Set-HelperLogger
-  return $result
+$pluginDir = Join-Path $script:HelperScriptRoot 'windows-runtime-helper\plugins'
+$pluginFiles = @(Get-ChildItem -LiteralPath $pluginDir -Filter '*.plugin.ps1' -File -ErrorAction Stop | Sort-Object Name)
+foreach ($pluginFile in $pluginFiles) {
+  . $pluginFile.FullName
 }
 
-function Invoke-ChromeRequest {
-  param(
-    [object]$Payload
-  )
+$script:StartedAtMs = Get-WindowsRuntimeEpochMilliseconds
+Set-WindowsRuntimeHelperLogger -RuntimeContext $script:RuntimeContext
 
-  $traceId = ''
-  if ($null -ne $Payload -and $Payload.trace_id) {
-    $traceId = [string]$Payload.trace_id
+$requestKinds = @($script:RequestHandlers.Keys | Sort-Object)
+$lifecycleNames = @($script:LifecycleHandlers | ForEach-Object {
+  if ([string]::IsNullOrWhiteSpace([string]$_.Name)) {
+    'unnamed'
+  } else {
+    [string]$_.Name
   }
-
-  $scriptPath = Join-Path (Split-Path -Parent $PSCommandPath) 'focus-or-start-debug-chrome.ps1'
-  $result = & $scriptPath `
-    -ChromePath ([string]$Payload.chrome_path) `
-    -RemoteDebuggingPort ([int]$Payload.remote_debugging_port) `
-    -UserDataDir ([string]$Payload.user_data_dir) `
-    -TraceId $traceId `
-    -DiagnosticsEnabled $DiagnosticsEnabled `
-    -DiagnosticsCategoryEnabled $DiagnosticsCategoryEnabled `
-    -DiagnosticsLevel $DiagnosticsLevel `
-    -DiagnosticsFile $DiagnosticsFile `
-    -DiagnosticsMaxBytes $DiagnosticsMaxBytes `
-    -DiagnosticsMaxFiles $DiagnosticsMaxFiles `
-    -ReturnResult
-
-  Set-HelperLogger
-  return $result
+})
+Write-StructuredLog -Level 'info' -Category 'alt_o' -Message 'helper plugins loaded' -Fields @{
+  request_kinds = ($requestKinds -join ',')
+  lifecycle_handlers = ($lifecycleNames -join ',')
 }
-
-function Invoke-HostRequest {
-  param(
-    [object]$Payload
-  )
-
-  $kind = if ($null -ne $Payload -and $Payload.kind) { [string]$Payload.kind } else { 'vscode_focus_or_open' }
-  switch ($kind) {
-    'vscode_focus_or_open' {
-      return Invoke-VscodeRequest -Payload $Payload
-    }
-    'chrome_focus_or_start' {
-      return Invoke-ChromeRequest -Payload $Payload
-    }
-    default {
-      throw "unknown request kind: $kind"
-    }
-  }
-}
-
-$script:StartedAtMs = Get-NowEpochMilliseconds
-Set-HelperLogger
 
 $watcher = $null
 $eventIds = @()
 try {
-  Ensure-Directory -Path (Split-Path -Parent $StatePath)
-  Ensure-Directory -Path $RequestDir
+  Ensure-WindowsRuntimeDirectory -Path (Split-Path -Parent $StatePath)
+  Ensure-WindowsRuntimeDirectory -Path $RequestDir
 
   $watcher = New-Object System.IO.FileSystemWatcher
   $watcher.Path = $RequestDir
@@ -407,19 +312,19 @@ try {
     request_dir = $RequestDir
     pid = $PID
   }
-  Ensure-ClipboardListenerRunning
+  Invoke-WindowsRuntimeLifecycleHook -HookName 'OnStart'
   Write-StructuredLog -Level 'info' -Category 'alt_o' -Message 'helper request directory watcher active' -Fields @{
     request_dir = $RequestDir
   }
 
-  $lastHeartbeatMs = Get-NowEpochMilliseconds
+  $lastHeartbeatMs = Get-WindowsRuntimeEpochMilliseconds
   Process-PendingRequests
   while ($true) {
-    $nowMs = Get-NowEpochMilliseconds
+    $nowMs = Get-WindowsRuntimeEpochMilliseconds
     if ($nowMs - $lastHeartbeatMs -ge $HeartbeatIntervalMs) {
       Write-HelperState -Ready '1'
       $lastHeartbeatMs = $nowMs
-      Ensure-ClipboardListenerRunning
+      Invoke-WindowsRuntimeLifecycleHook -HookName 'OnHeartbeat'
     }
 
     $timeoutSeconds = [Math]::Max([Math]::Ceiling(($HeartbeatIntervalMs - ([Math]::Max(0, ($nowMs - $lastHeartbeatMs)))) / 1000.0), 1)
