@@ -8,6 +8,28 @@ param(
 
   [string]$RequestDir = "$env:LOCALAPPDATA\wezterm-runtime-helper\requests",
 
+  [string]$ClipboardListenerScriptPath = '',
+
+  [string]$ClipboardStatePath = '',
+
+  [string]$ClipboardLogPath = '',
+
+  [string]$ClipboardOutputDir = '',
+
+  [string]$ClipboardWslDistro = '',
+
+  [int]$ClipboardHeartbeatIntervalSeconds = 1,
+
+  [int]$ClipboardHeartbeatTimeoutSeconds = 3,
+
+  [int]$ClipboardImageReadRetryCount = 12,
+
+  [int]$ClipboardImageReadRetryDelayMs = 100,
+
+  [int]$ClipboardCleanupMaxAgeHours = 48,
+
+  [int]$ClipboardCleanupMaxFiles = 32,
+
   [int]$HeartbeatTimeoutSeconds = 5,
 
   [int]$HeartbeatIntervalMs = 1000,
@@ -183,6 +205,17 @@ try {
     '-Port', [string]$Port,
     '-StatePath', $StatePath,
     '-RequestDir', $RequestDir,
+    '-ClipboardListenerScriptPath', $ClipboardListenerScriptPath,
+    '-ClipboardStatePath', $ClipboardStatePath,
+    '-ClipboardLogPath', $ClipboardLogPath,
+    '-ClipboardOutputDir', $ClipboardOutputDir,
+    '-ClipboardWslDistro', $ClipboardWslDistro,
+    '-ClipboardHeartbeatIntervalSeconds', [string]$ClipboardHeartbeatIntervalSeconds,
+    '-ClipboardHeartbeatTimeoutSeconds', [string]$ClipboardHeartbeatTimeoutSeconds,
+    '-ClipboardImageReadRetryCount', [string]$ClipboardImageReadRetryCount,
+    '-ClipboardImageReadRetryDelayMs', [string]$ClipboardImageReadRetryDelayMs,
+    '-ClipboardCleanupMaxAgeHours', [string]$ClipboardCleanupMaxAgeHours,
+    '-ClipboardCleanupMaxFiles', [string]$ClipboardCleanupMaxFiles,
     '-HeartbeatIntervalMs', [string]$HeartbeatIntervalMs,
     '-PollIntervalMs', [string]$PollIntervalMs,
     '-DiagnosticsEnabled', $DiagnosticsEnabled,

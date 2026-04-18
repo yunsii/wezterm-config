@@ -139,7 +139,7 @@ enqueue_helper_request() {
     code_part+="$(json_escape "$code_arg")"
   done
 
-  request_body="{\"request_id\":$(json_escape "$trace_id"),\"requested_dir\":$(json_escape "$target_dir"),\"distro\":$(json_escape "$WSL_DISTRO_NAME"),\"trace_id\":$(json_escape "$trace_id"),\"code_command\":[${code_part}]}"
+  request_body="{\"kind\":\"vscode_focus_or_open\",\"requested_dir\":$(json_escape "$target_dir"),\"distro\":$(json_escape "$WSL_DISTRO_NAME"),\"trace_id\":$(json_escape "$trace_id"),\"code_command\":[${code_part}]}"
   printf '%s' "$request_body" > "$request_path"
 
   for (( wait_i=0; wait_i<20; wait_i+=1 )); do
@@ -175,7 +175,8 @@ code_command=()
 tmux_window_id=""
 window_root=""
 start_ms="$(runtime_log_now_ms)"
-trace_id="$(runtime_log_current_trace_id)"
+trace_id="alt_o-$(runtime_log_generate_trace_id)"
+export WEZTERM_RUNTIME_TRACE_ID="$trace_id"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

@@ -158,6 +158,7 @@ Reclaim only removes skill-managed linked worktrees under the repository parent'
 - Current runtime categories include `alt_o`, `workspace`, `worktree`, `managed_command`, `command_panel`, `task`, `provider`, and `sync`.
 - In `hybrid-wsl`, the Windows-side `Alt+o` launcher now writes structured `alt_o` lines into the same WezTerm diagnostics file, reusing the same `trace_id` and rotation settings as the Lua-side diagnostics path; those lines include millisecond timestamps plus per-phase and total `duration_ms` fields for launch-path profiling.
 - In `hybrid-wsl`, the Windows runtime helper keeps a heartbeat file at `%LOCALAPPDATA%\wezterm-runtime-helper\state.env` and consumes queued request files from `%LOCALAPPDATA%\wezterm-runtime-helper\requests\`; when `Alt+o` is expected to use the helper path, check that heartbeat file first to confirm the helper is alive before reading the shared diagnostics log.
+- For a repeatable live smoke test of the Windows runtime host, run [`scripts/dev/check-windows-runtime-host.sh`](../../scripts/dev/check-windows-runtime-host.sh) from WSL; it verifies helper health plus the current `Alt+o`, `Alt+b`, and clipboard-listener control paths against the synced Windows runtime.
 
 ## Hybrid WSL Agent Startup Measurement
 

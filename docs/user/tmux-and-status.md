@@ -23,7 +23,7 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 - Outside git worktrees, `Alt+o` still opens the current directory.
 - In managed workspaces, `Alt+o` is forwarded directly to tmux so the active tmux window resolves the live worktree path first and, in `hybrid-wsl`, then uses the same Windows helper/front-focus path as the `default` workspace instead of `code .`.
 - If WezTerm only sees the WSL host fallback path such as `/C:/Users/...` in `hybrid-wsl`, `Alt+o` also forwards to the pane instead of using the stale host-side path.
-- In `hybrid-wsl`, `Alt+b` uses the synced Windows PowerShell launcher for the debug Chrome profile.
+- In `hybrid-wsl`, `Alt+b` uses the same Windows helper/front-focus path as `Alt+o` for the debug Chrome profile, with the direct launcher kept only as fallback.
 - In `posix-local`, `Alt+b` uses the synced shell launcher at `wezterm-x/scripts/focus-or-start-debug-chrome.sh`.
 - `Ctrl+k` opens a centered tmux popup command panel whenever the current pane is running tmux; repo-shared commands appear alongside any machine-local entries from `wezterm-x/local/command-panel.sh`.
 - The shared `hybrid-wsl` command panel entry force-closes all VS Code windows on the Windows host with `taskkill /IM code.exe /F`.

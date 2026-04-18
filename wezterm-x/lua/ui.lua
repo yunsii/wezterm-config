@@ -184,108 +184,45 @@ local function vscode_integration(constants)
   return constants.integrations and constants.integrations.vscode or {}
 end
 
-local function clipboard_image_listener_command(wezterm, constants)
+local function windows_notification_command(constants, title, message)
   local runtime_mode = constants.runtime_mode or 'hybrid-wsl'
   if runtime_mode ~= 'hybrid-wsl' or constants.host_os ~= 'windows' then
-    return nil, 'unsupported_runtime'
+    return nil
   end
 
-  local integration = clipboard_image_integration(constants)
+  local integration = vscode_integration(constants)
   local runtime_dir = integration.runtime_dir or (wezterm.config_dir .. '\\.wezterm-x')
-  local listener_script = integration.listener_script or 'scripts\\clipboard-image-listener.ps1'
-  local command = {
+  return {
     integration.powershell or 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
     '-NoProfile',
     '-NonInteractive',
-    '-STA',
     '-WindowStyle',
     'Hidden',
     '-ExecutionPolicy',
     'Bypass',
     '-File',
-    runtime_dir .. '\\' .. listener_script,
+    runtime_dir .. '\\scripts\\show-windows-notification.ps1',
+    '-Title',
+    title,
+    '-Message',
+    message,
   }
-
-  local distro = wsl_distro_from_domain(constants.default_domain)
-  if distro and distro ~= '' then
-    command[#command + 1] = '-WslDistro'
-    command[#command + 1] = distro
-  end
-
-  if integration.state_path and integration.state_path ~= '' then
-    command[#command + 1] = '-StatePath'
-    command[#command + 1] = integration.state_path
-  end
-
-  if integration.log_path and integration.log_path ~= '' then
-    command[#command + 1] = '-LogPath'
-    command[#command + 1] = integration.log_path
-  end
-
-  if integration.output_dir and integration.output_dir ~= '' then
-    command[#command + 1] = '-OutputDir'
-    command[#command + 1] = integration.output_dir
-  end
-
-  if integration.heartbeat_interval_seconds then
-    command[#command + 1] = '-HeartbeatIntervalSeconds'
-    command[#command + 1] = tostring(integration.heartbeat_interval_seconds)
-  end
-
-  if integration.image_read_retry_count then
-    command[#command + 1] = '-ImageReadRetryCount'
-    command[#command + 1] = tostring(integration.image_read_retry_count)
-  end
-
-  if integration.image_read_retry_delay_ms then
-    command[#command + 1] = '-ImageReadRetryDelayMs'
-    command[#command + 1] = tostring(integration.image_read_retry_delay_ms)
-  end
-
-  if integration.cleanup_max_age_hours then
-    command[#command + 1] = '-CleanupMaxAgeHours'
-    command[#command + 1] = tostring(integration.cleanup_max_age_hours)
-  end
-
-  if integration.cleanup_max_files then
-    command[#command + 1] = '-CleanupMaxFiles'
-    command[#command + 1] = tostring(integration.cleanup_max_files)
-  end
-
-  return command
 end
 
-local function ensure_clipboard_image_listener_running(wezterm, constants, logger, reason, force)
-  local command, command_reason = clipboard_image_listener_command(wezterm, constants)
+local function show_windows_notification(wezterm, constants, logger, category, trace_id, title, message)
+  local command = windows_notification_command(constants, title, message)
   if not command then
-    return false, command_reason
+    return
   end
-
-  local integration = clipboard_image_integration(constants)
-  local restart_interval = tonumber(integration.restart_interval_seconds or 15) or 15
-  local now_s = os.time()
-
-  if not force and clipboard_listener_state.last_start_attempt_s > 0 then
-    if now_s - clipboard_listener_state.last_start_attempt_s < restart_interval then
-      return false, 'throttled'
-    end
-  end
-
-  clipboard_listener_state.last_start_attempt_s = now_s
-  logger.info('clipboard', 'ensuring clipboard image listener is running', {
-    reason = reason,
-  })
 
   local ok, err = pcall(wezterm.background_child_process, command)
   if not ok then
-    logger.error('clipboard', 'failed to start clipboard image listener', {
+    logger.warn(category, 'failed to show windows notification', merge_fields(trace_id, {
       error = err,
-      reason = reason,
-    })
-    return false, 'spawn_failed'
+      title = title,
+      message = message,
+    }))
   end
-
-  return true, nil
 end
 
 local function vscode_helper_command(wezterm, constants)
@@ -299,6 +236,8 @@ local function vscode_helper_command(wezterm, constants)
   local helper_script = integration.helper_script or 'scripts\\ensure-windows-runtime-helper.ps1'
   local helper_worker_script = integration.helper_worker_script or 'scripts\\windows-runtime-helper.ps1'
   local diagnostics = constants.diagnostics and constants.diagnostics.wezterm or {}
+  local clipboard = clipboard_image_integration(constants)
+  local helper_category_enabled = diagnostics_capture_enabled(constants, 'alt_o') or diagnostics_capture_enabled(constants, 'chrome') or diagnostics_capture_enabled(constants, 'clipboard')
 
   return {
     integration.powershell or 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
@@ -318,6 +257,26 @@ local function vscode_helper_command(wezterm, constants)
     integration.helper_state_path or '',
     '-RequestDir',
     integration.helper_request_dir or integration.helper_request_path or '',
+    '-ClipboardListenerScriptPath',
+    runtime_dir .. '\\' .. (clipboard.listener_script or 'scripts\\clipboard-image-listener.ps1'),
+    '-ClipboardStatePath',
+    clipboard.state_path or '',
+    '-ClipboardLogPath',
+    clipboard.log_path or '',
+    '-ClipboardOutputDir',
+    clipboard.output_dir or '',
+    '-ClipboardWslDistro',
+    wsl_distro_from_domain(constants.default_domain) or '',
+    '-ClipboardHeartbeatIntervalSeconds',
+    tostring(clipboard.heartbeat_interval_seconds or 1),
+    '-ClipboardImageReadRetryCount',
+    tostring(clipboard.image_read_retry_count or 12),
+    '-ClipboardImageReadRetryDelayMs',
+    tostring(clipboard.image_read_retry_delay_ms or 100),
+    '-ClipboardCleanupMaxAgeHours',
+    tostring(clipboard.cleanup_max_age_hours or 48),
+    '-ClipboardCleanupMaxFiles',
+    tostring(clipboard.cleanup_max_files or 32),
     '-HeartbeatTimeoutSeconds',
     tostring(integration.helper_heartbeat_timeout_seconds or 5),
     '-HeartbeatIntervalMs',
@@ -327,7 +286,7 @@ local function vscode_helper_command(wezterm, constants)
     '-DiagnosticsEnabled',
     diagnostics.enabled == true and '1' or '0',
     '-DiagnosticsCategoryEnabled',
-    diagnostics_capture_enabled(constants, 'alt_o') and '1' or '0',
+    helper_category_enabled and '1' or '0',
     '-DiagnosticsLevel',
     diagnostics.level or 'info',
     '-DiagnosticsFile',
@@ -441,7 +400,7 @@ local function vscode_helper_state_is_fresh(helper_state, constants)
   return true, nil
 end
 
-local function send_alt_o_request_via_helper(wezterm, helpers, constants, logger, trace_id, cwd, distro, code_command)
+local function write_helper_request(wezterm, helpers, constants, logger, trace_id, category, request_body_factory)
   local integration = vscode_integration(constants)
   local helper_state, helper_state_reason = read_vscode_helper_state(helpers, constants, logger, trace_id)
   local helper_ready = false
@@ -481,29 +440,11 @@ local function send_alt_o_request_via_helper(wezterm, helpers, constants, logger
   end
   request_dir = request_dir:gsub('[\\/]+$', '')
 
-  local request_id = trace_id or tostring(os.time())
-  local request_path = request_dir .. '\\' .. request_id .. '.json'
+  local request_trace_id = trace_id or tostring(os.time())
+  local request_path = request_dir .. '\\' .. request_trace_id .. '.json'
+  local request_body = request_body_factory(request_trace_id)
 
-  local body_parts = {
-    '{',
-    '"request_id":', json_escape(request_id), ',',
-    '"requested_dir":', json_escape(cwd), ',',
-    '"distro":', json_escape(distro), ',',
-    '"trace_id":', json_escape(trace_id or ''), ',',
-    '"code_command":[',
-  }
-
-  for index, part in ipairs(code_command or {}) do
-    if index > 1 then
-      body_parts[#body_parts + 1] = ','
-    end
-    body_parts[#body_parts + 1] = json_escape(part)
-  end
-
-  body_parts[#body_parts + 1] = ']}'
-  local request_body = table.concat(body_parts)
-
-  logger.info('alt_o', 'sending Alt+o request via windows runtime helper', merge_fields(trace_id, {
+  logger.info(category, 'sending request via windows runtime helper', merge_fields(trace_id, {
     request_dir = request_dir,
     request_path = request_path,
     ensure_reason = ensure_reason or helper_ready_reason or 'ready',
@@ -515,13 +456,13 @@ local function send_alt_o_request_via_helper(wezterm, helpers, constants, logger
     helper_state = read_vscode_helper_state(helpers, constants, logger, trace_id)
     if helper_state and helper_state.request_dir and helper_state.request_dir ~= '' then
       request_dir = helper_state.request_dir:gsub('[\\/]+$', '')
-      request_path = request_dir .. '\\' .. request_id .. '.json'
+      request_path = request_dir .. '\\' .. request_trace_id .. '.json'
     end
     ok, err = write_text_file_atomic(request_path, request_body)
   end
 
   if not ok then
-    logger.warn('alt_o', 'failed to enqueue Alt+o request for windows runtime helper', merge_fields(trace_id, {
+    logger.warn(category, 'failed to enqueue request for windows runtime helper', merge_fields(trace_id, {
       error = err,
       request_path = request_path,
     }))
@@ -529,6 +470,43 @@ local function send_alt_o_request_via_helper(wezterm, helpers, constants, logger
   end
 
   return true, nil
+end
+
+local function send_alt_o_request_via_helper(wezterm, helpers, constants, logger, trace_id, cwd, distro, code_command)
+  return write_helper_request(wezterm, helpers, constants, logger, trace_id, 'alt_o', function(request_trace_id)
+    local body_parts = {
+      '{',
+      '"kind":"vscode_focus_or_open",',
+      '"requested_dir":', json_escape(cwd), ',',
+      '"distro":', json_escape(distro), ',',
+      '"trace_id":', json_escape(request_trace_id), ',',
+      '"code_command":[',
+    }
+
+    for index, part in ipairs(code_command or {}) do
+      if index > 1 then
+        body_parts[#body_parts + 1] = ','
+      end
+      body_parts[#body_parts + 1] = json_escape(part)
+    end
+
+    body_parts[#body_parts + 1] = ']}'
+    return table.concat(body_parts)
+  end)
+end
+
+local function send_chrome_request_via_helper(wezterm, helpers, constants, logger, trace_id, chrome)
+  return write_helper_request(wezterm, helpers, constants, logger, trace_id, 'chrome', function(request_trace_id)
+    return table.concat {
+      '{',
+      '"kind":"chrome_focus_or_start",',
+      '"trace_id":', json_escape(request_trace_id), ',',
+      '"chrome_path":', json_escape(chrome.executable), ',',
+      '"remote_debugging_port":', tostring(chrome.remote_debugging_port), ',',
+      '"user_data_dir":', json_escape(chrome.user_data_dir),
+      '}',
+    }
+  end)
 end
 
 local function read_cached_clipboard_image_state(helpers, constants, logger, trace_id)
@@ -608,14 +586,14 @@ local function paste_clipboard_or_image_path(wezterm, window, pane, constants, l
 
   local cached_state, cache_reason = read_cached_clipboard_image_state(helpers, constants, logger, trace_id)
   if not cached_state then
-    ensure_clipboard_image_listener_running(wezterm, constants, logger, 'cache-' .. cache_reason, false)
+    ensure_vscode_helper_running(wezterm, constants, logger, 'clipboard-cache-' .. cache_reason, false)
     window:perform_action(wezterm.action.PasteFrom 'Clipboard', pane)
     return
   end
 
   local cache_is_fresh, freshness_reason = clipboard_image_cache_is_fresh(cached_state, constants)
   if not cache_is_fresh then
-    ensure_clipboard_image_listener_running(wezterm, constants, logger, 'stale-' .. freshness_reason, false)
+    ensure_vscode_helper_running(wezterm, constants, logger, 'clipboard-stale-' .. freshness_reason, false)
     window:perform_action(wezterm.action.PasteFrom 'Clipboard', pane)
     return
   end
@@ -636,7 +614,7 @@ local function paste_clipboard_or_image_path(wezterm, window, pane, constants, l
       distro = distro,
       state_path = cached_state.__state_path,
     }))
-    ensure_clipboard_image_listener_running(wezterm, constants, logger, 'missing-image-path', false)
+    ensure_vscode_helper_running(wezterm, constants, logger, 'clipboard-missing-image-path', false)
     window:perform_action(wezterm.action.PasteFrom 'Clipboard', pane)
     return
   end
@@ -648,7 +626,7 @@ local function paste_clipboard_or_image_path(wezterm, window, pane, constants, l
       image_path = image_path,
       windows_path = cached_state.windows_path,
     }))
-    ensure_clipboard_image_listener_running(wezterm, constants, logger, 'missing-image-file', false)
+    ensure_vscode_helper_running(wezterm, constants, logger, 'clipboard-missing-image-file', false)
     window:perform_action(wezterm.action.PasteFrom 'Clipboard', pane)
     return
   end
@@ -670,6 +648,7 @@ local function open_current_dir_in_vscode(wezterm, window, pane, constants, logg
   local workspace_name = active_workspace_name(window)
   local runtime_mode = constants.runtime_mode or 'hybrid-wsl'
   local integration = constants.integrations and constants.integrations.vscode or {}
+  local command
 
   if not cwd or cwd == '/' then
     logger.warn('alt_o', 'current pane working directory is unavailable', merge_fields(trace_id, {
@@ -681,7 +660,6 @@ local function open_current_dir_in_vscode(wezterm, window, pane, constants, logg
     return
   end
 
-  local command
   if runtime_mode == 'hybrid-wsl' then
     local distro = wsl_distro_from_domain(domain_name) or wsl_distro_from_domain(constants.default_domain)
     if not distro then
@@ -703,47 +681,14 @@ local function open_current_dir_in_vscode(wezterm, window, pane, constants, logg
       return
     end
 
-    logger.info('alt_o', 'falling back to direct windows Alt+o launcher', merge_fields(trace_id, {
+    logger.error('alt_o', 'windows helper Alt+o request failed', merge_fields(trace_id, {
       reason = helper_reason,
       cwd = cwd,
       distro = distro,
     }))
-
-    local runtime_dir = integration.runtime_dir or (wezterm.config_dir .. '\\.wezterm-x')
-    local script_path = integration.script or 'scripts\\focus-or-open-vscode.ps1'
-    local diagnostics = constants.diagnostics and constants.diagnostics.wezterm or {}
-    command = {
-      integration.powershell or 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-File',
-      runtime_dir .. '\\' .. script_path,
-      '-RequestedDir',
-      cwd,
-      '-Distro',
-      distro,
-      '-TraceId',
-      trace_id or '',
-      '-DiagnosticsEnabled',
-      diagnostics.enabled == true and '1' or '0',
-      '-DiagnosticsCategoryEnabled',
-      diagnostics_capture_enabled(constants, 'alt_o') and '1' or '0',
-      '-DiagnosticsLevel',
-      diagnostics.level or 'info',
-      '-DiagnosticsFile',
-      diagnostics.file or '',
-      '-DiagnosticsMaxBytes',
-      tostring(diagnostics.max_bytes or 0),
-      '-DiagnosticsMaxFiles',
-      tostring(diagnostics.max_files or 0),
-    }
-
-    for _, part in ipairs(hybrid_command) do
-      command[#command + 1] = '-CodeArg'
-      command[#command + 1] = part
-    end
+    show_windows_notification(wezterm, constants, logger, 'alt_o', trace_id, 'WezTerm Alt+o', 'Windows helper failed to focus VS Code. Check wezterm diagnostics.')
+    window:toast_notification('WezTerm', 'Alt+o failed. Check WezTerm logs.', nil, 3000)
+    return
   else
     local posix_command = copy_args(integration.posix_command)
     if not posix_command or #posix_command == 0 then
@@ -781,7 +726,7 @@ local function open_current_dir_in_vscode(wezterm, window, pane, constants, logg
   end
 end
 
-local function open_debug_chrome(wezterm, window, constants, logger, trace_id)
+local function open_debug_chrome(wezterm, window, constants, logger, trace_id, helpers)
   local chrome = constants.chrome_debug_browser or {}
   local runtime_mode = constants.runtime_mode or 'hybrid-wsl'
   local integration = constants.integrations and constants.integrations.chrome_debug or {}
@@ -796,25 +741,20 @@ local function open_debug_chrome(wezterm, window, constants, logger, trace_id)
   end
 
   if runtime_mode == 'hybrid-wsl' then
-    local runtime_dir = integration.runtime_dir or (wezterm.config_dir .. '\\.wezterm-x')
-    local script_path = integration.script or 'scripts\\focus-or-start-debug-chrome.ps1'
-    command = {
-      integration.cmd or 'cmd.exe',
-      '/c',
-      integration.powershell or 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-File',
-      runtime_dir .. '\\' .. script_path,
-      '-ChromePath',
-      chrome.executable,
-      '-RemoteDebuggingPort',
-      tostring(chrome.remote_debugging_port),
-      '-UserDataDir',
-      chrome.user_data_dir,
-    }
+    local helper_sent, helper_reason = send_chrome_request_via_helper(wezterm, helpers, constants, logger, trace_id, chrome)
+    if helper_sent then
+      return
+    end
+
+    logger.error('chrome', 'windows helper Alt+b request failed', merge_fields(trace_id, {
+      reason = helper_reason,
+      runtime_mode = runtime_mode,
+      port = chrome.remote_debugging_port,
+      user_data_dir = chrome.user_data_dir,
+    }))
+    show_windows_notification(wezterm, constants, logger, 'chrome', trace_id, 'WezTerm Alt+b', 'Windows helper failed to focus debug Chrome. Check wezterm diagnostics.')
+    window:toast_notification('WezTerm', 'Alt+b failed. Check WezTerm logs.', nil, 3000)
+    return
   else
     local runtime_dir = integration.posix_runtime_dir or (wezterm.config_dir .. '/.wezterm-x')
     local script_path = integration.posix_script or 'scripts/focus-or-start-debug-chrome.sh'
@@ -857,7 +797,7 @@ function M.apply(opts)
   }
 
   if wezterm.gui then
-    ensure_clipboard_image_listener_running(wezterm, constants, logger, 'config-load', false)
+    ensure_vscode_helper_running(wezterm, constants, logger, 'config-load', false)
   end
 
   config.font = constants.fonts.terminal
@@ -1021,7 +961,7 @@ function M.apply(opts)
       mods = 'ALT',
       action = wezterm.action_callback(function(window, pane)
         local trace_id = logger.trace_id('chrome')
-        open_debug_chrome(wezterm, window, constants, logger, trace_id)
+        open_debug_chrome(wezterm, window, constants, logger, trace_id, helpers)
       end),
     },
     {
