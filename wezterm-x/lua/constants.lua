@@ -324,7 +324,10 @@ end
 local local_constants = helpers.load_optional_table(join_path(runtime_dir, 'local', 'constants.lua')) or {}
 local shared_env = helpers.load_optional_env_file(join_path(runtime_dir, 'local', 'shared.env')) or {}
 local repo_root_override = read_repo_root_override()
-local repo_worktree_task_env = repo_root_override and helpers.load_optional_env_file(join_path(repo_root_override, '.worktree-task', 'config.env')) or {}
+local repo_worktree_task_env = repo_root_override and (
+  helpers.load_optional_env_file(join_path(repo_root_override, 'config', 'worktree-task.env'))
+  or helpers.load_optional_env_file(join_path(repo_root_override, '.worktree-task', 'config.env'))
+) or {}
 local user_worktree_task_env = helpers.load_optional_env_file(default_worktree_task_user_config_path() or '') or {}
 local repo_managed_cli_env = parse_managed_cli_env(repo_worktree_task_env)
 local user_managed_cli_env = parse_managed_cli_env(user_worktree_task_env)

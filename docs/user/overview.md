@@ -45,7 +45,7 @@ The terminal font uses a platform-aware fallback chain defined in `default_termi
 - `wezterm-x/local.example/command-panel.sh`: tracked template for private machine-local `Ctrl+k` command panel items
 - `wezterm-x/local.example/shared.env`: tracked template for simple shared scalar values used by both Lua and shell runtime code
 - `wezterm-x/local/`: gitignored machine-local overrides that are still copied by the sync skill
-- `.worktree-task/config.env`: tracked repo profile for the self-contained worktree-task skill, including the explicit `wezterm-config` repo pointer used to collect shared task-launch conventions
+- `config/worktree-task.env`: tracked repo profile for the self-contained worktree-task skill, including the explicit `wezterm-config` repo pointer used to collect shared task-launch conventions; legacy `.worktree-task/config.env` remains a compatibility fallback
 - `wezterm-x/lua/`: WezTerm Lua modules synced under the target home directory's `.wezterm-x`
 - `skills/wezterm-runtime-sync/`: agent skill and scripts that own runtime sync and prompt regression checks
 - `skills/worktree-task/`: agent skill, core libraries, and built-in providers for linked task worktrees

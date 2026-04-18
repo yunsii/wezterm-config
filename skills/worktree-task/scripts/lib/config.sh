@@ -34,11 +34,48 @@ wt_config_set_defaults() {
   WT_PROVIDER_AGENT_PROFILE_CODEX_PROMPT_FLAG=""
 
   WT_CONFIG_USER_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/worktree-task/config.env"
-  WT_CONFIG_REPO_FILE="$WT_MAIN_WORKTREE_ROOT/.worktree-task/config.env"
+  WT_CONFIG_REPO_FILE="$(wt_config_resolve_repo_profile_file "$WT_MAIN_WORKTREE_ROOT")"
   WEZTERM_SHARED_ENV_FILE=""
   WEZTERM_CONFIG_REPO="${WEZTERM_CONFIG_REPO:-${WT_CONFIG_WEZTERM_REPO:-}}"
   WEZTERM_CONFIG_REPO_ROOT=""
   WEZTERM_CONFIG_REPO_FILE=""
+}
+
+wt_config_repo_profile_preferred_path() {
+  local repo_root="${1:-}"
+  [[ -n "$repo_root" ]] || return 1
+  printf '%s\n' "$repo_root/config/worktree-task.env"
+}
+
+wt_config_repo_profile_legacy_path() {
+  local repo_root="${1:-}"
+  [[ -n "$repo_root" ]] || return 1
+  printf '%s\n' "$repo_root/.worktree-task/config.env"
+}
+
+wt_config_resolve_repo_profile_file() {
+  local repo_root="${1:-}"
+  local preferred=""
+  local legacy=""
+
+  [[ -n "$repo_root" ]] || return 1
+
+  preferred="$(wt_config_repo_profile_preferred_path "$repo_root")"
+  legacy="$(wt_config_repo_profile_legacy_path "$repo_root")"
+
+  if [[ -f "$preferred" ]]; then
+    printf '%s\n' "$preferred"
+  elif [[ -f "$legacy" ]]; then
+    printf '%s\n' "$legacy"
+  else
+    printf '%s\n' "$preferred"
+  fi
+}
+
+wt_config_has_repo_profile_file() {
+  local repo_root="${1:-}"
+  [[ -n "$repo_root" ]] || return 1
+  [[ -f "$(wt_config_repo_profile_preferred_path "$repo_root")" || -f "$(wt_config_repo_profile_legacy_path "$repo_root")" ]]
 }
 
 wt_config_parse_value() {
@@ -63,7 +100,7 @@ wt_config_is_wezterm_repo_root() {
 wt_config_is_wezterm_profile_repo_root() {
   local repo_root="${1:-}"
   wt_config_is_wezterm_repo_root "$repo_root" || return 1
-  [[ -f "$repo_root/.worktree-task/config.env" ]]
+  wt_config_has_repo_profile_file "$repo_root"
 }
 
 wt_config_apply_setting() {
@@ -120,6 +157,10 @@ wt_config_base_dir_for_file() {
     dirname "$parent_dir"
     return 0
   fi
+  if [[ "$(basename "$parent_dir")" == "config" && "$(basename "$file")" == "worktree-task.env" ]]; then
+    dirname "$parent_dir"
+    return 0
+  fi
 
   printf '%s\n' "$parent_dir"
 }
@@ -163,7 +204,7 @@ wt_config_validate_wezterm_repo_root() {
   local repo_root="${1:?missing repo root}"
 
   [[ -d "$repo_root" ]] || wt_die "wezterm config repo does not exist: $repo_root"
-  wt_config_is_wezterm_profile_repo_root "$repo_root" || wt_die "wezterm config repo is missing wezterm.lua, wezterm-x, or .worktree-task/config.env: $repo_root"
+  wt_config_is_wezterm_profile_repo_root "$repo_root" || wt_die "wezterm config repo is missing wezterm.lua, wezterm-x, or config/worktree-task.env (.worktree-task/config.env legacy): $repo_root"
 }
 
 wt_config_resolve_wezterm_repo_root() {
@@ -243,9 +284,9 @@ wt_config_discover_wezterm_repo() {
   fi
 
   if [[ -n "$WEZTERM_CONFIG_REPO_ROOT" ]]; then
-    WEZTERM_CONFIG_REPO_FILE="$WEZTERM_CONFIG_REPO_ROOT/.worktree-task/config.env"
+    WEZTERM_CONFIG_REPO_FILE="$(wt_config_resolve_repo_profile_file "$WEZTERM_CONFIG_REPO_ROOT")"
     WEZTERM_SHARED_ENV_FILE="$WEZTERM_CONFIG_REPO_ROOT/wezterm-x/local/shared.env"
-    [[ -f "$WEZTERM_CONFIG_REPO_FILE" ]] || wt_die "wezterm config repo is missing .worktree-task/config.env: $WEZTERM_CONFIG_REPO_ROOT"
+    [[ -f "$WEZTERM_CONFIG_REPO_FILE" ]] || wt_die "wezterm config repo is missing config/worktree-task.env (.worktree-task/config.env legacy): $WEZTERM_CONFIG_REPO_ROOT"
     return 0
   fi
 

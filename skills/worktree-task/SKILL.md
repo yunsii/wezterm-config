@@ -71,7 +71,7 @@ Useful options:
 - Keep the cleaned-up task prompt concise and action-oriented. Include acceptance criteria or constraints only when they materially affect the implementation.
 - Do not ask the user to type into an interactive shell prompt. Pass the prompt through stdin or a prompt file.
 - The script does not archive task prompts under the repository. Runtime launch uses a temporary prompt file only long enough for the new tmux pane to start.
-- The skill is self-contained. Repo-specific behavior should come from tracked config such as `.worktree-task/config.env`, not from hard-coded relative paths into the target repository.
+- The skill is self-contained. Repo-specific behavior should come from tracked config such as `config/worktree-task.env` (legacy `.worktree-task/config.env` still works), not from hard-coded relative paths into the target repository.
 - Set `WEZTERM_CONFIG_REPO` when you want the installed skill to reuse a tracked `wezterm-config` repo or a derived repo as the source of shared worktree-task conventions.
 - Config collection now follows the tracked `wezterm-config` repo profile first, then the user override config, then the target repo override config.
 - Relative repo-managed paths such as `WT_PROVIDER_TMUX_CONFIG_FILE=tmux.conf` resolve against the configured `wezterm-config` repo, not against the target task repository.
@@ -81,8 +81,8 @@ Useful options:
 - By default reclaim refuses to remove a dirty worktree. Require `--force` before discarding local changes.
 - Delete the task branch only when it is already merged into the primary worktree `HEAD`; otherwise keep it and report that clearly.
 - The built-in `tmux-agent` provider derives session reuse, existing task-window discovery, and reclaim cleanup from live git context instead of stored tmux worktree metadata.
-- Configure the built-in tmux agent launcher with `WT_PROVIDER_AGENT_COMMAND`, `WT_PROVIDER_AGENT_COMMAND_LIGHT`, `WT_PROVIDER_AGENT_COMMAND_DARK`, and optional `WT_PROVIDER_AGENT_PROMPT_FLAG` in `.worktree-task/config.env` or the user config override file.
-- Repos that are themselves a `wezterm-config` repo, or a derived repo that carries the same conventions, should track `WEZTERM_CONFIG_REPO=.` in `.worktree-task/config.env`.
+- Configure the built-in tmux agent launcher with `WT_PROVIDER_AGENT_COMMAND`, `WT_PROVIDER_AGENT_COMMAND_LIGHT`, `WT_PROVIDER_AGENT_COMMAND_DARK`, and optional `WT_PROVIDER_AGENT_PROMPT_FLAG` in `config/worktree-task.env` or the user config override file.
+- Repos that are themselves a `wezterm-config` repo, or a derived repo that carries the same conventions, should track `WEZTERM_CONFIG_REPO=.` in `config/worktree-task.env`.
 - Built-in providers currently include `none` and `tmux-agent`. External providers can be selected by absolute path or `custom:name` when discoverable through `WT_PROVIDER_SEARCH_PATHS`.
 
 ## Script

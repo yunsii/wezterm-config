@@ -82,7 +82,7 @@ return {
 }
 ```
 
-The tracked launcher profiles live in `wezterm-x/lua/constants.lua` under `managed_cli.profiles`. Machine-local profile selection belongs in `wezterm-x/local/shared.env`, shared profile registration may also come from `.worktree-task/config.env` and `~/.config/worktree-task/config.env`, and machine-specific Lua-only overrides still belong in `wezterm-x/local/constants.lua`.
+The tracked launcher profiles live in `wezterm-x/lua/constants.lua` under `managed_cli.profiles`. Machine-local profile selection belongs in `wezterm-x/local/shared.env`, shared profile registration may also come from `config/worktree-task.env` (or legacy `.worktree-task/config.env`) and `~/.config/worktree-task/config.env`, and machine-specific Lua-only overrides still belong in `wezterm-x/local/constants.lua`.
 
 If you change the local file shape, update `wezterm-x/local.example/workspaces.lua` in the same edit.
 

@@ -83,9 +83,9 @@ Use the `worktree-task` skill when you want a fresh agent CLI implementation ses
 - Run it from the existing managed tmux agent window for the target repository when possible so the new task window can reuse the current repo-family tmux session directly from live git context.
 - The skill creates linked worktrees under the repository parent's `.worktrees/<repo>/` directory.
 - `WEZTERM_CONFIG_REPO` is required. In an agent workflow, every `worktree-task` run should first check whether it is configured; if it is missing, the agent should ask which tracked `wezterm-config` repo or derived repo you want, then run `skills/worktree-task/scripts/worktree-task configure --repo /absolute/path` to save the result into `~/.config/worktree-task/config.env`.
-- This repository's tracked worktree-task profile lives at `.worktree-task/config.env`. It enables the built-in `tmux-agent` provider, points `WEZTERM_CONFIG_REPO=.` back at this repo, and declares reusable agent launcher profiles such as `claude` and `codex`.
+- This repository's tracked worktree-task profile lives at `config/worktree-task.env`. It enables the built-in `tmux-agent` provider, points `WEZTERM_CONFIG_REPO=.` back at this repo, and declares reusable agent launcher profiles such as `claude` and `codex`. Legacy `.worktree-task/config.env` is still accepted as a compatibility fallback.
 - Machine-local agent selection belongs in `wezterm-x/local/shared.env` as `MANAGED_AGENT_PROFILE=claude|codex|...`.
-- Config collection order is: configured `wezterm-config` repo profile, then `~/.config/worktree-task/config.env`, then the target repo's own `.worktree-task/config.env`, then the selected `wezterm-config` repo's `wezterm-x/local/shared.env`.
+- Config collection order is: configured `wezterm-config` repo profile, then `~/.config/worktree-task/config.env`, then the target repo's own `config/worktree-task.env` (or legacy `.worktree-task/config.env`), then the selected `wezterm-config` repo's `wezterm-x/local/shared.env`.
 - Relative repo-managed paths such as `WT_PROVIDER_TMUX_CONFIG_FILE=tmux.conf` resolve against the configured `wezterm-config` repo or derived repo, not against the task repo where you launch the command.
 - Use `configure --repo` as the stable recovery path whenever `WEZTERM_CONFIG_REPO` is missing; `launch` often consumes stdin for the task prompt, so configuration should not depend on waiting for input on that same stream.
 - The built-in `tmux-agent` provider derives session reuse, existing task-window discovery, and reclaim cleanup from live git context instead of stored tmux worktree metadata.
@@ -125,7 +125,7 @@ WEZTERM_CONFIG_REPO=/absolute/path/to/wezterm-config
 EOF
 ```
 
-For a repo that is itself a `wezterm-config` repo or a derived repo carrying the same conventions, keep `WEZTERM_CONFIG_REPO=.` in that repo's tracked `.worktree-task/config.env`.
+For a repo that is itself a `wezterm-config` repo or a derived repo carrying the same conventions, keep `WEZTERM_CONFIG_REPO=.` in that repo's tracked `config/worktree-task.env`.
 
 If you run `launch` or `reclaim` before configuring `WEZTERM_CONFIG_REPO`, the command now stops with an explicit error telling you to run `skills/worktree-task/scripts/worktree-task configure --repo /absolute/path/to/wezterm-config` first.
 
@@ -193,7 +193,7 @@ Reclaim only removes skill-managed linked worktrees under the repository parent'
 ## Hybrid WSL Agent Startup Measurement
 
 - Use [`scripts/dev/install-hybrid-wsl-agent-startup-desktop-script.sh`](../../scripts/dev/install-hybrid-wsl-agent-startup-desktop-script.sh) from WSL when you want a Windows-side PowerShell test script for the currently configured managed agent CLI across the full hybrid `WSL + login shell + agent CLI` launch path.
-- The generator resolves the current project agent CLI through the same `worktree-task` config chain used by the built-in `tmux-agent` provider, including `.worktree-task/config.env`, `~/.config/worktree-task/config.env`, and `wezterm-x/local/shared.env`.
+- The generator resolves the current project agent CLI through the same `worktree-task` config chain used by the built-in `tmux-agent` provider, including `config/worktree-task.env` (or legacy `.worktree-task/config.env`), `~/.config/worktree-task/config.env`, and `wezterm-x/local/shared.env`.
 - By default it writes `measure-hybrid-wsl-agent-startup-<repo>.ps1` to the Windows Desktop and targets the current WSL distro.
 - The generated PowerShell wrapper invokes the generic [`scripts/dev/measure-hybrid-wsl-agent-startup.ps1`](../../scripts/dev/measure-hybrid-wsl-agent-startup.ps1) template with the resolved agent command baked in, so the wrapper tracks the current project selection instead of hard-coding a specific CLI.
 - Run the generator from the target repo root or pass `--cwd /path/to/repo` to resolve a different project context.
