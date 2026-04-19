@@ -1,22 +1,30 @@
 # AGENTS
 
-This file is the agent-facing entry point.
-It defines project-level rules for this repository.
+This file is the project-level agent entry point.
 User-level reusable agent profiles hosted under `agent-profiles/` are separate and do not override this file unless a user explicitly points an external tool at them.
 
-## Progressive Disclosure
+## Loading Rule
 
-Do not load all docs by default.
+Read `AGENTS.md` first, then open only the matching file under `docs/`. Read additional docs only when the current doc points to them or the task crosses that boundary.
 
-Agent workflow:
+## Task Routing
 
-1. Read `AGENTS.md`.
-2. Identify the task category.
-3. Open only the matching file under `docs/agents/`.
-4. Open a user doc under `docs/user/` only if the change affects user-visible behavior, setup, shortcuts, or workflow.
-5. Read additional docs only when the current doc explicitly points to them or the task cannot be completed safely without them.
-
-If the task is narrow, keep the loaded context narrow.
+- Setup, local prerequisites, or machine-local config:
+  Read [`docs/setup.md`](docs/setup.md).
+- Sync, reload, verification, or day-to-day maintenance:
+  Read [`docs/daily-workflow.md`](docs/daily-workflow.md).
+- Workspace definitions or workspace behavior:
+  Read [`docs/workspaces.md`](docs/workspaces.md).
+- Keybindings:
+  Read [`docs/keybindings.md`](docs/keybindings.md).
+- tmux UI, tab titles, status rendering, copy-mode, or visible terminal behavior:
+  Read [`docs/tmux-ui.md`](docs/tmux-ui.md).
+- Diagnostics, logs, or smoke tests:
+  Read [`docs/diagnostics.md`](docs/diagnostics.md).
+- Ownership boundaries, runtime architecture, or entry points:
+  Read [`docs/architecture.md`](docs/architecture.md).
+- Preparing a commit message or deciding commit split:
+  Read [`docs/commit-guidelines.md`](docs/commit-guidelines.md).
 
 ## Hard Rules
 
@@ -25,18 +33,8 @@ If the task is narrow, keep the loaded context narrow.
 - Windows runtime files are generated from this repo by the `wezterm-runtime-sync` skill in `skills/wezterm-runtime-sync/`.
 - Keep workspace definitions in `wezterm-x/workspaces.lua`, not inline in `wezterm.lua`.
 - Keep private machine and project overrides in `wezterm-x/local/` and keep tracked templates in `wezterm-x/local.example/`.
-- If user-visible behavior changes, update the matching user doc in `/docs/user/` in the same edit.
-- If keybindings change, update [`docs/user/keybindings.md`](docs/user/keybindings.md).
-- If workspace semantics change, update [`docs/user/workspaces.md`](docs/user/workspaces.md).
+- Prefer updating an existing doc in `docs/` over adding a new sibling file; keep presentations under `docs/presentations/`.
+- If behavior, keybindings, workspace semantics, tmux UI, or diagnostics change, update the matching docs in the same edit.
 - After runtime config changes, run the `wezterm-runtime-sync` skill.
 - Do not run Git commands that can contend on the index lock in parallel.
 - Do not auto-commit or auto-push unless the user asks or the task explicitly calls for it.
-
-## Agent Docs
-
-- [`docs/agents/routing.md`](docs/agents/routing.md): task-to-doc routing and load order
-- [`docs/agents/repo-structure.md`](docs/agents/repo-structure.md): ownership boundaries and entry points
-- [`docs/agents/workspace-rules.md`](docs/agents/workspace-rules.md): workspace model and editing constraints
-- [`docs/agents/runtime-invariants.md`](docs/agents/runtime-invariants.md): tmux, agent CLI, and UI invariants
-- [`docs/agents/validation.md`](docs/agents/validation.md): sync, reload, and verification rules
-- [`docs/agents/commit-guidelines.md`](docs/agents/commit-guidelines.md): commit format, scopes, and message quality rules

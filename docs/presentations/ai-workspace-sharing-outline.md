@@ -84,9 +84,9 @@ subtitle: WezTerm + tmux + Git Worktree + AI CLI 的一体化终端开发环境
 | 快捷键 | 功能 |
 |--------|------|
 | `Alt+w` | 打开/切换到工作工作区 |
-| `Alt+o` | 在 VS Code 中打开当前 worktree 根目录 |
+| `Alt+v` | 在 VS Code 中打开当前 worktree 根目录 |
 | `Alt+b` | 启动 Chrome 调试浏览器 |
-| `Alt+v` / `Alt+s` | 垂直/水平分屏 |
+| `Ctrl+k v` / `Ctrl+k h` | 垂直/水平分屏 |
 
 ### Git Worktree 操作
 
@@ -99,12 +99,12 @@ subtitle: WezTerm + tmux + Git Worktree + AI CLI 的一体化终端开发环境
 
 | 快捷键 | 功能 |
 |--------|------|
-| `Ctrl+k` | 弹出命令面板（仓库共享 + 机器本地命令） |
+| `Ctrl+Shift+P` | 弹出 tmux 命令面板（仓库共享 + 机器本地命令） |
 
 ### 智能复制粘贴
 
 - `Shift+拖拽`：tmux 面板内选择文本
-- `Alt+拖拽`：跨面板的 WezTerm 级文本选择
+- `Super+拖拽`：跨面板的 WezTerm 级文本选择
 - `Ctrl+v`：智能粘贴（hybrid-wsl 下支持剪贴板图片缓存）
 
 ---
@@ -205,8 +205,8 @@ WT_POLICY_RECLAIM_DIRTY=refuse   # 未提交的更改拒绝回收
 4. **AI 任务启动**：用 worktree-task 创建一个新任务 → 观察新 tmux 窗口自动打开 + AI CLI 启动
 5. **并行工作**：在主 worktree 继续开发，同时 AI 在另一个窗口独立工作
 6. **任务回收**：worktree-task reclaim → 展示清理过程
-7. **命令面板**：`Ctrl+k` 打开命令面板 → 展示自定义命令
-8. **编辑器集成**：`Alt+o` 从当前 worktree 直接打开 VS Code
+7. **命令面板**：`Ctrl+Shift+P` 打开命令面板 → 展示自定义命令
+8. **编辑器集成**：`Alt+v` 从当前 worktree 直接打开 VS Code
 
 ---
 
@@ -229,7 +229,7 @@ wezterm-config/               ← Git 仓库（source of truth）
 ├── skills/                   ← Claude Code / Codex Skills
 │   ├── wezterm-runtime-sync/ ← 运行时同步
 │   └── worktree-task/        ← 任务 worktree 管理
-└── docs/                     ← 用户文档 + 代理文档
+└── docs/                     ← 主题化项目文档
 ```
 
 ### 设计原则

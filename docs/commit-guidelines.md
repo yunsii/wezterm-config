@@ -12,7 +12,7 @@ Use a commit format that is:
 
 This repo uses a lightweight Conventional Commits style with repo-specific scopes.
 
-## Commit Shape
+## Title Shape
 
 Preferred title format:
 
@@ -36,7 +36,7 @@ Scope is optional when it does not add useful information:
 - `test`: test additions or test-only changes
 - `chore`: maintenance, tooling, or housekeeping that does not fit the types above
 
-## Scope Guidance
+## Scope Rules
 
 Use the narrowest stable scope that explains the change area.
 
@@ -85,8 +85,8 @@ If a repo-specific file-oriented scope is clearer, use that instead, such as:
 
 Good examples:
 
-- `docs(api): clarify webhook retry behavior`
-- `fix(auth): avoid token refresh loop`
+- `docs(workspaces): clarify local override boundaries`
+- `fix(tmux): avoid stale status refresh`
 - `feat(ui): add compact table density`
 
 Avoid:
@@ -97,30 +97,22 @@ Avoid:
 
 ## Body Rules
 
-Add a body when the reason is not obvious from the diff or title.
+- Separate title and body with one blank line.
+- Add a body when the reason is not obvious from the diff or title.
+- Focus on why and constraints, not a line-by-line diff narration.
+- Use 2-4 short lines in most cases.
 
-Body structure:
+Suggested body structure:
 
 1. State the problem or current limitation.
 2. Explain why this approach is the right fix.
 3. Note important side effects, constraints, or follow-up implications if needed.
 
-Body guidance:
-
-- Separate title and body with one blank line.
-- Prefer present tense when describing the current problem.
-- Keep the body focused on why, not a line-by-line diff narration.
-
 ## AI Collaboration Metadata
 
 When AI-assisted development details add review value, append an `AI Collaboration:` block after the main body.
 
-You should strongly prefer adding the block when any of the following are true:
-
-- the work required repeated debugging or multiple failed implementation attempts before the root cause was identified
-- the final fix depends on constraints outside the repo, such as shell rc files, OS environment behavior, or toolchain/runtime quirks
-- the final diff is small relative to the investigation needed to make it correct
-- meaningful human course-corrections changed the implementation plan more than once
+Prefer adding the block when debugging was non-trivial, environment constraints mattered, or meaningful human course-corrections changed the implementation plan more than once.
 
 Preferred shape:
 
@@ -140,33 +132,21 @@ AI Collaboration:
 - skills-used: vercel-react-best-practices
 ```
 
-Rules:
-
 - Keep the title and main body readable without the AI block.
 - Use the AI block to capture process context, not a full debug diary.
 - Omit fields that do not add signal for the current commit.
 - Keep the AI block flat: use single-level bullets only; do not nest bullets under fields such as `hard-parts`.
-
-### Field Definitions
-
-- `human-adjustments`: count meaningful human interventions that changed the plan, prompt, code, or commit content. Exclude approval-only or escalation-only interactions.
-- `hard-parts`: short summaries of non-obvious constraints, missed edge cases, or problems that required repeated debugging to resolve.
-- `ai-complexity`: one of `low`, `medium`, or `high`.
-- `tools-used`: external helpers that materially affected the result, such as MCP tools or repository-specific CLIs.
-- `skills-used`: agent skills that materially affected the result.
-
-### Complexity Guidance
-
-- `low`: narrow change, few constraints, little or no debugging.
-- `medium`: multiple files or non-obvious constraints, with meaningful validation or iteration.
-- `high`: cross-cutting change, strong constraints, or repeated human correction and debugging.
-
-### Metadata Quality Rules
-
 - Prefer concrete summaries over vague notes like `debugged a lot`.
-- Record only tools or skills that materially influenced the final result.
-- Do not include raw escalation logs or approval history in the commit message.
-- Keep the AI block short enough to scan in `git log --format=fuller`.
+- Do not include raw escalation logs or approval history.
+
+Common fields: `human-adjustments`, `hard-parts`, `ai-complexity`, `tools-used`, `skills-used`.
+Record only tools or skills that materially influenced the result, and keep the block short enough to scan in `git log --format=fuller`.
+
+Complexity guidance:
+
+- `low`: narrow change, few constraints, little or no debugging
+- `medium`: multiple files or non-obvious constraints, with meaningful validation or iteration
+- `high`: cross-cutting change, strong constraints, or repeated human correction and debugging
 
 ## Commit Splitting
 
@@ -178,6 +158,7 @@ Rules:
 ## Breaking Changes
 
 Use breaking-change markers only when the repo behavior or documented workflow changes incompatibly.
+Use either `feat(scope)!: ...` in the title or a `BREAKING CHANGE:` footer in the body.
 
 Examples:
 
@@ -194,11 +175,11 @@ BREAKING CHANGE: plugin instances now require an explicit project ID.
 ## Repo-Specific Rules
 
 - Match the current repo history, which already uses `feat:`, `docs:`, and similar prefixes.
-- Prefer `docs(agents): ...` for agent-only documentation work.
-- Prefer `docs(user): ...` only if a commit changes user docs without changing agent docs.
-- For mixed documentation work across user and agent docs, prefer `docs: ...` unless one audience is clearly primary.
+- Prefer `docs: ...` for repository documentation changes.
+- Only add a scope when it clarifies the owning area, for example `docs(workspaces): ...`, `docs(diagnostics): ...`, or `docs(readme): ...`.
+- For mixed documentation work across multiple topic docs, prefer plain `docs: ...` unless one topic is clearly primary.
 - Do not run Git commands that can contend on the index lock in parallel; stage, inspect, and commit in sequence.
-- Before committing runtime changes, confirm required sync and validation steps in [`validation.md`](./validation.md).
+- Before committing runtime changes, confirm required sync and validation steps in [`daily-workflow.md`](./daily-workflow.md).
 - Preview the full commit message and get human confirmation before running `git commit`.
-- Use [`scripts/dev/commit-with-ai-context.sh`](../../scripts/dev/commit-with-ai-context.sh) when the commit should include AI collaboration metadata.
-- For agent-driven commits that need separate human confirmation before a privileged `git commit`, first run `scripts/dev/commit-with-ai-context.sh --print-only --write-message-file auto`. The script will reuse a repo-and-branch-specific temp file and print the exact file path; after confirmation run `git commit -F <that-path>`.
+- Use [`scripts/dev/commit-with-ai-context.sh`](../scripts/dev/commit-with-ai-context.sh) when the commit should include AI collaboration metadata.
+- For agent-driven commits that need separate human confirmation before a privileged `git commit`, first run `scripts/dev/commit-with-ai-context.sh --print-only --write-message-file auto`. The script prints the reusable message file path; after confirmation run `git commit -F <that-path>`.
