@@ -94,6 +94,45 @@ local function parse_non_negative_number(value)
   return numeric
 end
 
+local function decode_helper_response_env(values)
+  if not values then
+    return nil
+  end
+
+  local response = {
+    version = tonumber(values.version) or values.version,
+    message_type = values.message_type,
+    trace_id = values.trace_id,
+    domain = values.domain,
+    action = values.action,
+    ok = values.ok == '1',
+    status = values.status,
+    decision_path = values.decision_path,
+    result_type = values.result_type,
+    helperctl_elapsed_ms = values.helperctl_elapsed_ms,
+  }
+
+  local result = {}
+  for key, value in pairs(values) do
+    local result_key = key:match '^result_(.+)$'
+    if result_key then
+      result[result_key] = value
+    end
+  end
+  if next(result) ~= nil then
+    response.result = result
+  end
+
+  if values.error_code or values.error_message then
+    response.error = {
+      code = values.error_code,
+      message = values.error_message,
+    }
+  end
+
+  return response
+end
+
 function M.new(opts)
   return setmetatable({
     wezterm = opts.wezterm,
@@ -372,23 +411,24 @@ function M:ensure_helper_running_sync(reason)
   return true, nil
 end
 
-function M:write_request(trace_id, category, request_kind, payload_body_factory)
-  local response, reason = self:write_request_with_response(trace_id, category, request_kind, payload_body_factory)
+function M:write_request(trace_id, category, request_domain, request_action, payload_body_factory)
+  local response, reason = self:write_request_with_response(trace_id, category, request_domain, request_action, payload_body_factory)
   if not response then
     return false, reason
   end
 
-  if response.ok ~= '1' then
-    return false, response.error_code or response.status or 'request_failed'
+  if response.ok ~= true then
+    return false, (response.error and response.error.code) or response.status or 'request_failed'
   end
 
   return true, nil
 end
 
-function M:invoke_helper_request(trace_id, category, request_kind, request_timeout_ms, request_command, phase)
+function M:invoke_helper_request(trace_id, category, request_domain, request_action, request_timeout_ms, request_command, phase)
   local started_at = self:current_epoch_ms()
   self.logger.info(category, 'sending request via windows runtime helper ipc', merge_fields(trace_id, {
-    request_kind = request_kind,
+    request_domain = request_domain,
+    request_action = request_action,
     phase = phase or 'direct',
     timeout_ms = tostring(request_timeout_ms or 0),
   }))
@@ -398,7 +438,8 @@ function M:invoke_helper_request(trace_id, category, request_kind, request_timeo
   if not ok then
     self.logger.warn(category, 'windows runtime helper ipc request raised an error', merge_fields(trace_id, {
       error = success,
-      request_kind = request_kind,
+      request_domain = request_domain,
+      request_action = request_action,
       phase = phase or 'direct',
       elapsed_ms = tostring(elapsed_ms),
       timeout_ms = tostring(request_timeout_ms or 0),
@@ -410,7 +451,8 @@ function M:invoke_helper_request(trace_id, category, request_kind, request_timeo
     self.logger.warn(category, 'windows runtime helper ipc request failed', merge_fields(trace_id, {
       stdout = stdout,
       stderr = stderr,
-      request_kind = request_kind,
+      request_domain = request_domain,
+      request_action = request_action,
       phase = phase or 'direct',
       elapsed_ms = tostring(elapsed_ms),
       timeout_ms = tostring(request_timeout_ms or 0),
@@ -425,7 +467,8 @@ function M:invoke_helper_request(trace_id, category, request_kind, request_timeo
       self.logger.warn(category, 'failed to parse windows runtime helper ipc response', merge_fields(trace_id, {
         error = parsed_response,
         stdout = stdout,
-        request_kind = request_kind,
+        request_domain = request_domain,
+        request_action = request_action,
         phase = phase or 'direct',
         elapsed_ms = tostring(elapsed_ms),
         timeout_ms = tostring(request_timeout_ms or 0),
@@ -433,30 +476,34 @@ function M:invoke_helper_request(trace_id, category, request_kind, request_timeo
       return nil, 'response_parse_failed'
     end
 
-    response = parsed_response
+    response = decode_helper_response_env(parsed_response)
   end
 
   self.logger.info(category, 'windows runtime helper ipc request completed', merge_fields(trace_id, {
     status = response and response.status or nil,
     decision_path = response and response.decision_path or nil,
-    request_kind = request_kind,
+    request_domain = request_domain,
+    request_action = request_action,
+    result_type = response and response.result_type or nil,
     phase = phase or 'direct',
     elapsed_ms = tostring(elapsed_ms),
     helperctl_elapsed_ms = response and response.helperctl_elapsed_ms or nil,
     timeout_ms = tostring(request_timeout_ms or 0),
   }))
 
-  return response or { ok = '1' }, nil
+  return response or { ok = true }, nil
 end
 
-function M:write_request_with_response(trace_id, category, request_kind, payload_body_factory)
+function M:write_request_with_response(trace_id, category, request_domain, request_action, payload_body_factory)
   local request_trace_id = trace_id or tostring(os.time())
   local payload_body = payload_body_factory(request_trace_id)
   local request_body = table.concat {
     '{',
-    '"version":1,',
+    '"version":2,',
     '"trace_id":', json_escape(request_trace_id), ',',
-    '"kind":', json_escape(request_kind), ',',
+    '"message_type":"request",',
+    '"domain":', json_escape(request_domain), ',',
+    '"action":', json_escape(request_action), ',',
     '"payload":', payload_body,
     '}',
   }
@@ -471,7 +518,8 @@ function M:write_request_with_response(trace_id, category, request_kind, payload
 
   if not state_is_fresh then
     self.logger.info('host_helper', 'windows runtime helper state is stale before request; ensuring synchronously', merge_fields(trace_id, {
-      request_kind = request_kind,
+      request_domain = request_domain,
+      request_action = request_action,
       preflight_reason = state_reason,
       phase = 'preflight',
       timeout_ms = tostring(request_timeout_ms),
@@ -491,7 +539,7 @@ function M:write_request_with_response(trace_id, category, request_kind, payload
     request_phase = 'after_preflight_ensure'
   end
 
-  local response, reason = self:invoke_helper_request(trace_id, category, request_kind, request_timeout_ms, request_command, request_phase)
+  local response, reason = self:invoke_helper_request(trace_id, category, request_domain, request_action, request_timeout_ms, request_command, request_phase)
   if response then
     return response, nil
   end
@@ -501,7 +549,7 @@ function M:write_request_with_response(trace_id, category, request_kind, payload
     return nil, ensured_reason
   end
 
-  return self:invoke_helper_request(trace_id, category, request_kind, request_timeout_ms, request_command, 'after_ensure')
+  return self:invoke_helper_request(trace_id, category, request_domain, request_action, request_timeout_ms, request_command, 'after_ensure')
 end
 
 return M

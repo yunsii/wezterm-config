@@ -160,7 +160,7 @@ internal sealed class ClipboardService : IDisposable
             return ClipboardState.Text(sequence, formats, text);
         }
 
-        EnsureDirectory(config.ClipboardOutputDir);
+        FileSystemUtil.EnsureDirectory(config.ClipboardOutputDir);
         using var image = GetClipboardImageWithRetry();
         if (image == null)
         {
@@ -379,32 +379,5 @@ internal sealed class ClipboardService : IDisposable
         }
 
         return normalized;
-    }
-
-    private static void EnsureDirectory(string? path)
-    {
-        if (!string.IsNullOrWhiteSpace(path))
-        {
-            Directory.CreateDirectory(path);
-        }
-    }
-
-}
-
-internal sealed class HiddenClipboardForm : Form
-{
-    public HiddenClipboardForm(ClipboardService service)
-    {
-        ShowInTaskbar = false;
-        FormBorderStyle = FormBorderStyle.FixedToolWindow;
-        StartPosition = FormStartPosition.Manual;
-        Size = new Size(1, 1);
-        Location = new Point(-32000, -32000);
-        Opacity = 0;
-    }
-
-    protected override void SetVisibleCore(bool value)
-    {
-        base.SetVisibleCore(false);
     }
 }

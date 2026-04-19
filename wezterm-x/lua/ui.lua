@@ -495,32 +495,33 @@ local function paste_clipboard_or_image_path(wezterm, window, pane, constants, l
     return
   end
 
-  if resolved_state.kind ~= 'image' then
+  if resolved_state.result_type ~= 'clipboard_image' then
     window:perform_action(wezterm.action.PasteFrom 'Clipboard', pane)
     return
   end
 
-  local image_path = resolved_state.wsl_path
-  if (not image_path or image_path == '') and resolved_state.windows_path and resolved_state.windows_path ~= '' then
-    image_path = clipboard_feature.windows_path_to_wsl_path(resolved_state.windows_path)
+  local result = resolved_state.result or {}
+  local image_path = result.wsl_path
+  if (not image_path or image_path == '') and result.windows_path and result.windows_path ~= '' then
+    image_path = clipboard_feature.windows_path_to_wsl_path(result.windows_path)
   end
 
   if not image_path or image_path == '' then
     logger.warn('clipboard', 'resolved clipboard image is missing a WSL path', merge_fields(trace_id, {
       domain = domain_name,
       distro = distro,
-      windows_path = resolved_state.windows_path,
+      windows_path = result.windows_path,
     }))
     window:perform_action(wezterm.action.PasteFrom 'Clipboard', pane)
     return
   end
 
-  if resolved_state.windows_path and resolved_state.windows_path ~= '' and not host:file_exists(resolved_state.windows_path) then
+  if result.windows_path and result.windows_path ~= '' and not host:file_exists(result.windows_path) then
     logger.warn('clipboard', 'resolved clipboard image file is missing on disk', merge_fields(trace_id, {
       domain = domain_name,
       distro = distro,
       image_path = image_path,
-      windows_path = resolved_state.windows_path,
+      windows_path = result.windows_path,
     }))
     window:perform_action(wezterm.action.PasteFrom 'Clipboard', pane)
     return

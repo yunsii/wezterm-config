@@ -116,7 +116,10 @@ internal static class HelperCtlProgram
 
         var lines = new List<string>
         {
-            "version=1",
+            $"version={response.Version}",
+            $"message_type={Sanitize(response.MessageType)}",
+            $"domain={Sanitize(response.Domain)}",
+            $"action={Sanitize(response.Action)}",
             $"ok={(response.Ok ? "1" : "0")}",
             $"trace_id={Sanitize(response.TraceId)}",
             $"status={Sanitize(response.Status)}",
@@ -124,55 +127,12 @@ internal static class HelperCtlProgram
             $"helperctl_elapsed_ms={elapsedMs}",
         };
 
-        if (response.Result?.Pid is int pid)
+        if (!string.IsNullOrWhiteSpace(response.ResultType))
         {
-            lines.Add($"pid={pid}");
+            lines.Add($"result_type={Sanitize(response.ResultType)}");
         }
 
-        if (response.Result?.Hwnd is long hwnd)
-        {
-            lines.Add($"hwnd={hwnd}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(response.Result?.Kind))
-        {
-            lines.Add($"kind={Sanitize(response.Result.Kind)}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(response.Result?.Sequence))
-        {
-            lines.Add($"sequence={Sanitize(response.Result.Sequence)}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(response.Result?.Formats))
-        {
-            lines.Add($"formats={Sanitize(response.Result.Formats)}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(response.Result?.Text))
-        {
-            lines.Add($"text={Sanitize(response.Result.Text)}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(response.Result?.WindowsPath))
-        {
-            lines.Add($"windows_path={Sanitize(response.Result.WindowsPath)}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(response.Result?.WslPath))
-        {
-            lines.Add($"wsl_path={Sanitize(response.Result.WslPath)}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(response.Result?.Distro))
-        {
-            lines.Add($"distro={Sanitize(response.Result.Distro)}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(response.Result?.LastError))
-        {
-            lines.Add($"last_error={Sanitize(response.Result.LastError)}");
-        }
+        AppendResultLines(lines, response.Result);
 
         if (!string.IsNullOrWhiteSpace(response.Error?.Code))
         {
@@ -186,6 +146,33 @@ internal static class HelperCtlProgram
 
         Console.Out.Write(string.Join(Environment.NewLine, lines));
         Console.Out.Write(Environment.NewLine);
+    }
+
+    private static void AppendResultLines(List<string> lines, JsonElement? result)
+    {
+        if (result is not JsonElement element || element.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        foreach (var property in element.EnumerateObject())
+        {
+            var key = $"result_{property.Name}";
+            var value = property.Value.ValueKind switch
+            {
+                JsonValueKind.String => property.Value.GetString(),
+                JsonValueKind.Number => property.Value.ToString(),
+                JsonValueKind.True => "1",
+                JsonValueKind.False => "0",
+                JsonValueKind.Null => null,
+                _ => property.Value.ToString(),
+            };
+
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                lines.Add($"{key}={Sanitize(value)}");
+            }
+        }
     }
 
     private static string Sanitize(string? value)

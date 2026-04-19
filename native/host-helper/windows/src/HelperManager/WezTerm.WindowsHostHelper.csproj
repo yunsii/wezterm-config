@@ -11,12 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="../Shared/NamedPipeTransport.cs" Link="Shared/NamedPipeTransport.cs" />
-    <Compile Include="../Shared/Protocol.cs" Link="Shared/Protocol.cs" />
-    <Compile Include="../Shared/Support.cs" Link="Shared/Support.cs" />
-    <Compile Include="ClipboardService.cs" />
-    <Compile Include="HostHelperManager.cs" />
-    <Compile Include="InstanceRegistry.cs" />
-    <Compile Include="Program.cs" />
+    <Compile Include="../Shared/*.cs" LinkBase="Shared" />
+    <Compile Include="*.cs" />
   </ItemGroup>
 </Project>

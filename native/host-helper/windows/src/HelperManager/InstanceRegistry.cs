@@ -169,12 +169,12 @@ internal sealed class InstanceRegistry
 
         try
         {
-            HostHelperManager.EnsureDirectory(Path.GetDirectoryName(statePath));
+            FileSystemUtil.EnsureDirectory(Path.GetDirectoryName(statePath));
             var json = JsonSerializer.Serialize(state, new JsonSerializerOptions
             {
                 WriteIndented = false,
             });
-            HostHelperManager.WriteAtomicTextFile(statePath, json + Environment.NewLine);
+            FileSystemUtil.WriteAtomicTextFile(statePath, json + Environment.NewLine);
         }
         catch
         {

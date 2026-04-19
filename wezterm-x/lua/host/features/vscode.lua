@@ -20,7 +20,7 @@ return function(runtime)
       message = 'Windows helper failed to focus VS Code. Check wezterm diagnostics.',
     },
     request = function(trace_id, payload)
-      return runtime:write_request(trace_id, 'alt_o', 'vscode_focus_or_open', function(_)
+      return runtime:write_request(trace_id, 'alt_o', 'vscode', 'focus_or_open', function(_)
         return table.concat {
           '{',
           '"requested_dir":', runtime:json_escape(payload.cwd), ',',

@@ -7,7 +7,7 @@ return function(runtime)
       message = 'Windows helper failed to focus debug Chrome. Check wezterm diagnostics.',
     },
     request = function(trace_id, payload)
-      return runtime:write_request(trace_id, 'chrome', 'chrome_focus_or_start', function(_)
+      return runtime:write_request(trace_id, 'chrome', 'chrome', 'focus_or_start', function(_)
         return table.concat {
           '{',
           '"chrome_path":', runtime:json_escape(payload.executable), ',',

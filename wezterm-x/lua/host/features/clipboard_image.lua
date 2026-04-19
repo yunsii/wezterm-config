@@ -25,7 +25,8 @@ return function(runtime)
       local response, reason = runtime:write_request_with_response(
         trace_id,
         'clipboard',
-        'clipboard_resolve_for_paste',
+        'clipboard',
+        'resolve_for_paste',
         function(_)
           return '{}'
         end
@@ -35,12 +36,12 @@ return function(runtime)
         return nil, reason
       end
 
-      if response.ok ~= '1' then
-        return nil, response.error_code or response.status or 'request_failed'
+      if response.ok ~= true then
+        return nil, (response.error and response.error.code) or response.status or 'request_failed'
       end
 
-      if not response.kind or response.kind == '' then
-        return nil, 'response_missing_kind'
+      if not response.result_type or response.result_type == '' then
+        return nil, 'response_missing_result_type'
       end
 
       return response, nil

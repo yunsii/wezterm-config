@@ -130,7 +130,7 @@ invoke_helper_request() {
     code_part+="$(json_escape "$code_arg")"
   done
 
-  request_body="{\"version\":1,\"trace_id\":$(json_escape "$trace_id"),\"kind\":\"vscode_focus_or_open\",\"payload\":{\"requested_dir\":$(json_escape "$target_dir"),\"distro\":$(json_escape "$WSL_DISTRO_NAME"),\"code_command\":[${code_part}]}}"
+  request_body="{\"version\":2,\"trace_id\":$(json_escape "$trace_id"),\"message_type\":\"request\",\"domain\":\"vscode\",\"action\":\"focus_or_open\",\"payload\":{\"requested_dir\":$(json_escape "$target_dir"),\"distro\":$(json_escape "$WSL_DISTRO_NAME"),\"code_command\":[${code_part}]}}"
   request_body_b64="$(printf '%s' "$request_body" | base64 | tr -d '\r\n')"
   "$HELPER_CLIENT_WSL" request --pipe "$HELPER_IPC_ENDPOINT" --payload-base64 "$request_body_b64" --timeout-ms 5000 >/dev/null 2>&1
 }

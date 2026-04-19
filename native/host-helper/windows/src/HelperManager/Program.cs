@@ -83,8 +83,10 @@ internal static class Program
         try
         {
             var text = string.IsNullOrWhiteSpace(message) ? "helper-manager failed" : message;
+            var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wezterm-runtime-helper");
+            FileSystemUtil.EnsureDirectory(logDir);
             File.AppendAllText(
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wezterm-runtime-helper", "manager-bootstrap.log"),
+                Path.Combine(logDir, "manager-bootstrap.log"),
                 $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {text}{Environment.NewLine}",
                 new UTF8Encoding(false));
         }

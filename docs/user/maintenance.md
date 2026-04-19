@@ -70,7 +70,7 @@ flowchart LR
   E --> G["Clipboard service\nsingle STA thread + live read/write"]
   F --> H["Activate existing window\nor launch target app"]
   G --> I["return text\nor exported image path"]
-  H --> J["env-style response\nstatus / decision_path / pid / hwnd"]
+  H --> J["typed response envelope\ndomain / action / result_type / result"]
   I --> J
   J --> B
   B --> K["WezTerm action\nfocus app or paste result"]
@@ -78,8 +78,9 @@ flowchart LR
 
 ### Key Points And Hard Parts
 
-- 热路径现在应该只有一条主链路: `Lua -> helperctl.exe -> named pipe -> helper-manager.exe -> response`。常态请求仍以 IPC 为主；只有在 helper 心跳明显过期或 bootstrap 状态缺失时，WezTerm 才会先做一次轻量 `state.env` 预检并同步 ensure。
+- 热路径现在应该只有一条主链路: `Lua -> helperctl.exe -> named pipe -> helper-manager.exe -> response`。pipe 上的请求/响应都使用 typed envelope：顶层固定 `message_type / domain / action / payload|result`，不再把不同能力都塞进一个 `kind` 和一组散字段。常态请求仍以 IPC 为主；只有在 helper 心跳明显过期或 bootstrap 状态缺失时，WezTerm 才会先做一次轻量 `state.env` 预检并同步 ensure。
 - `helper-manager.exe` 是唯一决策点: VS Code 目录归一化、Chrome 调试实例复用、剪贴板文本/图片判定都放在这里，避免 Lua、Shell、PowerShell 各自维护一套状态机。
+- 响应结果也按类型收口: 当前窗口复用返回 `result_type=window_ref`，剪贴板返回 `clipboard_text` 或 `clipboard_image`，避免 `pid/hwnd/text/windows_path` 继续平铺在同一层。
 - 复用逻辑的难点不在“启动应用”，而在“找到正确窗口并置前”: 需要同时结合持久化缓存、进程命令行匹配、`MainWindowHandle` 可见窗口扫描，以及启动后的前台绑定补偿。
 - 剪贴板逻辑的难点不在 IPC，而在 Windows 数据格式: 读的时候要在 STA 线程里拿最新内容，写图片时要同时写 `CF_DIB` 和 `PNG`，这样 Ditto 和目标程序都能稳定识别。
 - 日志必须贯穿整条链路: 一个 `trace_id` 贯通 Lua 发起、helper 收到、复用决策、请求完成，排查窗口复用和剪贴板问题时不能再拆多个零散日志文件。
@@ -94,7 +95,7 @@ flowchart LR
 ### Active Hybrid Flow
 
 - In `hybrid-wsl`, new WSL tabs in the built-in `default` workspace now start through `scripts/runtime/open-default-shell-session.sh`, which creates a lightweight single-pane tmux session, keeps tmux status rendering enabled, and marks it `destroy-unattached on` so closing the tab still behaves like an ephemeral shell.
-- WezTerm Lua generates a request payload with a `trace_id` and invokes `%LOCALAPPDATA%\wezterm-runtime-helper\bin\helperctl.exe` against the stable named pipe `\\.\pipe\wezterm-host-helper-v1`.
+- WezTerm Lua generates a typed request envelope with `trace_id`, `domain`, and `action`, then invokes `%LOCALAPPDATA%\wezterm-runtime-helper\bin\helperctl.exe` against the stable named pipe `\\.\pipe\wezterm-host-helper-v1`.
 - The steady-state path now sends that IPC request first; only when the request fails does WezTerm synchronously run `wezterm-x/scripts/ensure-windows-runtime-helper.ps1` and retry once.
 - `wezterm-x/scripts/ensure-windows-runtime-helper.ps1` is only a thin bootstrap: it checks the installed helper heartbeat/config, writes `manager-config.json`, and launches the stable native helper if needed.
 - `%LOCALAPPDATA%\wezterm-runtime-helper\bin\helper-manager.exe` hosts the named-pipe server, evaluates reuse/launch policy, writes decision logs, and updates the persisted instance registry.

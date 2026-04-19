@@ -6,13 +6,19 @@ namespace WezTerm.WindowsHostHelper;
 internal sealed class HelperRequest
 {
     [JsonPropertyName("version")]
-    public int Version { get; init; } = 1;
+    public int Version { get; init; } = 2;
 
     [JsonPropertyName("trace_id")]
     public string? TraceId { get; init; }
 
-    [JsonPropertyName("kind")]
-    public string? Kind { get; init; }
+    [JsonPropertyName("message_type")]
+    public string MessageType { get; init; } = "request";
+
+    [JsonPropertyName("domain")]
+    public string? Domain { get; init; }
+
+    [JsonPropertyName("action")]
+    public string? Action { get; init; }
 
     [JsonPropertyName("payload")]
     public JsonElement Payload { get; init; }
@@ -21,10 +27,19 @@ internal sealed class HelperRequest
 internal sealed class HelperResponse
 {
     [JsonPropertyName("version")]
-    public int Version { get; init; } = 1;
+    public int Version { get; init; } = 2;
 
     [JsonPropertyName("trace_id")]
     public string TraceId { get; init; } = string.Empty;
+
+    [JsonPropertyName("message_type")]
+    public string MessageType { get; init; } = "response";
+
+    [JsonPropertyName("domain")]
+    public string Domain { get; init; } = string.Empty;
+
+    [JsonPropertyName("action")]
+    public string Action { get; init; } = string.Empty;
 
     [JsonPropertyName("ok")]
     public bool Ok { get; init; }
@@ -35,8 +50,11 @@ internal sealed class HelperResponse
     [JsonPropertyName("decision_path")]
     public string DecisionPath { get; init; } = string.Empty;
 
+    [JsonPropertyName("result_type")]
+    public string? ResultType { get; init; }
+
     [JsonPropertyName("result")]
-    public HelperResponseResult? Result { get; init; }
+    public JsonElement? Result { get; init; }
 
     [JsonPropertyName("error")]
     public HelperError? Error { get; init; }
@@ -46,30 +64,25 @@ internal sealed class HelperResponse
         return new HelperResponse
         {
             TraceId = traceId,
+            Domain = outcome.Domain,
+            Action = outcome.Action,
             Ok = true,
             Status = outcome.Status,
             DecisionPath = outcome.DecisionPath,
-            Result = new HelperResponseResult
-            {
-                Pid = outcome.ProcessId,
-                Hwnd = outcome.WindowHandle,
-                Kind = outcome.ClipboardKind,
-                Sequence = outcome.ClipboardSequence,
-                Formats = outcome.ClipboardFormats,
-                Text = outcome.ClipboardText,
-                WindowsPath = outcome.ClipboardWindowsPath,
-                WslPath = outcome.ClipboardWslPath,
-                Distro = outcome.ClipboardDistro,
-                LastError = outcome.ClipboardLastError,
-            },
+            ResultType = outcome.ResultType,
+            Result = outcome.Result is null
+                ? null
+                : JsonSerializer.SerializeToElement(outcome.Result, outcome.Result.GetType()),
         };
     }
 
-    public static HelperResponse Failure(string traceId, string code, string message)
+    public static HelperResponse Failure(string traceId, string domain, string action, string code, string message)
     {
         return new HelperResponse
         {
             TraceId = traceId,
+            Domain = domain,
+            Action = action,
             Ok = false,
             Status = "failed",
             DecisionPath = "error",
@@ -82,17 +95,17 @@ internal sealed class HelperResponse
     }
 }
 
-internal sealed class HelperResponseResult
+internal sealed class HelperWindowRefResult
 {
     [JsonPropertyName("pid")]
     public int? Pid { get; init; }
 
     [JsonPropertyName("hwnd")]
     public long? Hwnd { get; init; }
+}
 
-    [JsonPropertyName("kind")]
-    public string? Kind { get; init; }
-
+internal sealed class HelperClipboardTextResult
+{
     [JsonPropertyName("sequence")]
     public string? Sequence { get; init; }
 
@@ -101,6 +114,15 @@ internal sealed class HelperResponseResult
 
     [JsonPropertyName("text")]
     public string? Text { get; init; }
+}
+
+internal sealed class HelperClipboardImageResult
+{
+    [JsonPropertyName("sequence")]
+    public string? Sequence { get; init; }
+
+    [JsonPropertyName("formats")]
+    public string? Formats { get; init; }
 
     [JsonPropertyName("windows_path")]
     public string? WindowsPath { get; init; }
@@ -125,15 +147,11 @@ internal sealed class HelperError
 }
 
 internal sealed record RequestOutcome(
+    string Domain,
+    string Action,
     string Status,
     string DecisionPath,
+    string? ResultType = null,
+    object? Result = null,
     int? ProcessId = null,
-    long? WindowHandle = null,
-    string? ClipboardKind = null,
-    string? ClipboardSequence = null,
-    string? ClipboardFormats = null,
-    string? ClipboardText = null,
-    string? ClipboardWindowsPath = null,
-    string? ClipboardWslPath = null,
-    string? ClipboardDistro = null,
-    string? ClipboardLastError = null);
+    long? WindowHandle = null);

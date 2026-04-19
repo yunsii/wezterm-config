@@ -260,7 +260,7 @@ enqueue_vscode_request() {
   local trace_id="$1"
   local code_exe
   code_exe="$(detect_vscode_exe)"
-  invoke_helper_request "$trace_id" "$(printf '{"version":1,"trace_id":%s,"kind":"vscode_focus_or_open","payload":{"requested_dir":%s,"distro":%s,"code_command":[%s]}}' \
+  invoke_helper_request "$trace_id" "$(printf '{"version":2,"trace_id":%s,"message_type":"request","domain":"vscode","action":"focus_or_open","payload":{"requested_dir":%s,"distro":%s,"code_command":[%s]}}' \
     "$(json_escape "$trace_id")" \
     "$(json_escape "$target_dir")" \
     "$(json_escape "$distro")" \
@@ -281,7 +281,7 @@ enqueue_chrome_request() {
   if chrome_registry_has_entry || chrome_process_exists "$chrome_profile"; then
     expect_reuse=1
   fi
-  invoke_helper_request "$trace_id" "$(printf '{"version":1,"trace_id":%s,"kind":"chrome_focus_or_start","payload":{"chrome_path":%s,"remote_debugging_port":9222,"user_data_dir":%s}}' \
+  invoke_helper_request "$trace_id" "$(printf '{"version":2,"trace_id":%s,"message_type":"request","domain":"chrome","action":"focus_or_start","payload":{"chrome_path":%s,"remote_debugging_port":9222,"user_data_dir":%s}}' \
     "$(json_escape "$trace_id")" \
     "$(json_escape "chrome.exe")" \
     "$(json_escape "$chrome_profile")")" || return 1
@@ -311,29 +311,29 @@ enqueue_clipboard_request() {
   [[ -f "$test_png" ]] || return 1
   text_payload="clipboard-smoke $(date '+%Y-%m-%d %H:%M:%S %z')"
 
-  write_text_response="$(invoke_helper_request_capture "${trace_id}-write-text" "$(printf '{"version":1,"trace_id":%s,"kind":"clipboard_write_text","payload":{"text":%s}}' \
+  write_text_response="$(invoke_helper_request_capture "${trace_id}-write-text" "$(printf '{"version":2,"trace_id":%s,"message_type":"request","domain":"clipboard","action":"write_text","payload":{"text":%s}}' \
     "$(json_escape "${trace_id}-write-text")" \
     "$(json_escape "$text_payload")")")" || return 1
   [[ "$(env_value_from_text status "$write_text_response")" == "clipboard_written_text" ]] || return 1
 
-  resolve_text_response="$(invoke_helper_request_capture "${trace_id}-resolve-text" "$(printf '{"version":1,"trace_id":%s,"kind":"clipboard_resolve_for_paste","payload":{}}' \
+  resolve_text_response="$(invoke_helper_request_capture "${trace_id}-resolve-text" "$(printf '{"version":2,"trace_id":%s,"message_type":"request","domain":"clipboard","action":"resolve_for_paste","payload":{}}' \
     "$(json_escape "${trace_id}-resolve-text")")")" || return 1
-  [[ "$(env_value_from_text kind "$resolve_text_response")" == "text" ]] || return 1
-  [[ "$(env_value_from_text text "$resolve_text_response")" == "$text_payload" ]] || return 1
+  [[ "$(env_value_from_text result_type "$resolve_text_response")" == "clipboard_text" ]] || return 1
+  [[ "$(env_value_from_text result_text "$resolve_text_response")" == "$text_payload" ]] || return 1
 
   # Leave a small gap between the text and image writes so clipboard history
   # tools like Ditto do not coalesce/ignore the second update as "too fast".
   sleep 1
 
-  write_image_response="$(invoke_helper_request_capture "${trace_id}-write-image" "$(printf '{"version":1,"trace_id":%s,"kind":"clipboard_write_image_file","payload":{"image_path":%s}}' \
+  write_image_response="$(invoke_helper_request_capture "${trace_id}-write-image" "$(printf '{"version":2,"trace_id":%s,"message_type":"request","domain":"clipboard","action":"write_image_file","payload":{"image_path":%s}}' \
     "$(json_escape "${trace_id}-write-image")" \
     "$(json_escape "$(wslpath -w "$test_png")")")")" || return 1
   [[ "$(env_value_from_text status "$write_image_response")" == "clipboard_written_image" ]] || return 1
 
-  resolve_image_response="$(invoke_helper_request_capture "${trace_id}-resolve-image" "$(printf '{"version":1,"trace_id":%s,"kind":"clipboard_resolve_for_paste","payload":{}}' \
+  resolve_image_response="$(invoke_helper_request_capture "${trace_id}-resolve-image" "$(printf '{"version":2,"trace_id":%s,"message_type":"request","domain":"clipboard","action":"resolve_for_paste","payload":{}}' \
     "$(json_escape "${trace_id}-resolve-image")")")" || return 1
-  [[ "$(env_value_from_text kind "$resolve_image_response")" == "image" ]] || return 1
-  [[ -n "$(env_value_from_text formats "$resolve_image_response")" ]] || return 1
+  [[ "$(env_value_from_text result_type "$resolve_image_response")" == "clipboard_image" ]] || return 1
+  [[ -n "$(env_value_from_text result_formats "$resolve_image_response")" ]] || return 1
 }
 
 ensure_helper
