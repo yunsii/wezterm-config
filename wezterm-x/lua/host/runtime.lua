@@ -1,137 +1,14 @@
 local M = {}
 M.__index = M
+local path_sep = package.config:sub(1, 1)
 
-local function merge_fields(trace_id, fields)
-  local merged = {}
-
-  for key, value in pairs(fields or {}) do
-    merged[key] = value
-  end
-  if trace_id and trace_id ~= '' then
-    merged.trace_id = trace_id
-  end
-
-  return merged
+local function join_path(...)
+  return table.concat({ ... }, path_sep)
 end
 
-local function json_escape(value)
-  local text = tostring(value or '')
-  text = text:gsub('\\', '\\\\')
-  text = text:gsub('"', '\\"')
-  text = text:gsub('\n', '\\n')
-  text = text:gsub('\r', '\\r')
-  text = text:gsub('\t', '\\t')
-  return '"' .. text .. '"'
-end
-
-local function base64_encode(data)
-  local alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-  local result = {}
-  local bytes = { data:byte(1, #data) }
-  local padding = (3 - (#bytes % 3)) % 3
-
-  for _ = 1, padding do
-    bytes[#bytes + 1] = 0
-  end
-
-  for index = 1, #bytes, 3 do
-    local chunk = bytes[index] * 65536 + bytes[index + 1] * 256 + bytes[index + 2]
-    local a = math.floor(chunk / 262144) % 64 + 1
-    local b = math.floor(chunk / 4096) % 64 + 1
-    local c = math.floor(chunk / 64) % 64 + 1
-    local d = chunk % 64 + 1
-    result[#result + 1] = alphabet:sub(a, a)
-    result[#result + 1] = alphabet:sub(b, b)
-    result[#result + 1] = alphabet:sub(c, c)
-    result[#result + 1] = alphabet:sub(d, d)
-  end
-
-  for index = 1, padding do
-    result[#result - index + 1] = '='
-  end
-
-  return table.concat(result)
-end
-
-local function current_epoch_ms()
-  return os.time() * 1000
-end
-
-local function diagnostics_capture_enabled(constants, category)
-  local diagnostics = constants and constants.diagnostics or {}
-  local wezterm_diagnostics = diagnostics.wezterm or {}
-  local categories = wezterm_diagnostics.categories or {}
-
-  if wezterm_diagnostics.enabled ~= true then
-    return false
-  end
-
-  if next(categories) == nil then
-    return true
-  end
-
-  return categories[category] == true
-end
-
-local function wsl_distro_from_domain(domain_name)
-  if not domain_name then
-    return nil
-  end
-
-  return domain_name:match '^WSL:(.+)$'
-end
-
-local function helper_integration(constants)
-  return constants.integrations and constants.integrations.vscode or {}
-end
-
-local function parse_non_negative_number(value)
-  local numeric = tonumber(value)
-  if not numeric or numeric < 0 then
-    return nil
-  end
-
-  return numeric
-end
-
-local function decode_helper_response_env(values)
-  if not values then
-    return nil
-  end
-
-  local response = {
-    version = tonumber(values.version) or values.version,
-    message_type = values.message_type,
-    trace_id = values.trace_id,
-    domain = values.domain,
-    action = values.action,
-    ok = values.ok == '1',
-    status = values.status,
-    decision_path = values.decision_path,
-    result_type = values.result_type,
-    helperctl_elapsed_ms = values.helperctl_elapsed_ms,
-  }
-
-  local result = {}
-  for key, value in pairs(values) do
-    local result_key = key:match '^result_(.+)$'
-    if result_key then
-      result[result_key] = value
-    end
-  end
-  if next(result) ~= nil then
-    response.result = result
-  end
-
-  if values.error_code or values.error_message then
-    response.error = {
-      code = values.error_code,
-      message = values.error_message,
-    }
-  end
-
-  return response
-end
+local runtime_dir = rawget(_G, 'WEZTERM_RUNTIME_DIR') or '.'
+local codec = dofile(join_path(runtime_dir, 'lua', 'host', 'runtime_codec.lua'))
+local helper = dofile(join_path(runtime_dir, 'lua', 'host', 'runtime_helper.lua'))
 
 function M.new(opts)
   return setmetatable({
@@ -147,7 +24,7 @@ function M:integration(name)
 end
 
 function M:helper_integration()
-  return helper_integration(self.constants)
+  return helper.helper_integration(self.constants)
 end
 
 function M:helper_runtime_dir()
@@ -156,15 +33,15 @@ function M:helper_runtime_dir()
 end
 
 function M:merge_fields(trace_id, fields)
-  return merge_fields(trace_id, fields)
+  return codec.merge_fields(trace_id, fields)
 end
 
 function M:json_escape(value)
-  return json_escape(value)
+  return codec.json_escape(value)
 end
 
 function M:current_epoch_ms()
-  return current_epoch_ms()
+  return codec.current_epoch_ms()
 end
 
 function M:supports_windows_helper()
@@ -181,7 +58,7 @@ function M:show_windows_notification(category, trace_id, title, message)
         return
       end
 
-      self.logger.warn(category, 'failed to show wezterm toast notification', merge_fields(trace_id, {
+    self.logger.warn(category, 'failed to show wezterm toast notification', codec.merge_fields(trace_id, {
         error = err,
         title = title,
         message = message,
@@ -190,173 +67,26 @@ function M:show_windows_notification(category, trace_id, title, message)
     end
   end
 
-  self.logger.warn(category, 'wezterm toast notification unavailable', merge_fields(trace_id, {
+  self.logger.warn(category, 'wezterm toast notification unavailable', codec.merge_fields(trace_id, {
     title = title,
     message = message,
   }))
 end
 
 function M:helper_command()
-  if not self:supports_windows_helper() then
-    return nil, 'unsupported_runtime'
-  end
-
-  local integration = self:helper_integration()
-  local runtime_dir = self:helper_runtime_dir()
-  local helper_script = integration.helper_script or 'scripts\\ensure-windows-runtime-helper.ps1'
-  local diagnostics = self.constants.diagnostics and self.constants.diagnostics.wezterm or {}
-  local helper_log_file = integration.helper_log_file or diagnostics.file or ''
-  local clipboard = self:integration 'clipboard_image'
-  local helper_category_enabled = diagnostics_capture_enabled(self.constants, 'host_helper')
-    or diagnostics_capture_enabled(self.constants, 'alt_o')
-    or diagnostics_capture_enabled(self.constants, 'chrome')
-    or diagnostics_capture_enabled(self.constants, 'clipboard')
-
-  return {
-    integration.powershell or 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
-    '-NoProfile',
-    '-NonInteractive',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-File',
-    runtime_dir .. '\\' .. helper_script,
-    '-StatePath',
-    integration.helper_state_path or '',
-    '-ClipboardOutputDir',
-    clipboard.output_dir or '',
-    '-ClipboardWslDistro',
-    wsl_distro_from_domain(self.constants.default_domain) or '',
-    '-ClipboardImageReadRetryCount',
-    tostring(clipboard.image_read_retry_count or 12),
-    '-ClipboardImageReadRetryDelayMs',
-    tostring(clipboard.image_read_retry_delay_ms or 100),
-    '-ClipboardCleanupMaxAgeHours',
-    tostring(clipboard.cleanup_max_age_hours or 48),
-    '-ClipboardCleanupMaxFiles',
-    tostring(clipboard.cleanup_max_files or 32),
-    '-HeartbeatTimeoutSeconds',
-    tostring(integration.helper_heartbeat_timeout_seconds or 5),
-    '-HeartbeatIntervalMs',
-    tostring(integration.helper_heartbeat_interval_ms or 1000),
-    '-DiagnosticsEnabled',
-    diagnostics.enabled == true and '1' or '0',
-    '-DiagnosticsCategoryEnabled',
-    helper_category_enabled and '1' or '0',
-    '-DiagnosticsLevel',
-    diagnostics.level or 'info',
-    '-DiagnosticsFile',
-    helper_log_file,
-    '-DiagnosticsMaxBytes',
-    tostring(diagnostics.max_bytes or 0),
-    '-DiagnosticsMaxFiles',
-    tostring(diagnostics.max_files or 0),
-  }, nil
+  return helper.build_helper_command(self)
 end
 
 function M:helper_state_snapshot()
-  if not self:supports_windows_helper() then
-    return nil, 'unsupported_runtime'
-  end
-
-  local integration = self:helper_integration()
-  local state_path = integration.helper_state_path
-  if not state_path or state_path == '' then
-    return nil, 'state_path_unconfigured'
-  end
-
-  local state = self.helpers.load_optional_env_file(state_path)
-  if not state then
-    return nil, 'state_unavailable'
-  end
-
-  return state, nil
+  return helper.helper_state_snapshot(self)
 end
 
 function M:helper_state_preflight()
-  if not self:supports_windows_helper() then
-    return false, 'unsupported_runtime', {}
-  end
-
-  local integration = self:helper_integration()
-  local expected_runtime_dir = self:helper_runtime_dir()
-  local timeout_ms = (integration.helper_heartbeat_timeout_seconds or 5) * 1000
-  local state, state_reason = self:helper_state_snapshot()
-  if not state then
-    return false, state_reason, {
-      expected_runtime_dir = expected_runtime_dir,
-      timeout_ms = tostring(timeout_ms),
-    }
-  end
-
-  if state.ready ~= '1' then
-    return false, 'state_not_ready', {
-      expected_runtime_dir = expected_runtime_dir,
-      ready = state.ready,
-      timeout_ms = tostring(timeout_ms),
-    }
-  end
-
-  if expected_runtime_dir ~= '' and state.runtime_dir ~= expected_runtime_dir then
-    return false, 'runtime_dir_mismatch', {
-      expected_runtime_dir = expected_runtime_dir,
-      state_runtime_dir = state.runtime_dir,
-      timeout_ms = tostring(timeout_ms),
-    }
-  end
-
-  local heartbeat_at_ms = parse_non_negative_number(state.heartbeat_at_ms)
-  if not heartbeat_at_ms then
-    return false, 'heartbeat_missing', {
-      expected_runtime_dir = expected_runtime_dir,
-      heartbeat_at_ms = state.heartbeat_at_ms,
-      timeout_ms = tostring(timeout_ms),
-    }
-  end
-
-  local heartbeat_age_ms = math.max(self:current_epoch_ms() - heartbeat_at_ms, 0)
-  if heartbeat_age_ms > timeout_ms then
-    return false, 'heartbeat_stale', {
-      expected_runtime_dir = expected_runtime_dir,
-      heartbeat_at_ms = tostring(heartbeat_at_ms),
-      heartbeat_age_ms = tostring(heartbeat_age_ms),
-      timeout_ms = tostring(timeout_ms),
-    }
-  end
-
-  return true, nil, {
-    expected_runtime_dir = expected_runtime_dir,
-    state_runtime_dir = state.runtime_dir,
-    heartbeat_at_ms = tostring(heartbeat_at_ms),
-    heartbeat_age_ms = tostring(heartbeat_age_ms),
-    timeout_ms = tostring(timeout_ms),
-  }
+  return helper.helper_state_preflight(self, codec.parse_non_negative_number)
 end
 
 function M:helper_request_command(payload_json)
-  if not self:supports_windows_helper() then
-    return nil, 'unsupported_runtime'
-  end
-
-  local integration = self:helper_integration()
-  local helper_client_exe = integration.helper_client_exe
-  local helper_ipc_endpoint = integration.helper_ipc_endpoint
-  if not helper_client_exe or helper_client_exe == '' then
-    return nil, 'client_exe_unconfigured'
-  end
-  if not helper_ipc_endpoint or helper_ipc_endpoint == '' then
-    return nil, 'ipc_endpoint_unconfigured'
-  end
-
-  return {
-    helper_client_exe,
-    'request',
-    '--pipe',
-    helper_ipc_endpoint,
-    '--payload-base64',
-    base64_encode(payload_json),
-    '--timeout-ms',
-    tostring(integration.helper_request_timeout_ms or 5000),
-  }, nil
+  return helper.helper_request_command(self, codec.base64_encode, payload_json)
 end
 
 function M:ensure_helper_running(reason)
@@ -427,7 +157,7 @@ end
 
 function M:invoke_helper_request(trace_id, category, request_domain, request_action, request_timeout_ms, request_command, phase)
   local started_at = self:current_epoch_ms()
-  self.logger.info(category, 'sending request via windows runtime helper ipc', merge_fields(trace_id, {
+  self.logger.info(category, 'sending request via windows runtime helper ipc', codec.merge_fields(trace_id, {
     request_domain = request_domain,
     request_action = request_action,
     phase = phase or 'direct',
@@ -437,7 +167,7 @@ function M:invoke_helper_request(trace_id, category, request_domain, request_act
   local ok, success, stdout, stderr = pcall(self.wezterm.run_child_process, request_command)
   local elapsed_ms = math.max(self:current_epoch_ms() - started_at, 0)
   if not ok then
-    self.logger.warn(category, 'windows runtime helper ipc request raised an error', merge_fields(trace_id, {
+    self.logger.warn(category, 'windows runtime helper ipc request raised an error', codec.merge_fields(trace_id, {
       error = success,
       request_domain = request_domain,
       request_action = request_action,
@@ -449,7 +179,7 @@ function M:invoke_helper_request(trace_id, category, request_domain, request_act
   end
 
   if not success then
-    self.logger.warn(category, 'windows runtime helper ipc request failed', merge_fields(trace_id, {
+    self.logger.warn(category, 'windows runtime helper ipc request failed', codec.merge_fields(trace_id, {
       stdout = stdout,
       stderr = stderr,
       request_domain = request_domain,
@@ -465,7 +195,7 @@ function M:invoke_helper_request(trace_id, category, request_domain, request_act
   if stdout and stdout ~= '' then
     local parsed_ok, parsed_response = pcall(self.helpers.load_env_text, stdout, '<helper-response>')
     if not parsed_ok then
-      self.logger.warn(category, 'failed to parse windows runtime helper ipc response', merge_fields(trace_id, {
+      self.logger.warn(category, 'failed to parse windows runtime helper ipc response', codec.merge_fields(trace_id, {
         error = parsed_response,
         stdout = stdout,
         request_domain = request_domain,
@@ -477,10 +207,10 @@ function M:invoke_helper_request(trace_id, category, request_domain, request_act
       return nil, 'response_parse_failed'
     end
 
-    response = decode_helper_response_env(parsed_response)
+    response = codec.decode_helper_response_env(parsed_response)
   end
 
-  self.logger.info(category, 'windows runtime helper ipc request completed', merge_fields(trace_id, {
+  self.logger.info(category, 'windows runtime helper ipc request completed', codec.merge_fields(trace_id, {
     status = response and response.status or nil,
     decision_path = response and response.decision_path or nil,
     request_domain = request_domain,
@@ -501,10 +231,10 @@ function M:write_request_with_response(trace_id, category, request_domain, reque
   local request_body = table.concat {
     '{',
     '"version":2,',
-    '"trace_id":', json_escape(request_trace_id), ',',
+    '"trace_id":', codec.json_escape(request_trace_id), ',',
     '"message_type":"request",',
-    '"domain":', json_escape(request_domain), ',',
-    '"action":', json_escape(request_action), ',',
+    '"domain":', codec.json_escape(request_domain), ',',
+    '"action":', codec.json_escape(request_action), ',',
     '"payload":', payload_body,
     '}',
   }
@@ -518,7 +248,7 @@ function M:write_request_with_response(trace_id, category, request_domain, reque
   local request_phase = 'direct'
 
   if not state_is_fresh then
-    self.logger.info('host_helper', 'windows runtime helper state is stale before request; ensuring synchronously', merge_fields(trace_id, {
+    self.logger.info('host_helper', 'windows runtime helper state is stale before request; ensuring synchronously', codec.merge_fields(trace_id, {
       request_domain = request_domain,
       request_action = request_action,
       preflight_reason = state_reason,
