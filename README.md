@@ -20,6 +20,10 @@ All runtime files are synced from this repo by the `wezterm-runtime-sync` skill.
 
 Before using managed workspaces, copy `wezterm-x/local.example/` to `wezterm-x/local/` and fill in your private machine-specific values there. The `wezterm-x/local/` directory is gitignored but still copied by the sync skill because sync works from the working tree.
 
+This repo also hosts versioned user-level agent profiles under `agent-profiles/`.
+Those files are maintained here for reuse and version control, but they are not project-level WezTerm instructions and are not part of the synced runtime.
+Project docs and project agent rules still live under this repo root and `docs/`.
+
 ## Read This Repo
 
 This file is the user-facing entry point.
@@ -36,4 +40,5 @@ User docs:
 - [`docs/user/tmux-and-status.md`](docs/user/tmux-and-status.md): tab titles, tmux layout, and status behavior
 - [`docs/user/maintenance.md`](docs/user/maintenance.md): sync, reload, and validation workflow
 
-Agent rules live in [`AGENTS.md`](AGENTS.md).
+Project agent rules live in [`AGENTS.md`](AGENTS.md).
+User-level reusable agent profiles live under [`agent-profiles/`](agent-profiles/).

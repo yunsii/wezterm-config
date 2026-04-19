@@ -13,6 +13,7 @@ Use this doc when you need ownership boundaries or file entry points.
 
 ## Entry Points
 
+- `agent-profiles/`: hosted source for versioned user-level agent profiles; these files are meant to be linked from user-level paths outside the repo and are not the project-level instruction source for this repository
 - `wezterm-x/workspaces.lua`: managed workspace definitions
 - `wezterm.lua`: top-level WezTerm config and keybindings
 - `wezterm-x/lua/`: supporting Lua modules loaded by `wezterm.lua`

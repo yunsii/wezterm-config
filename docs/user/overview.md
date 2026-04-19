@@ -37,9 +37,10 @@ The terminal font uses a platform-aware fallback chain defined in `default_termi
 5. Edit `wezterm-x/local/workspaces.lua` for your private project directories.
 6. Optionally edit `wezterm-x/local/command-panel.sh` for machine-local tmux command palette entries exposed through `Ctrl+Shift+P`.
 
- ## Repo Entry Points
+## Repo Entry Points
 
 - `wezterm.lua`: main WezTerm config
+- `agent-profiles/`: versioned source for user-level reusable agent profiles hosted in this repo; these files are for external user-level entrypoints such as `~/AGENTS.md` or `~/.claude/CLAUDE.md`, not for repo-local runtime behavior
 - `wezterm-x/workspaces.lua`: shared public workspace baseline and per-project startup defaults
 - `wezterm-x/local.example/`: tracked templates for private machine-local overrides
 - `wezterm-x/local.example/command-panel.sh`: tracked template for private machine-local tmux command palette items

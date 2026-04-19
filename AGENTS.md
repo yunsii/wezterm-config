@@ -1,6 +1,8 @@
 # AGENTS
 
 This file is the agent-facing entry point.
+It defines project-level rules for this repository.
+User-level reusable agent profiles hosted under `agent-profiles/` are separate and do not override this file unless a user explicitly points an external tool at them.
 
 ## Progressive Disclosure
 
@@ -19,6 +21,7 @@ If the task is narrow, keep the loaded context narrow.
 ## Hard Rules
 
 - This repository is the source of truth.
+- Treat `agent-profiles/` as hosted user-level profile source, not as the project-level instruction source for this repo.
 - Windows runtime files are generated from this repo by the `wezterm-runtime-sync` skill in `skills/wezterm-runtime-sync/`.
 - Keep workspace definitions in `wezterm-x/workspaces.lua`, not inline in `wezterm.lua`.
 - Keep private machine and project overrides in `wezterm-x/local/` and keep tracked templates in `wezterm-x/local.example/`.
