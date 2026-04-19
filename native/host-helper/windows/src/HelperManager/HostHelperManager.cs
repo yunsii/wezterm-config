@@ -19,7 +19,7 @@ internal sealed class HostHelperManager : IDisposable
         this.config = config;
         logger = new StructuredLogger(config.Diagnostics);
 
-        var instanceRegistry = new InstanceRegistry(Path.Combine(Path.GetDirectoryName(config.StatePath) ?? config.RuntimeDir, "window-cache.json"));
+        var instanceRegistry = new InstanceRegistry(config.WindowCachePath ?? Path.Combine(config.RuntimeDir, "window-cache.json"));
         var windowReuseService = new WindowReuseService(instanceRegistry);
         clipboardService = new ClipboardService(config, logger);
         requestRouter = new RequestRouter(

@@ -1,7 +1,7 @@
 param(
   [string]$RuntimeDir = '',
 
-  [string]$InstallRoot = "$env:LOCALAPPDATA\wezterm-runtime-helper\bin",
+  [string]$InstallRoot = "$env:LOCALAPPDATA\wezterm-runtime\bin",
 
   [string]$Trigger = 'runtime_sync',
 
@@ -11,7 +11,7 @@ param(
 
   [string]$DiagnosticsLevel = 'info',
 
-  [string]$DiagnosticsFile = "$env:USERPROFILE\.wezterm-runtime\wezterm-debug.log",
+  [string]$DiagnosticsFile = "$env:LOCALAPPDATA\wezterm-runtime\logs\helper.log",
 
   [int]$DiagnosticsMaxBytes = 5242880,
 
@@ -71,17 +71,8 @@ function Stop-InstalledHelperManagerProcesses {
   $stoppedProcessIds = @()
   foreach ($process in @(Get-Process -Name $processName -ErrorAction SilentlyContinue)) {
     try {
-      $mainModulePath = $null
-      try {
-        $mainModulePath = $process.MainModule.FileName
-      } catch {
-        $mainModulePath = $null
-      }
-
-      if ($null -eq $mainModulePath -or $mainModulePath -ieq $BinaryPath) {
-        Stop-Process -Id $process.Id -Force -ErrorAction Stop
-        $stoppedProcessIds += [string]$process.Id
-      }
+      Stop-Process -Id $process.Id -Force -ErrorAction Stop
+      $stoppedProcessIds += [string]$process.Id
     } catch {
     } finally {
       $process.Dispose()

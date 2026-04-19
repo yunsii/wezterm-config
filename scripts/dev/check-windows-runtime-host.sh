@@ -106,20 +106,20 @@ userprofile_win="$(trim_cr "$(cmd.exe /c echo %USERPROFILE% 2>/dev/null || true)
 localappdata_wsl="$(wslpath -u "$localappdata_win")"
 userprofile_wsl="$(wslpath -u "$userprofile_win")"
 
-runtime_state_win="${userprofile_win}\\.wezterm-runtime"
-runtime_state_wsl="${userprofile_wsl}/.wezterm-runtime"
+runtime_state_win="${localappdata_win}\\wezterm-runtime"
+runtime_state_wsl="${localappdata_wsl}/wezterm-runtime"
 runtime_home_win="${userprofile_win}\\.wezterm-x"
 runtime_home_wsl="${userprofile_wsl}/.wezterm-x"
-debug_log_wsl="${runtime_state_wsl}/wezterm-debug.log"
+helper_log_wsl="${runtime_state_wsl}/logs/helper.log"
 
 helper_ensure_wsl="${runtime_home_wsl}/scripts/ensure-windows-runtime-helper.ps1"
-helper_state_win="${localappdata_win}\\wezterm-runtime-helper\\state.env"
-helper_state_wsl="${localappdata_wsl}/wezterm-runtime-helper/state.env"
-helper_window_cache_wsl="${localappdata_wsl}/wezterm-runtime-helper/window-cache.json"
-helper_client_wsl="${localappdata_wsl}/wezterm-runtime-helper/bin/helperctl.exe"
+helper_state_win="${runtime_state_win}\\state\\helper\\state.env"
+helper_state_wsl="${runtime_state_wsl}/state/helper/state.env"
+helper_window_cache_wsl="${runtime_state_wsl}/cache/helper/window-cache.json"
+helper_client_wsl="${runtime_state_wsl}/bin/helperctl.exe"
 helper_ipc_endpoint='\\.\pipe\wezterm-host-helper-v1'
 
-clipboard_output_win="${localappdata_win}\\wezterm-clipboard-images"
+clipboard_output_win="${runtime_state_win}\\state\\clipboard\\exports"
 
 distro="${WSL_DISTRO_NAME:-}"
 [[ -n "$distro" ]] || distro="Ubuntu-22.04"
@@ -197,7 +197,7 @@ wait_for_log_match() {
   local limit=$((timeout_seconds * 10))
   local i
   for ((i=0; i<limit; i+=1)); do
-    if rg -n "$pattern" "$debug_log_wsl" >/dev/null 2>&1; then
+    if rg -n "$pattern" "$helper_log_wsl" >/dev/null 2>&1; then
       return 0
     fi
     sleep 0.1
@@ -229,7 +229,7 @@ ensure_helper() {
     -DiagnosticsEnabled 1 \
     -DiagnosticsCategoryEnabled 1 \
     -DiagnosticsLevel info \
-    -DiagnosticsFile "${runtime_state_win}\\wezterm-debug.log" \
+    -DiagnosticsFile "${runtime_state_win}\\logs\\helper.log" \
     -DiagnosticsMaxBytes 5242880 \
     -DiagnosticsMaxFiles 5 >/dev/null
 }

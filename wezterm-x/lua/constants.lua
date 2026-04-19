@@ -5,16 +5,6 @@ local function join_path(...)
   return table.concat({ ... }, path_sep)
 end
 
-local runtime_dir = rawget(_G, 'WEZTERM_RUNTIME_DIR')
-if not runtime_dir or runtime_dir == '' then
-  runtime_dir = join_path(wezterm.config_dir, '.wezterm-x')
-end
-local runtime_state_dir = rawget(_G, 'WEZTERM_RUNTIME_STATE_DIR')
-if not runtime_state_dir or runtime_state_dir == '' then
-  runtime_state_dir = join_path(wezterm.config_dir, '.wezterm-runtime')
-end
-local helpers = dofile(join_path(runtime_dir, 'lua', 'helpers.lua'))
-
 local function detect_host_os()
   local triple = wezterm.target_triple or ''
 
@@ -28,6 +18,43 @@ local function detect_host_os()
 
   return 'linux'
 end
+
+local host_os = detect_host_os()
+
+local runtime_dir = rawget(_G, 'WEZTERM_RUNTIME_DIR')
+if not runtime_dir or runtime_dir == '' then
+  runtime_dir = join_path(wezterm.config_dir, '.wezterm-x')
+end
+
+local function default_runtime_state_dir()
+  if host_os == 'windows' then
+    local local_app_data = os.getenv 'LOCALAPPDATA'
+    if local_app_data and local_app_data ~= '' then
+      return join_path(local_app_data, 'wezterm-runtime')
+    end
+
+    return join_path(wezterm.config_dir, '.wezterm-runtime')
+  end
+
+  local xdg_state_home = os.getenv 'XDG_STATE_HOME'
+  if xdg_state_home and xdg_state_home ~= '' then
+    return join_path(xdg_state_home, 'wezterm-runtime')
+  end
+
+  local home = os.getenv 'HOME'
+  if home and home ~= '' then
+    return join_path(home, '.local', 'state', 'wezterm-runtime')
+  end
+
+  return join_path(wezterm.config_dir, '.wezterm-runtime')
+end
+
+local runtime_state_dir = rawget(_G, 'WEZTERM_RUNTIME_STATE_DIR')
+if not runtime_state_dir or runtime_state_dir == '' then
+  runtime_state_dir = default_runtime_state_dir()
+end
+
+local helpers = dofile(join_path(runtime_dir, 'lua', 'helpers.lua'))
 
 local function default_runtime_mode(host_os)
   if host_os == 'windows' then
@@ -103,12 +130,7 @@ local function default_clipboard_image_output_dir(host_os)
     return nil
   end
 
-  local local_app_data = os.getenv 'LOCALAPPDATA'
-  if local_app_data and local_app_data ~= '' then
-    return local_app_data .. '\\wezterm-clipboard-images'
-  end
-
-  return nil
+  return join_path(runtime_state_dir, 'state', 'clipboard', 'exports')
 end
 
 local function default_windows_runtime_helper_state_path(host_os)
@@ -116,12 +138,7 @@ local function default_windows_runtime_helper_state_path(host_os)
     return nil
   end
 
-  local local_app_data = os.getenv 'LOCALAPPDATA'
-  if local_app_data and local_app_data ~= '' then
-    return local_app_data .. '\\wezterm-runtime-helper\\state.env'
-  end
-
-  return nil
+  return join_path(runtime_state_dir, 'state', 'helper', 'state.env')
 end
 
 local function default_windows_runtime_helper_client_path(host_os)
@@ -129,12 +146,15 @@ local function default_windows_runtime_helper_client_path(host_os)
     return nil
   end
 
-  local local_app_data = os.getenv 'LOCALAPPDATA'
-  if local_app_data and local_app_data ~= '' then
-    return local_app_data .. '\\wezterm-runtime-helper\\bin\\helperctl.exe'
+  return join_path(runtime_state_dir, 'bin', 'helperctl.exe')
+end
+
+local function default_windows_helper_diagnostics_file(host_os)
+  if host_os ~= 'windows' then
+    return nil
   end
 
-  return nil
+  return join_path(runtime_state_dir, 'logs', 'helper.log')
 end
 
 local function default_windows_runtime_helper_ipc_endpoint(host_os)
@@ -160,11 +180,7 @@ local function default_launch_menu(host_os)
 end
 
 local function default_diagnostics_file(host_os)
-  if host_os == 'windows' then
-    return runtime_state_dir .. '\\wezterm-debug.log'
-  end
-
-  return runtime_state_dir .. '/wezterm-debug.log'
+  return join_path(runtime_state_dir, 'logs', 'wezterm.log')
 end
 
 local function read_repo_root_override()
@@ -332,7 +348,6 @@ local user_worktree_task_env = helpers.load_optional_env_file(default_worktree_t
 local repo_managed_cli_env = parse_managed_cli_env(repo_worktree_task_env)
 local user_managed_cli_env = parse_managed_cli_env(user_worktree_task_env)
 local local_managed_cli_profile = normalize_agent_profile_name(shared_env.MANAGED_AGENT_PROFILE)
-local host_os = detect_host_os()
 
 local base_constants = {
   host_os = host_os,
@@ -418,6 +433,7 @@ local base_constants = {
       runtime_dir = runtime_dir,
       helper_script = 'scripts\\ensure-windows-runtime-helper.ps1',
       helper_client_exe = default_windows_runtime_helper_client_path(host_os),
+      helper_log_file = default_windows_helper_diagnostics_file(host_os),
       helper_ipc_endpoint = default_windows_runtime_helper_ipc_endpoint(host_os),
       helper_state_path = default_windows_runtime_helper_state_path(host_os),
       helper_request_timeout_ms = 5000,

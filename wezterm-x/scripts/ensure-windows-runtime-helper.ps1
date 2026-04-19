@@ -1,5 +1,5 @@
 param(
-  [string]$StatePath = "$env:LOCALAPPDATA\wezterm-runtime-helper\state.env",
+  [string]$StatePath = "$env:LOCALAPPDATA\wezterm-runtime\state\helper\state.env",
 
   [string]$ClipboardOutputDir = '',
 
@@ -132,17 +132,27 @@ function Get-ExpectedRuntimeDir {
 }
 
 function Get-ManagerPaths {
-  $managerRoot = Join-Path $env:LOCALAPPDATA 'wezterm-runtime-helper'
+  $managerRoot = Join-Path $env:LOCALAPPDATA 'wezterm-runtime'
   return @{
     Root = $managerRoot
     Exe = Join-Path $managerRoot 'bin\helper-manager.exe'
-    Config = Join-Path $managerRoot 'manager-config.json'
+    Config = Join-Path $managerRoot 'state\helper\manager-config.json'
+    WindowCache = Join-Path $managerRoot 'cache\helper\window-cache.json'
     IpcEndpoint = '\\.\pipe\wezterm-host-helper-v1'
   }
 }
 
 function Stop-StaleProcesses {
   param([hashtable]$State)
+
+  foreach ($process in @(Get-Process -Name 'helper-manager' -ErrorAction SilentlyContinue)) {
+    try {
+      Stop-Process -Id $process.Id -Force -ErrorAction Stop
+    } catch {
+    } finally {
+      $process.Dispose()
+    }
+  }
 
   if ($null -ne $State) {
     $helperPid = 0
@@ -165,6 +175,7 @@ function Write-ManagerConfig {
   $config = [ordered]@{
     runtimeDir = $RuntimeDir
     statePath = $StatePath
+    windowCachePath = $ManagerPaths.WindowCache
     ipcEndpoint = $ManagerPaths.IpcEndpoint
     clipboardOutputDir = $ClipboardOutputDir
     clipboardWslDistro = $ClipboardWslDistro

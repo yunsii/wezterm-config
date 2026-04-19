@@ -47,15 +47,17 @@ bash tests/tmux-reset/run.sh
 
 That suite uses a dedicated temporary `tmux -L ...` socket, a temporary `HOME`, and an internal shim so it does not touch the live default tmux server. The current cases cover default-session resolution, in-place reset, current-workspace cleanup, global cleanup, and fallback-to-home behavior when the cwd is unusable.
 
-In `hybrid-wsl`, `Ctrl+v` smart image paste now resolves clipboard state through the Windows host helper over IPC at paste time. The clipboard decision no longer depends on a separate clipboard state file or listener log; the live paste result comes directly from the helper request/response path, and request diagnostics are unified in `%USERPROFILE%\.wezterm-runtime\wezterm-debug.log`. If text paste is fast but image-path paste stops working, sync the runtime, let WezTerm auto-reload, and inspect the shared `clipboard` trace lines there.
+In `hybrid-wsl`, `Ctrl+v` smart image paste now resolves clipboard state through the Windows host helper over IPC at paste time. The clipboard decision no longer depends on a separate clipboard state file or listener log; the live paste result comes directly from the helper request/response path. If text paste is fast but image-path paste stops working, sync the runtime, let WezTerm auto-reload, and inspect the shared `trace_id` across `%LOCALAPPDATA%\wezterm-runtime\logs\wezterm.log` and `%LOCALAPPDATA%\wezterm-runtime\logs\helper.log`.
 The Windows host smoke test now validates clipboard behavior with controlled IPC writes as well: it writes a formatted timestamp string to the Windows clipboard, resolves it back as text, waits one second, then writes the tracked [`assets/copy-test.png`](/home/yuns/github/wezterm-config/assets/copy-test.png) image to the clipboard and resolves it back as image. The one-second gap is intentional so clipboard history tools like Ditto do not treat the second write as an update that happened "too fast" and skip it. This keeps clipboard regression checks independent of whatever is currently on the desktop clipboard.
+After migrating to the new runtime layout, run [`scripts/dev/cleanup-runtime-legacy-paths.sh`](/home/yuns/github/wezterm-config/scripts/dev/cleanup-runtime-legacy-paths.sh) once from WSL to remove old runtime directories and the legacy single-file WSL log. The script deletes itself after a successful run.
 
 ## Windows Host Design
 
 - In `hybrid-wsl`, WezTerm Lua is only responsible for request generation, helper bootstrap, and request-side diagnostics.
-- `%LOCALAPPDATA%\wezterm-runtime-helper\bin\helper-manager.exe` is the active Windows host control plane. It owns VS Code focus/open, Chrome debug-browser reuse, clipboard monitoring, and request-side decision logging.
-- `%LOCALAPPDATA%\wezterm-runtime-helper\bin\helperctl.exe` is the thin console IPC client that WezTerm Lua, tmux-side scripts, and smoke tests invoke when they need a request/response.
-- `%USERPROFILE%\.wezterm-native\host-helper\windows\` is the source tree that sync publishes and the installer compiles from; `%LOCALAPPDATA%\wezterm-runtime-helper\bin\` is the stable installed binary location that the runtime actually launches.
+- `%LOCALAPPDATA%\wezterm-runtime\` is the Windows runtime state root. It keeps `logs/`, `state/`, `cache/`, and `bin/` in one place.
+- `%LOCALAPPDATA%\wezterm-runtime\bin\helper-manager.exe` is the active Windows host control plane. It owns VS Code focus/open, Chrome debug-browser reuse, clipboard monitoring, and request-side decision logging.
+- `%LOCALAPPDATA%\wezterm-runtime\bin\helperctl.exe` is the thin console IPC client that WezTerm Lua, tmux-side scripts, and smoke tests invoke when they need a request/response.
+- `%USERPROFILE%\.wezterm-native\host-helper\windows\` is the source tree that sync publishes and the installer compiles from; `%LOCALAPPDATA%\wezterm-runtime\bin\` is the stable installed binary location that the runtime actually launches.
 - `wezterm-x/scripts/` is now intentionally thin on Windows. It keeps the helper installer/launcher/bootstrap pieces, but the old Windows request handlers and worker-plugin chain are no longer part of the active design.
 
 ### Core Flow
@@ -95,14 +97,16 @@ flowchart LR
 ### Active Hybrid Flow
 
 - In `hybrid-wsl`, new WSL tabs in the built-in `default` workspace now start through `scripts/runtime/open-default-shell-session.sh`, which creates a lightweight single-pane tmux session, keeps tmux status rendering enabled, and marks it `destroy-unattached on` so closing the tab still behaves like an ephemeral shell.
-- WezTerm Lua generates a typed request envelope with `trace_id`, `domain`, and `action`, then invokes `%LOCALAPPDATA%\wezterm-runtime-helper\bin\helperctl.exe` against the stable named pipe `\\.\pipe\wezterm-host-helper-v1`.
+- WezTerm Lua generates a typed request envelope with `trace_id`, `domain`, and `action`, then invokes `%LOCALAPPDATA%\wezterm-runtime\bin\helperctl.exe` against the stable named pipe `\\.\pipe\wezterm-host-helper-v1`.
 - The steady-state path now sends that IPC request first; only when the request fails does WezTerm synchronously run `wezterm-x/scripts/ensure-windows-runtime-helper.ps1` and retry once.
 - `wezterm-x/scripts/ensure-windows-runtime-helper.ps1` is only a thin bootstrap: it checks the installed helper heartbeat/config, writes `manager-config.json`, and launches the stable native helper if needed.
-- `%LOCALAPPDATA%\wezterm-runtime-helper\bin\helper-manager.exe` hosts the named-pipe server, evaluates reuse/launch policy, writes decision logs, and updates the persisted instance registry.
-- `%LOCALAPPDATA%\wezterm-runtime-helper\bin\helperctl.exe` keeps request/response transport out of WezTerm Lua and avoids depending on the `WinExe` server binary for stdout.
-- `%LOCALAPPDATA%\wezterm-runtime-helper\window-cache.json` is the persisted instance registry for reusable app windows.
-- `%LOCALAPPDATA%\wezterm-runtime-helper\state.env` is now bootstrap state, not request-time routing state.
-- `%USERPROFILE%\.wezterm-runtime\wezterm-debug.log` is the main cross-layer diagnostics file; use one `trace_id` to follow Lua request submission, helper reuse evaluation, and request completion.
+- `%LOCALAPPDATA%\wezterm-runtime\bin\helper-manager.exe` hosts the named-pipe server, evaluates reuse/launch policy, writes decision logs, and updates the persisted instance registry.
+- `%LOCALAPPDATA%\wezterm-runtime\bin\helperctl.exe` keeps request/response transport out of WezTerm Lua and avoids depending on the `WinExe` server binary for stdout.
+- `%LOCALAPPDATA%\wezterm-runtime\cache\helper\window-cache.json` is the persisted instance registry for reusable app windows.
+- `%LOCALAPPDATA%\wezterm-runtime\state\helper\state.env` is now bootstrap state, not request-time routing state.
+- `%LOCALAPPDATA%\wezterm-runtime\state\helper\manager-config.json` is the persisted helper bootstrap config snapshot.
+- `%LOCALAPPDATA%\wezterm-runtime\state\clipboard\exports\` stores exported clipboard images that bridge Windows clipboard reads back into WSL paste flows.
+- `%LOCALAPPDATA%\wezterm-runtime\logs\wezterm.log` and `%LOCALAPPDATA%\wezterm-runtime\logs\helper.log` are the main diagnostics files; use one `trace_id` to follow Lua request submission, helper reuse evaluation, and request completion.
 
 ## Posix Host Design
 
@@ -230,8 +234,8 @@ Reclaim only removes skill-managed linked worktrees under the repository parent'
 - Leave `WEZTERM_RUNTIME_LOG_CATEGORIES` empty to capture all runtime categories, or set a comma-separated list such as `alt_o,workspace,worktree`.
 - Current runtime categories include `alt_o`, `workspace`, `worktree`, `managed_command`, `command_panel`, `task`, `provider`, and `sync`.
 - `command_panel` diagnostics now carry decision fields across the WezTerm-to-tmux palette path: WezTerm logs whether `Ctrl+Shift+P` used `decision_path="user_key_transport"` or fell back to `decision_path="wezterm_native_palette"`, and tmux-side palette logs include `trigger_source` such as `user0_transport`.
-- In `hybrid-wsl`, the Windows-side `Alt+v` launcher now writes structured `alt_o` lines into the same WezTerm diagnostics file under `%USERPROFILE%\.wezterm-runtime\wezterm-debug.log`, reusing the same `trace_id` and rotation settings as the Lua-side diagnostics path; those lines include millisecond timestamps plus per-phase and total `duration_ms` fields for launch-path profiling. The diagnostics category remains `alt_o` for compatibility.
-- In `hybrid-wsl`, the Windows host control plane is now a stable `%LOCALAPPDATA%\wezterm-runtime-helper\bin\helper-manager.exe` process instead of a versioned PowerShell worker script. It still writes heartbeat state to `%LOCALAPPDATA%\wezterm-runtime-helper\state.env` for bootstrap health, while request delivery goes through the stable named pipe `\\.\pipe\wezterm-host-helper-v1`.
+- In `hybrid-wsl`, the Windows-side `Alt+v` launcher now writes structured `alt_o` lines into `%LOCALAPPDATA%\wezterm-runtime\logs\helper.log`, reusing the same `trace_id` and rotation settings as the helper diagnostics path; those lines include millisecond timestamps plus per-phase and total `duration_ms` fields for launch-path profiling. The diagnostics category remains `alt_o` for compatibility.
+- In `hybrid-wsl`, the Windows host control plane is now a stable `%LOCALAPPDATA%\wezterm-runtime\bin\helper-manager.exe` process instead of a versioned PowerShell worker script. It still writes heartbeat state to `%LOCALAPPDATA%\wezterm-runtime\state\helper\state.env` for bootstrap health, while request delivery goes through the stable named pipe `\\.\pipe\wezterm-host-helper-v1`.
 - `Alt+v` and `Alt+b` requests are now handled directly inside that same `helper-manager.exe` process. The old PowerShell request handlers and worker plugin chain are no longer part of the active Windows hot path.
 - Host-helper reuse diagnostics now emit explicit decision fields such as `decision_path`, `registry_hit`, `matched_process_count`, `matched_process_ids`, and `matched_window_found`, so one `trace_id` is enough to explain why a request reused an existing window or fell through to launch.
 - Clipboard image monitoring now runs inside that same `helper-manager.exe` process without launching a second standalone listener PowerShell window. `Ctrl+v` no longer depends on the state-file heartbeat to decide whether to paste an image path; it issues a live clipboard IPC request instead.
@@ -284,7 +288,7 @@ The `open-project-session.sh` helper now warns when it detects tmux older than 3
 - The stable top-level `%USERPROFILE%\.wezterm.lua` bootstrap is still updated last, so normal WezTerm file watching continues to auto-reload the refreshed runtime after sync.
 - The sync step still writes `repo-root.txt` and `repo-main-root.txt` into `%USERPROFILE%\.wezterm-x` so managed runtime code can locate the source repo and main worktree.
 - On Windows targets, every sync now runs `wezterm-x/scripts/install-windows-runtime-helper-manager.ps1` and prints the helper install/build log to the terminal. If that install step fails, the whole sync fails instead of silently leaving an older helper binary running.
-- On Windows targets, the sync step also publishes `%USERPROFILE%\.wezterm-native\host-helper\windows\` into the stable `%LOCALAPPDATA%\wezterm-runtime-helper\bin\` install root so the host helper executable does not move every time the runtime is resynced.
+- On Windows targets, the sync step also publishes `%USERPROFILE%\.wezterm-native\host-helper\windows\` into the stable `%LOCALAPPDATA%\wezterm-runtime\bin\` install root so the host helper executable does not move every time the runtime is resynced.
 - The synced `wezterm-x/scripts/` directory is now intentionally thin on Windows: it keeps the helper installer/launcher/bootstrap pieces and cross-platform shell helpers, while the actual VS Code/Chrome/clipboard request handling lives under `native/host-helper/windows/`.
 - `.sync-target` is repo-local and gitignored. If you need to change the target home later, delete it and rerun the script to re-prompt.
 

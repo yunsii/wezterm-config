@@ -207,7 +207,7 @@ internal static class HelperCtlProgram
 
             Console.Error.WriteLine(fullText);
             File.AppendAllText(
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wezterm-runtime-helper", "helperctl-bootstrap.log"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wezterm-runtime", "logs", "helperctl-bootstrap.log"),
                 $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {fullText}{Environment.NewLine}",
                 new UTF8Encoding(false));
         }

@@ -39,14 +39,15 @@ detect_windows_paths() {
   WINDOWS_USERPROFILE_WIN="$userprofile_win"
   WINDOWS_LOCALAPPDATA_WSL="$(wslpath -u "$WINDOWS_LOCALAPPDATA_WIN")"
   WINDOWS_USERPROFILE_WSL="$(wslpath -u "$WINDOWS_USERPROFILE_WIN")"
-  HELPER_STATE_WIN="${WINDOWS_LOCALAPPDATA_WIN}\\wezterm-runtime-helper\\state.env"
-  HELPER_STATE_WSL="${WINDOWS_LOCALAPPDATA_WSL}/wezterm-runtime-helper/state.env"
-  HELPER_CLIENT_WSL="${WINDOWS_LOCALAPPDATA_WSL}/wezterm-runtime-helper/bin/helperctl.exe"
+  WINDOWS_RUNTIME_STATE_WIN="${WINDOWS_LOCALAPPDATA_WIN}\\wezterm-runtime"
+  WINDOWS_RUNTIME_STATE_WSL="${WINDOWS_LOCALAPPDATA_WSL}/wezterm-runtime"
+  HELPER_STATE_WIN="${WINDOWS_RUNTIME_STATE_WIN}\\state\\helper\\state.env"
+  HELPER_STATE_WSL="${WINDOWS_RUNTIME_STATE_WSL}/state/helper/state.env"
+  HELPER_CLIENT_WSL="${WINDOWS_RUNTIME_STATE_WSL}/bin/helperctl.exe"
   HELPER_IPC_ENDPOINT='\\.\pipe\wezterm-host-helper-v1'
-  local runtime_state_win="${WINDOWS_USERPROFILE_WIN}\\.wezterm-runtime"
   WINDOWS_RUNTIME_HOME_WIN="${WINDOWS_USERPROFILE_WIN}\\.wezterm-x"
   WINDOWS_RUNTIME_HOME_WSL="${WINDOWS_USERPROFILE_WSL}/.wezterm-x"
-  WINDOWS_DIAGNOSTICS_FILE_WIN="${runtime_state_win}\\wezterm-debug.log"
+  WINDOWS_DIAGNOSTICS_FILE_WIN="${WINDOWS_RUNTIME_STATE_WIN}\\logs\\helper.log"
 
   WINDOWS_HELPER_ENSURE_SCRIPT_WIN="${WINDOWS_RUNTIME_HOME_WIN}\\scripts\\ensure-windows-runtime-helper.ps1"
 }

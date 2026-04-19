@@ -8,6 +8,7 @@ internal sealed class HelperConfig
     public required string ConfigHash { get; init; }
     public required string RuntimeDir { get; init; }
     public required string StatePath { get; init; }
+    public string? WindowCachePath { get; init; }
     public required string IpcEndpoint { get; init; }
     public required DiagnosticConfig Diagnostics { get; init; }
     public string? ClipboardOutputDir { get; init; }
@@ -39,6 +40,7 @@ internal sealed class HelperConfig
             ConfigHash = parsed.ConfigHash,
             RuntimeDir = parsed.RuntimeDir,
             StatePath = parsed.StatePath,
+            WindowCachePath = ResolveWindowCachePath(parsed.WindowCachePath),
             IpcEndpoint = parsed.IpcEndpoint,
             Diagnostics = parsed.Diagnostics,
             ClipboardOutputDir = ResolveClipboardOutputDir(parsed.ClipboardOutputDir),
@@ -59,7 +61,29 @@ internal sealed class HelperConfig
             throw new InvalidOperationException("LocalApplicationData was unavailable for clipboard exports");
         }
 
-        var fallbackPath = Path.Combine(localAppData, "wezterm-clipboard-images");
+        var fallbackPath = Path.Combine(localAppData, "wezterm-runtime", "state", "clipboard", "exports");
+        if (string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return fallbackPath;
+        }
+
+        if (!Path.IsPathRooted(configuredPath))
+        {
+            return fallbackPath;
+        }
+
+        return Path.GetFullPath(configuredPath);
+    }
+
+    private static string ResolveWindowCachePath(string? configuredPath)
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(localAppData))
+        {
+            throw new InvalidOperationException("LocalApplicationData was unavailable for helper window cache");
+        }
+
+        var fallbackPath = Path.Combine(localAppData, "wezterm-runtime", "cache", "helper", "window-cache.json");
         if (string.IsNullOrWhiteSpace(configuredPath))
         {
             return fallbackPath;

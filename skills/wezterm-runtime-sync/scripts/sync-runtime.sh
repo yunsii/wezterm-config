@@ -50,7 +50,7 @@ install_windows_helper_manager() {
   runtime_dir_win="$(wslpath -w "$target_runtime_dir" 2>/dev/null || true)"
   target_home="$(dirname "$target_runtime_dir")"
   target_home_win="$(wslpath -w "$target_home" 2>/dev/null || true)"
-  [[ -n "$target_home_win" ]] && diagnostics_file_win="${target_home_win}\\.wezterm-runtime\\wezterm-debug.log"
+  [[ -n "$target_home_win" ]] && diagnostics_file_win="${target_home_win}\\AppData\\Local\\wezterm-runtime\\logs\\helper.log"
   [[ -n "$install_script_win" && -n "$runtime_dir_win" && -n "$diagnostics_file_win" ]] || return 0
 
   sync_trace "step=helper-install status=starting target_runtime_dir=$target_runtime_dir runtime_dir_win=$runtime_dir_win install_script_win=$install_script_win"
@@ -197,6 +197,17 @@ resolve_main_repo_root() {
   fi
 
   dirname "$common_dir"
+}
+
+target_runtime_state_dir() {
+  local target_home="${1:?missing target home}"
+
+  if [[ "$target_home" =~ ^/mnt/[A-Za-z]/Users/[^/]+$ ]]; then
+    printf '%s/AppData/Local/wezterm-runtime\n' "$target_home"
+    return 0
+  fi
+
+  printf '%s/.local/state/wezterm-runtime\n' "$target_home"
 }
 
 append_unique_candidate() {
@@ -400,7 +411,7 @@ MAIN_REPO_ROOT="$(resolve_main_repo_root "$REPO_ROOT")"
 
 TARGET_HOME="$(choose_target_home)"
 TARGET_FILE="$TARGET_HOME/.wezterm.lua"
-TARGET_RUNTIME_STATE_DIR="$TARGET_HOME/.wezterm-runtime"
+TARGET_RUNTIME_STATE_DIR="$(target_runtime_state_dir "$TARGET_HOME")"
 TARGET_RUNTIME_DIR="$TARGET_HOME/.wezterm-x"
 TARGET_NATIVE_DIR="$TARGET_HOME/.wezterm-native"
 TEMP_RUNTIME_DIR="$TARGET_HOME/.wezterm-x.tmp.$$"

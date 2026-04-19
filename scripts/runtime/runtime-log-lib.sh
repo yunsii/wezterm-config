@@ -18,7 +18,7 @@ runtime_log_init() {
   : "${WEZTERM_RUNTIME_LOG_ENABLED:=1}"
   : "${WEZTERM_RUNTIME_LOG_LEVEL:=info}"
   : "${WEZTERM_RUNTIME_LOG_CATEGORIES:=}"
-  : "${WEZTERM_RUNTIME_LOG_FILE:=${XDG_STATE_HOME:-$HOME/.local/state}/wezterm-runtime.log}"
+  : "${WEZTERM_RUNTIME_LOG_FILE:=${XDG_STATE_HOME:-$HOME/.local/state}/wezterm-runtime/logs/runtime.log}"
   : "${WEZTERM_RUNTIME_LOG_ROTATE_BYTES:=5242880}"
   : "${WEZTERM_RUNTIME_LOG_ROTATE_COUNT:=5}"
   : "${WEZTERM_RUNTIME_LOG_SOURCE:=$(basename "${0:-runtime}")}"

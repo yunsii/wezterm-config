@@ -83,7 +83,7 @@ internal static class Program
         try
         {
             var text = string.IsNullOrWhiteSpace(message) ? "helper-manager failed" : message;
-            var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wezterm-runtime-helper");
+            var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wezterm-runtime", "logs");
             FileSystemUtil.EnsureDirectory(logDir);
             File.AppendAllText(
                 Path.Combine(logDir, "manager-bootstrap.log"),

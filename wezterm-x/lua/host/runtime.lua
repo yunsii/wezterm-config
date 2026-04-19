@@ -205,6 +205,7 @@ function M:helper_command()
   local runtime_dir = self:helper_runtime_dir()
   local helper_script = integration.helper_script or 'scripts\\ensure-windows-runtime-helper.ps1'
   local diagnostics = self.constants.diagnostics and self.constants.diagnostics.wezterm or {}
+  local helper_log_file = integration.helper_log_file or diagnostics.file or ''
   local clipboard = self:integration 'clipboard_image'
   local helper_category_enabled = diagnostics_capture_enabled(self.constants, 'host_helper')
     or diagnostics_capture_enabled(self.constants, 'alt_o')
@@ -244,7 +245,7 @@ function M:helper_command()
     '-DiagnosticsLevel',
     diagnostics.level or 'info',
     '-DiagnosticsFile',
-    diagnostics.file or '',
+    helper_log_file,
     '-DiagnosticsMaxBytes',
     tostring(diagnostics.max_bytes or 0),
     '-DiagnosticsMaxFiles',
