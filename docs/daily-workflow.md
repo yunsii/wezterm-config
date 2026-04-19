@@ -52,6 +52,20 @@ WEZTERM_WINDOWS_HELPER_INSTALL_SOURCE=release skills/wezterm-runtime-sync/script
 
 Use `WEZTERM_WINDOWS_HELPER_INSTALL_SOURCE=local` when you want to verify the local-build path explicitly. Leave it unset for normal `auto` behavior.
 
+When GitHub download speed is poor, the Windows helper installer now checks these release-archive sources in order before it falls back to the manifest URL:
+
+- `WEZTERM_WINDOWS_HELPER_RELEASE_ARCHIVE=C:\path\to\asset.zip`
+- `%LOCALAPPDATA%\wezterm-runtime\artifacts\host-helper\<version>\<assetName>`
+- `%LOCALAPPDATA%\wezterm-runtime\artifacts\host-helper\<assetName>`
+- the existing `%LOCALAPPDATA%\wezterm-runtime\cache\downloads\<version>\<assetName>` cache entry
+
+For network overrides, use one of:
+
+- `WEZTERM_WINDOWS_HELPER_RELEASE_URL=https://.../asset.zip`
+- `WEZTERM_WINDOWS_HELPER_RELEASE_BASE_URL=https://mirror.example.com/host-helper/<version>`
+
+Both local archives and URL overrides are still verified against the manifest SHA-256 before installation.
+
 ## Reload Rules
 
 - Current WezTerm versions watch the loaded config file and `require`-loaded Lua files automatically. Use `Ctrl+Shift+R` only to force a reload when needed.

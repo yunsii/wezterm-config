@@ -231,12 +231,152 @@ function Get-ReleaseDownloadCacheRoot {
   return Join-Path $env:LOCALAPPDATA 'wezterm-runtime\cache\downloads'
 }
 
+function Get-ReleasePreloadRoot {
+  return Join-Path $env:LOCALAPPDATA 'wezterm-runtime\artifacts\host-helper'
+}
+
 function Get-FileSha256 {
   param(
     [string]$Path
   )
 
   return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path -ErrorAction Stop).Hash.ToLowerInvariant()
+}
+
+function Invoke-ReleaseDownloadWithCurl {
+  param(
+    [string]$Url,
+    [string]$OutFile
+  )
+
+  $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+  if ($null -eq $curl) {
+    return $false
+  }
+
+  & $curl.Source `
+    --location `
+    --fail `
+    --silent `
+    --show-error `
+    --output $OutFile `
+    $Url
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "curl.exe download failed with exit code $LASTEXITCODE"
+  }
+
+  return $true
+}
+
+function Invoke-ReleaseDownloadWithPowerShell {
+  param(
+    [string]$Url,
+    [string]$OutFile
+  )
+
+  Invoke-WebRequest -Uri $Url -OutFile $OutFile -ErrorAction Stop | Out-Null
+}
+
+function Invoke-ReleaseDownload {
+  param(
+    [string]$Url,
+    [string]$OutFile
+  )
+
+  $downloaders = @(
+    @{ Name = 'curl.exe'; Action = { Invoke-ReleaseDownloadWithCurl -Url $Url -OutFile $OutFile } },
+    @{ Name = 'Invoke-WebRequest'; Action = { Invoke-ReleaseDownloadWithPowerShell -Url $Url -OutFile $OutFile; $true } }
+  )
+
+  $lastError = $null
+  foreach ($downloader in $downloaders) {
+    try {
+      $result = & $downloader.Action
+      if ($result) {
+        return [string]$downloader.Name
+      }
+    } catch {
+      $lastError = $_
+      Write-Output ("[helper-install] download_attempt_failed=" + [string]$downloader.Name)
+      Write-Output ("[helper-install] download_attempt_error=" + $_.Exception.Message)
+    }
+  }
+
+  if ($null -ne $lastError) {
+    throw $lastError
+  }
+
+  throw 'no release downloader is available'
+}
+
+function Test-ValidatedReleaseArchive {
+  param(
+    [string]$Path,
+    [string]$ExpectedSha,
+    [string]$Source,
+    [switch]$RequirePath
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Path)) {
+    if ($RequirePath) {
+      throw "release archive path is required for source: $Source"
+    }
+    return $null
+  }
+
+  if (-not (Test-Path -LiteralPath $Path)) {
+    if ($RequirePath) {
+      throw "release archive path does not exist for source ${Source}: $Path"
+    }
+    return $null
+  }
+
+  $actualSha = Get-FileSha256 -Path $Path
+  if ($actualSha -ne $ExpectedSha) {
+    if ($RequirePath) {
+      throw "release archive checksum mismatch for source ${Source}: expected $ExpectedSha, got $actualSha"
+    }
+
+    Write-Output ("[helper-install] skipped_archive_path=" + $Path)
+    Write-Output ("[helper-install] skipped_archive_source=" + $Source)
+    Write-Output ("[helper-install] skipped_archive_reason=checksum_mismatch")
+    return $null
+  }
+
+  return @{
+    Path = $Path
+    Source = $Source
+  }
+}
+
+function Resolve-ReleaseDownloadUrl {
+  param(
+    [pscustomobject]$Manifest,
+    [string]$AssetName
+  )
+
+  $overrideUrl = [string]$env:WEZTERM_WINDOWS_HELPER_RELEASE_URL
+  if (-not [string]::IsNullOrWhiteSpace($overrideUrl)) {
+    return @{
+      Url = $overrideUrl
+      Source = 'override_url'
+    }
+  }
+
+  $baseUrl = [string]$env:WEZTERM_WINDOWS_HELPER_RELEASE_BASE_URL
+  if (-not [string]::IsNullOrWhiteSpace($baseUrl)) {
+    $trimmed = $baseUrl.TrimEnd('/', '\')
+    return @{
+      Url = "$trimmed/$AssetName"
+      Source = 'base_url'
+    }
+  }
+
+  return @{
+    Url = [string]$Manifest.downloadUrl
+    Source = 'manifest_url'
+  }
 }
 
 function Ensure-ReleaseArchive {
@@ -261,23 +401,57 @@ function Ensure-ReleaseArchive {
   $cacheRoot = Get-ReleaseDownloadCacheRoot
   $versionDir = Join-Path $cacheRoot ([string]$Manifest.version)
   $archivePath = Join-Path $versionDir $assetName
+  $preloadRoot = Get-ReleasePreloadRoot
+  $versionedPreloadPath = Join-Path (Join-Path $preloadRoot ([string]$Manifest.version)) $assetName
+  $flatPreloadPath = Join-Path $preloadRoot $assetName
   $expectedSha = ([string]$Manifest.sha256).ToLowerInvariant()
-  $downloadUrl = [string]$Manifest.downloadUrl
 
   $null = New-Item -ItemType Directory -Force -Path $versionDir
 
-  if (Test-Path -LiteralPath $archivePath) {
-    if ((Get-FileSha256 -Path $archivePath) -eq $expectedSha) {
-      return $archivePath
+  $explicitArchivePath = [string]$env:WEZTERM_WINDOWS_HELPER_RELEASE_ARCHIVE
+  if (-not [string]::IsNullOrWhiteSpace($explicitArchivePath)) {
+    $resolvedExplicitArchive = Test-ValidatedReleaseArchive `
+      -Path $explicitArchivePath `
+      -ExpectedSha $expectedSha `
+      -Source 'explicit_archive' `
+      -RequirePath
+    return @{
+      Path = $resolvedExplicitArchive.Path
+      Source = $resolvedExplicitArchive.Source
+      DownloadUrl = ''
     }
-    Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
+  }
+
+  foreach ($candidate in @(
+    @{ Path = $versionedPreloadPath; Source = 'preload_versioned' },
+    @{ Path = $flatPreloadPath; Source = 'preload_flat' },
+    @{ Path = $archivePath; Source = 'cache' }
+  )) {
+    $resolvedCandidate = Test-ValidatedReleaseArchive `
+      -Path ([string]$candidate.Path) `
+      -ExpectedSha $expectedSha `
+      -Source ([string]$candidate.Source)
+    if ($null -ne $resolvedCandidate) {
+      return @{
+        Path = $resolvedCandidate.Path
+        Source = $resolvedCandidate.Source
+        DownloadUrl = ''
+      }
+    }
   }
 
   $tempArchivePath = "$archivePath.download"
   Remove-Item -LiteralPath $tempArchivePath -Force -ErrorAction SilentlyContinue
 
+  $download = Resolve-ReleaseDownloadUrl -Manifest $Manifest -AssetName $assetName
+  $downloadUrl = [string]$download.Url
+  if ([string]::IsNullOrWhiteSpace($downloadUrl)) {
+    throw 'release download URL is empty after applying overrides'
+  }
+
+  $downloadedBy = ''
   try {
-    Invoke-WebRequest -Uri $downloadUrl -OutFile $tempArchivePath -ErrorAction Stop | Out-Null
+    $downloadedBy = Invoke-ReleaseDownload -Url $downloadUrl -OutFile $tempArchivePath
     $actualSha = Get-FileSha256 -Path $tempArchivePath
     if ($actualSha -ne $expectedSha) {
       throw "downloaded helper release checksum mismatch: expected $expectedSha, got $actualSha"
@@ -287,7 +461,12 @@ function Ensure-ReleaseArchive {
     Remove-Item -LiteralPath $tempArchivePath -Force -ErrorAction SilentlyContinue
   }
 
-  return $archivePath
+  return @{
+    Path = $archivePath
+    Source = [string]$download.Source
+    DownloadUrl = $downloadUrl
+    DownloadedBy = $downloadedBy
+  }
 }
 
 function Resolve-ExpandedPackageRoot {
@@ -387,7 +566,11 @@ function Install-FromRelease {
     return
   }
 
-  $archivePath = Ensure-ReleaseArchive -Manifest $Manifest
+  $archive = Ensure-ReleaseArchive -Manifest $Manifest
+  $archivePath = [string]$archive.Path
+  $archiveSource = [string]$archive.Source
+  $archiveDownloadUrl = [string]$archive.DownloadUrl
+  $archiveDownloadedBy = [string]$archive.DownloadedBy
   $expandedDir = Join-Path ([System.IO.Path]::GetTempPath()) ("wezterm-helper-release-" + [guid]::NewGuid().ToString('N'))
   $null = New-Item -ItemType Directory -Force -Path $expandedDir
 
@@ -402,6 +585,10 @@ function Install-FromRelease {
       install_source = 'release'
       binary_path = $installedManagerPath
       release_version = [string]$Manifest.version
+      archive_source = $archiveSource
+      archive_path = $archivePath
+      download_url = $archiveDownloadUrl
+      downloaded_by = $archiveDownloadedBy
       stopped_existing_manager = if ($stoppedProcessIds.Count -gt 0) { '1' } else { '0' }
       stopped_process_ids = ($stoppedProcessIds -join ',')
     }
@@ -414,6 +601,10 @@ function Install-FromRelease {
       sha256 = ([string]$Manifest.sha256).ToLowerInvariant()
       assetName = Get-ReleaseAssetName -Manifest $Manifest
       downloadUrl = [string]$Manifest.downloadUrl
+      archiveSource = $archiveSource
+      archivePath = $archivePath
+      resolvedDownloadUrl = $archiveDownloadUrl
+      downloadedBy = $archiveDownloadedBy
       installedAt = [DateTimeOffset]::UtcNow.ToString('o')
     }
   } finally {
@@ -459,6 +650,13 @@ Write-Output ("[helper-install] installed_source=" + $resolvedInstallSource)
 Write-Output ("[helper-install] install_state=" + (Get-InstallStatePath -ResolvedInstallRoot $InstallRoot))
 if ($resolvedInstallSource -eq 'release' -and $null -ne $releaseManifest) {
   Write-Output ("[helper-install] release_version=" + [string]$releaseManifest.version)
+}
+$releaseInstallState = Read-InstallState -ResolvedInstallRoot $InstallRoot
+if ($resolvedInstallSource -eq 'release' -and $null -ne $releaseInstallState) {
+  Write-Output ("[helper-install] release_archive_source=" + [string]$releaseInstallState.archiveSource)
+  Write-Output ("[helper-install] release_archive_path=" + [string]$releaseInstallState.archivePath)
+  Write-Output ("[helper-install] release_download_url=" + [string]$releaseInstallState.resolvedDownloadUrl)
+  Write-Output ("[helper-install] release_downloaded_by=" + [string]$releaseInstallState.downloadedBy)
 }
 Write-Output ("[helper-install] installed_binary=" + (Join-Path $InstallRoot 'helper-manager.exe'))
 Write-Output ("[helper-install] installed_client=" + (Join-Path $InstallRoot 'helperctl.exe'))

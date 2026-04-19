@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "enabled": false,
-  "version": "",
-  "assetName": "",
-  "downloadUrl": "",
-  "sha256": ""
+  "enabled": true,
+  "version": "host-helper-v2026.04.19.1",
+  "assetName": "wezterm-windows-host-helper-host-helper-v2026.04.19.1-win-x64.zip",
+  "downloadUrl": "https://github.com/yunsii/wezterm-config/releases/download/host-helper-v2026.04.19.1/wezterm-windows-host-helper-host-helper-v2026.04.19.1-win-x64.zip",
+  "sha256": "0301932cb37ed42eb29cb83bed9023eca241b576da21580d2306d6cbe7d8ab71"
 }
