@@ -88,6 +88,18 @@ copy_file_atomic() {
   mv -f "$temp_path" "$target_path"
 }
 
+wait_for_flow() {
+  local flow_name="${1:?missing flow name}"
+  local pid="${2:-}"
+
+  if [[ -z "$pid" ]]; then
+    return 0
+  fi
+
+  sync_trace "flow=$flow_name status=waiting pid=$pid"
+  wait "$pid"
+}
+
 lua_quote() {
   local value="${1-}"
   value="${value//\\/\\\\}"
@@ -382,6 +394,9 @@ TARGET_RUNTIME_DIR="$TARGET_HOME/.wezterm-x"
 TARGET_NATIVE_DIR="$TARGET_HOME/.wezterm-native"
 TEMP_RUNTIME_DIR="$TARGET_HOME/.wezterm-x.tmp.$$"
 TEMP_NATIVE_DIR="$TARGET_HOME/.wezterm-native.tmp.$$"
+TEMP_BOOTSTRAP_FILE="$TARGET_RUNTIME_STATE_DIR/.wezterm.lua.tmp.$$"
+RUNTIME_NATIVE_FLOW_PID=""
+BOOTSTRAP_FLOW_PID=""
 
 runtime_log_info sync "sync-runtime invoked" \
   "repo_root=$REPO_ROOT" \
@@ -393,36 +408,73 @@ sync_trace "step=init repo_root=$REPO_ROOT main_repo_root=$MAIN_REPO_ROOT"
 sync_trace "step=target target_home=$TARGET_HOME target_file=$TARGET_FILE"
 sync_trace "step=target target_runtime_dir=$TARGET_RUNTIME_DIR target_native_dir=$TARGET_NATIVE_DIR"
 
-mkdir -p "$TARGET_HOME"
-mkdir -p "$TARGET_RUNTIME_STATE_DIR"
-rm -rf "$TEMP_RUNTIME_DIR" "$TEMP_NATIVE_DIR"
-mkdir -p "$TEMP_RUNTIME_DIR"
-mkdir -p "$TEMP_NATIVE_DIR"
-sync_trace "step=prepare temp_runtime_dir=$TEMP_RUNTIME_DIR temp_native_dir=$TEMP_NATIVE_DIR"
+run_runtime_native_flow() {
+  local repo_root_path=""
 
-cp -R "$RUNTIME_SOURCE_DIR"/. "$TEMP_RUNTIME_DIR"/
-if [[ -d "$NATIVE_SOURCE_DIR" ]]; then
-  cp -R "$NATIVE_SOURCE_DIR"/. "$TEMP_NATIVE_DIR"/
-fi
-sync_trace "step=copy-source status=completed runtime_source=$RUNTIME_SOURCE_DIR native_source=$NATIVE_SOURCE_DIR"
+  sync_trace "flow=runtime-native status=starting target_runtime_dir=$TARGET_RUNTIME_DIR target_native_dir=$TARGET_NATIVE_DIR"
 
-repo_root_path="${WEZTERM_REPO_ROOT:-}"
-if [[ -z "$repo_root_path" ]]; then
-  repo_root_path="$(cd "$REPO_ROOT" && pwd -P)"
-fi
-printf '%s\n' "$repo_root_path" > "$TEMP_RUNTIME_DIR/repo-root.txt"
-printf '%s\n' "$MAIN_REPO_ROOT" > "$TEMP_RUNTIME_DIR/repo-main-root.txt"
-sync_trace "step=write-metadata repo_root_path=$repo_root_path repo_main_root=$MAIN_REPO_ROOT"
+  mkdir -p "$TARGET_HOME"
+  mkdir -p "$TARGET_RUNTIME_STATE_DIR"
+  rm -rf "$TEMP_RUNTIME_DIR" "$TEMP_NATIVE_DIR"
+  mkdir -p "$TEMP_RUNTIME_DIR"
+  mkdir -p "$TEMP_NATIVE_DIR"
+  sync_trace "step=prepare temp_runtime_dir=$TEMP_RUNTIME_DIR temp_native_dir=$TEMP_NATIVE_DIR"
 
-rm -rf "$TARGET_RUNTIME_DIR" "$TARGET_NATIVE_DIR"
-mv "$TEMP_RUNTIME_DIR" "$TARGET_RUNTIME_DIR"
-mv "$TEMP_NATIVE_DIR" "$TARGET_NATIVE_DIR"
-sync_trace "step=publish-runtime status=completed target_runtime_dir=$TARGET_RUNTIME_DIR target_native_dir=$TARGET_NATIVE_DIR"
+  cp -R "$RUNTIME_SOURCE_DIR"/. "$TEMP_RUNTIME_DIR"/
+  if [[ -d "$NATIVE_SOURCE_DIR" ]]; then
+    cp -R "$NATIVE_SOURCE_DIR"/. "$TEMP_NATIVE_DIR"/
+  fi
+  sync_trace "step=copy-source status=completed runtime_source=$RUNTIME_SOURCE_DIR native_source=$NATIVE_SOURCE_DIR"
 
-install_windows_helper_manager "$TARGET_RUNTIME_DIR"
-copy_file_atomic "$SOURCE_FILE" "$TARGET_FILE"
-touch "$TARGET_FILE"
-sync_trace "step=refresh-bootstrap status=completed target_file=$TARGET_FILE"
+  repo_root_path="${WEZTERM_REPO_ROOT:-}"
+  if [[ -z "$repo_root_path" ]]; then
+    repo_root_path="$(cd "$REPO_ROOT" && pwd -P)"
+  fi
+  printf '%s\n' "$repo_root_path" > "$TEMP_RUNTIME_DIR/repo-root.txt"
+  printf '%s\n' "$MAIN_REPO_ROOT" > "$TEMP_RUNTIME_DIR/repo-main-root.txt"
+  sync_trace "step=write-metadata repo_root_path=$repo_root_path repo_main_root=$MAIN_REPO_ROOT"
+
+  rm -rf "$TARGET_RUNTIME_DIR" "$TARGET_NATIVE_DIR"
+  mv "$TEMP_RUNTIME_DIR" "$TARGET_RUNTIME_DIR"
+  mv "$TEMP_NATIVE_DIR" "$TARGET_NATIVE_DIR"
+  sync_trace "step=publish-runtime status=completed target_runtime_dir=$TARGET_RUNTIME_DIR target_native_dir=$TARGET_NATIVE_DIR"
+
+  install_windows_helper_manager "$TARGET_RUNTIME_DIR"
+  sync_trace "flow=runtime-native status=completed target_runtime_dir=$TARGET_RUNTIME_DIR target_native_dir=$TARGET_NATIVE_DIR"
+}
+
+run_bootstrap_prepare_flow() {
+  sync_trace "flow=wezterm-config status=starting target_file=$TARGET_FILE temp_file=$TEMP_BOOTSTRAP_FILE"
+  mkdir -p "$TARGET_HOME"
+  mkdir -p "$TARGET_RUNTIME_STATE_DIR"
+  cp "$SOURCE_FILE" "$TEMP_BOOTSTRAP_FILE"
+  sync_trace "step=prepare-bootstrap status=completed temp_file=$TEMP_BOOTSTRAP_FILE"
+  sync_trace "flow=wezterm-config status=prepared target_file=$TARGET_FILE temp_file=$TEMP_BOOTSTRAP_FILE"
+}
+
+finalize_bootstrap_refresh() {
+  [[ -f "$TEMP_BOOTSTRAP_FILE" ]] || {
+    printf 'Prepared bootstrap file is missing: %s\n' "$TEMP_BOOTSTRAP_FILE" >&2
+    return 1
+  }
+
+  copy_file_atomic "$TEMP_BOOTSTRAP_FILE" "$TARGET_FILE"
+  rm -f "$TEMP_BOOTSTRAP_FILE"
+  touch "$TARGET_FILE"
+  sync_trace "step=refresh-bootstrap status=completed target_file=$TARGET_FILE"
+}
+
+run_runtime_native_flow &
+RUNTIME_NATIVE_FLOW_PID=$!
+sync_trace "flow=runtime-native status=running async=1 pid=$RUNTIME_NATIVE_FLOW_PID"
+
+run_bootstrap_prepare_flow &
+BOOTSTRAP_FLOW_PID=$!
+sync_trace "flow=wezterm-config status=running async=1 pid=$BOOTSTRAP_FLOW_PID"
+
+wait_for_flow runtime-native "$RUNTIME_NATIVE_FLOW_PID"
+wait_for_flow wezterm-config "$BOOTSTRAP_FLOW_PID"
+finalize_bootstrap_refresh
 
 maybe_reload_tmux "$REPO_ROOT"
 

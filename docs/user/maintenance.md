@@ -28,7 +28,7 @@ skills/wezterm-runtime-sync/scripts/sync-runtime.sh --target-home /mnt/c/Users/y
 Run those commands from the repo root, or set `WEZTERM_CONFIG_REPO=/absolute/path/to/repo` before invoking the script from elsewhere.
 
 3. Let WezTerm auto-reload the synced config changes.
-   In current WezTerm versions, `automatically_reload_config` defaults to `true`: the loaded config file is watched, `require`-loaded Lua files are also watched, and the majority of options take effect automatically. The sync script now always refreshes the top-level `%USERPROFILE%\.wezterm.lua` mtime after copying so auto-reload still triggers reliably even when the file contents are unchanged. Use `Ctrl+Shift+R` only to force a reload when needed.
+   In current WezTerm versions, `automatically_reload_config` defaults to `true`: the loaded config file is watched, `require`-loaded Lua files are also watched, and the majority of options take effect automatically. The sync script now runs two grouped flows in parallel: a `runtime/native/helper` flow that publishes the runtime trees and installs the Windows helper, plus a `wezterm.lua` staging flow. It only commits and touches the top-level `%USERPROFILE%\.wezterm.lua` after both flows finish, so WezTerm reload does not race ahead of helper installation. Use `Ctrl+Shift+R` only to force a reload when needed.
 4. The sync script also tries to reload tmux automatically when a tmux server is already running and reachable from the current shell. If you changed tmux styling or startup behavior and that automatic reload was unavailable or not sufficient, reload tmux config manually:
 
 ```bash
