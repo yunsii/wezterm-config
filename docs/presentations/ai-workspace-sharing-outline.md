@@ -1,259 +1,276 @@
 ---
-title: 我的 AI 工作环境分享
-subtitle: WezTerm + tmux + Git Worktree + AI CLI 的一体化终端开发环境
+title: 我的 AI 工作平台分享
+subtitle: 从终端配置到 personal terminal platform v1.0
 ---
 
-# 我的 AI 工作环境分享
+# 我的 AI 工作平台分享
 
-> 演示大纲 — 面向技术同事
-
----
-
-## 一、为什么需要一套「管理型」终端环境
-
-- 日常开发中反复切项目、开终端、敲命令的隐性成本
-- AI 编码助手（Claude Code / Codex）兴起后，终端成为主战场
-- 目标：**一套键盘驱动的环境，把项目管理、Git 分支、AI 对话都收进同一个窗口**
+> 分享提纲 — 面向技术同事
 
 ---
 
-## 二、整体架构一览
+## 一、开场：这已经不是“终端配置”了
 
-```
-┌─────────────────────────────────────────────────┐
-│  WezTerm（终端模拟器 / UI 宿主）                   │
-│  ┌───────────┬───────────┬───────────┐          │
-│  │ default   │  work     │  config   │ ← 工作区  │
-│  └───────────┴───────────┴───────────┘          │
-│        │            │            │               │
-│        ▼            ▼            ▼               │
-│      原生终端    tmux 会话    tmux 会话           │
-│                 ┌──────────────────┐             │
-│                 │ 窗口1: 主worktree │             │
-│                 │ 窗口2: task/xxx  │             │
-│                 │ 窗口3: task/yyy  │             │
-│                 └──────────────────┘             │
-│                        │                        │
-│                 Git Worktree 映射                 │
-│                 每个任务 = 独立分支 + 独立目录       │
-└─────────────────────────────────────────────────┘
-```
+- 以前以为自己在折腾 `WezTerm + tmux`
+- 现在回头看，实际上是在搭一个 personal terminal platform
+- 这套平台同时承载：
+  - 日常开发
+  - Git worktree 并行任务
+  - AI CLI 协作
+  - Windows 宿主动作
+  - 跨语言运行时控制面
 
-### 关键组件
+一句话定位：
 
-| 层级 | 工具 | 职责 |
-|------|------|------|
-| UI 层 | WezTerm | 终端渲染、工作区管理、快捷键分发 |
-| 会话层 | tmux | 多窗口/多面板、状态栏、会话持久化 |
-| 版本控制 | Git Worktree | 并行任务隔离，每个任务独立目录和分支 |
-| AI 层 | Codex / Claude Code | 在终端内直接对话、生成代码、执行任务 |
-| 追踪层 | WakaTime | 编码时间自动统计，状态栏实时展示 |
-
-### 支持的运行模式
-
-- **hybrid-wsl**：Windows 桌面 WezTerm + WSL 内 tmux 运行时
-- **posix-local**：Linux / macOS 原生运行
+> `v1.0` 的意义，是这套环境第一次从“能跑”变成“有主干的系统”。
 
 ---
 
-## 三、工作区模型
+## 二、为什么值得分享
 
-### 三个核心工作区
-
-| 工作区 | 快捷键 | 用途 |
-|--------|--------|------|
-| `default` | `Alt+d` | WezTerm 原生终端，临时操作 |
-| `work` | `Alt+w` | 日常项目开发，tmux 管理多个项目标签页 |
-| `config` | `Alt+c` | 终端配置本身的维护 |
-
-- `Alt+p`：轮换切换所有工作区
-- `Alt+Shift+x`：关闭当前非默认工作区
-
-### 工作区内部结构
-
-- 每个管理型工作区 = 一个 tmux 会话
-- 每个项目 = 一个 tmux 窗口（标签页标题自动取项目目录名）
-- 每个 Git Worktree = 一个 tmux 窗口，按需创建
+- AI 编码助手起来之后，终端重新变成主战场
+- 单靠“几个快捷键 + 几个脚本”已经不够了
+- 真正需要的是一套统一工作流：
+  - 项目切换快
+  - 多任务隔离清晰
+  - AI 是一等公民
+  - 平台动作可控
+  - 整套系统可验证、可维护、可演化
 
 ---
 
-## 四、键盘驱动的工作流
+## 三、v1.0 的核心变化
 
-### 项目导航
+- 从“工具并排摆着”走向“统一控制面”
+- 从“脚本堆出来”走向“多语言分层架构”
+- 从“本机能跑”走向“helper 可构建、可发布、可回退”
+- 从“AI 辅助写代码”走向“AI 快速推进 + 人持续纠偏 + 真实验证闭环”
 
-| 快捷键 | 功能 |
-|--------|------|
-| `Alt+w` | 打开/切换到工作工作区 |
-| `Alt+v` | 在 VS Code 中打开当前 worktree 根目录 |
-| `Alt+b` | 启动 Chrome 调试浏览器 |
-| `Ctrl+k v` / `Ctrl+k h` | 垂直/水平分屏 |
+可以重点讲这四个关键词：
 
-### Git Worktree 操作
-
-| 快捷键 | 功能 |
-|--------|------|
-| `Alt+g` | 弹出 worktree 选择器（当前仓库族） |
-| `Alt+Shift+g` | 循环切换下一个 worktree |
-
-### 命令面板
-
-| 快捷键 | 功能 |
-|--------|------|
-| `Ctrl+Shift+P` | 弹出 tmux 命令面板（仓库共享 + 机器本地命令） |
-
-### 智能复制粘贴
-
-- `Shift+拖拽`：tmux 面板内选择文本
-- `Super+拖拽`：跨面板的 WezTerm 级文本选择
-- `Ctrl+v`：智能粘贴（hybrid-wsl 下支持剪贴板图片缓存）
+- `C#`
+- `IPC`
+- Windows `exe`
+- 混合语言架构
 
 ---
 
-## 五、tmux 状态栏 — 实时上下文感知
+## 四、整体架构一览
 
-```
- ┌─────────────────────────────────────────────────────┐
- │ repo-name  main  +3 ~2 -1  ^0 =0  Node v20.11.0    │  ← 第一行
- │ linked:2 · primary                                   │  ← 第二行
- │ WakaTime: 3h 42m                                     │  ← 第三行
- └─────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+  U["User / AI Agent"]
+
+  subgraph Interaction["Interaction Surface"]
+    WT["WezTerm
+    Lua runtime / keybindings / UI events"]
+    TMUX["tmux
+    panes / command routing / session control"]
+  end
+
+  subgraph Control["Unified Control Plane"]
+    RT["Runtime Scripts
+    Bash / wrappers / sync / diagnostics"]
+    HC["helper clients
+    helperctl / request encode / dispatch"]
+    AG["Agent Contracts
+    profiles / clipboard wrapper / platform actions"]
+  end
+
+  subgraph Windows["Windows Native Host"]
+    HM["Host Helper Manager
+    C# long-lived exe"]
+    IPC["IPC Layer
+    request-response / state sync"]
+    PS["PowerShell Bridge
+    install / bootstrap / compatibility path"]
+  end
+
+  subgraph Targets["Platform Capabilities"]
+    IDE["IDE / VS Code"]
+    CHROME["Chrome debug browser"]
+    CLIP["Clipboard text / image"]
+    HOST["Notifications / host-side actions"]
+  end
+
+  U --> WT
+  U --> TMUX
+  U --> AG
+  WT <--> TMUX
+  WT --> RT
+  TMUX --> RT
+  AG --> RT
+  RT --> HC
+  HC --> IPC
+  IPC <--> HM
+  PS --> HM
+  HM --> IDE
+  HM --> CHROME
+  HM --> CLIP
+  HM --> HOST
 ```
 
-### 展示信息
+### 讲解重点
 
-- **仓库名** + **分支名** + **Git 变更统计**（增/改/删）
-- **远程同步状态**：`^N` 领先 / `vN` 落后 / `=0` 已同步 / `x0` 无上游
-- **Worktree 角色**：`primary` 或 `linked`，以及关联 worktree 数量
-- **Node.js 版本**（支持 nvm 回退）
-- **WakaTime 编码时间**（缓存 60 秒，异步刷新）
-
-### 刷新策略
-
-- 混合机制：焦点变更 → 后台刷新 + 30 秒兜底轮询
-- 每个段位保持稳定占位，数据不可用时显示占位符，避免状态栏闪烁
+- `WezTerm + tmux` 还是交互表面
+- 真正的新东西在下面：统一控制面和 Windows native helper
+- AI 不是外挂，而是这套平台的直接消费者
 
 ---
 
-## 六、AI 工作流集成（重点）
+## 五、分层看这个项目
 
-### 6.1 worktree-task：AI 任务的完整生命周期
+| 层 | 技术 | 角色 |
+|---|---|---|
+| 交互层 | `WezTerm` / `tmux` | 工作区、面板、快捷键、命令路由 |
+| 运行时层 | Bash / shell | sync、bootstrap、diagnostics、repo-local wrappers |
+| 宿主桥接层 | `PowerShell` | Windows 安装、兼容、bootstrap |
+| 原生控制层 | `C#` | helper-manager.exe / helperctl.exe / IPC control plane |
+| 协作层 | docs / agent profiles / contracts | 让 AI 和人都能稳定消费平台能力 |
 
-```
-  用户提出需求
-       │
-       ▼
-  ┌──────────────┐
-  │ worktree-task │
-  │    launch     │
-  └──────┬───────┘
-         │
-         ├── 创建 Git Worktree（独立分支 task/xxx）
-         ├── 在 tmux 中打开新窗口
-         └── 启动 AI CLI（Codex / Claude Code）并注入任务 prompt
-                │
-                ▼
-         AI 在隔离环境中编码
-                │
-                ▼
-  ┌──────────────┐
-  │ worktree-task │
-  │   reclaim     │
-  └──────┬───────┘
-         │
-         ├── 清理 tmux 窗口
-         ├── 移除 worktree
-         └── 已合并的分支自动删除，未合并的保留
-```
+### 这一页想强调什么
 
-### 核心理念
-
-- **一个任务 = 一个分支 + 一个目录 + 一个 AI 会话**
-- AI 在完全隔离的环境中工作，不影响主 worktree
-- 多个 AI 任务可以并行进行，互不干扰
-
-### 配置示例
-
-```bash
-# config/worktree-task.env
-WT_PROVIDER=tmux-agent          # 使用 tmux 作为任务载体
-WT_PROVIDER_AGENT_COMMAND=claude  # 默认 AI CLI
-WT_POLICY_BRANCH_PREFIX=task/    # 分支前缀
-WT_POLICY_RECLAIM_DIRTY=refuse   # 未提交的更改拒绝回收
-```
-
-### 6.2 wezterm-runtime-sync：配置即代码
-
-- 所有配置集中在 Git 仓库中管理
-- 通过 sync skill 一键部署到目标机器
-- WezTerm 自动热重载，改完即生效
-
-### 6.3 Claude Code Skills 扩展
-
-- 以独立 skill 形式封装可复用的自动化操作
-- 每个 skill 有完整的文档（SKILL.md）+ 脚本 + 代理配置
-- 通过 Claude Code 或 Codex 自然语言调用
+- 这不是单语言项目
+- 难点也不是“语言多”
+- 难点是每一层该放什么，边界要怎么收
 
 ---
 
-## 七、日常工作流演示路线
+## 六、前端视角下最有意思的地方
 
-> 建议现场 Demo 的操作顺序
+### 1. 第一次把 `C# + IPC` 真做进系统里
 
-1. **启动**：打开 WezTerm → `Alt+w` 进入工作工作区 → 展示已管理的项目标签
-2. **状态栏**：切换几个 tmux 窗口，展示状态栏实时更新（仓库、分支、变更数）
-3. **Worktree 切换**：`Alt+g` 打开选择器 → 选择一个 linked worktree → 观察状态栏变化
-4. **AI 任务启动**：用 worktree-task 创建一个新任务 → 观察新 tmux 窗口自动打开 + AI CLI 启动
-5. **并行工作**：在主 worktree 继续开发，同时 AI 在另一个窗口独立工作
-6. **任务回收**：worktree-task reclaim → 展示清理过程
-7. **命令面板**：`Ctrl+Shift+P` 打开命令面板 → 展示自定义命令
-8. **编辑器集成**：`Alt+v` 从当前 worktree 直接打开 VS Code
+- 以前知道 `IPC`，但更多是概念
+- 这次是把它做成了平台主链路
+- `WezTerm / tmux / shell -> helperctl -> helper-manager.exe -> response`
 
----
+### 2. 第一次认真处理 Windows `exe` 交付问题
 
-## 八、配置分层设计
+- 本地有 `dotnet` 时直接 publish
+- 没有 `dotnet` 时走 release fallback
+- 开始有制品、安装、版本和回退语义
 
-```
-wezterm-config/               ← Git 仓库（source of truth）
-├── wezterm.lua               ← WezTerm 入口
-├── tmux.conf                 ← tmux 配置
-├── wezterm-x/
-│   ├── lua/                  ← WezTerm Lua 运行时模块
-│   ├── workspaces.lua        ← 公开的工作区基线定义
-│   ├── local.example/        ← 配置模板（提交到 Git）
-│   └── local/                ← 私有配置（gitignored，不提交）
-│       ├── constants.lua     ← 运行模式、Shell、主题
-│       ├── shared.env        ← WakaTime API Key 等
-│       ├── workspaces.lua    ← 私有项目目录
-│       └── command-panel.sh  ← 本机命令面板扩展
-├── scripts/runtime/          ← tmux 状态栏、worktree 操作脚本
-├── skills/                   ← Claude Code / Codex Skills
-│   ├── wezterm-runtime-sync/ ← 运行时同步
-│   └── worktree-task/        ← 任务 worktree 管理
-└── docs/                     ← 主题化项目文档
-```
+### 3. 第一次真正做混合语言架构收口
 
-### 设计原则
-
-- **公开 vs 私有分离**：模板提交到 Git，敏感配置 gitignored
-- **配置即代码**：所有变更可追溯、可回滚
-- **sync 部署**：修改仓库 → 运行 sync → WezTerm 热重载
+- `Lua`、shell、`PowerShell`、`C#` 各自干什么
+- 哪些逻辑应该继续留在脚本里
+- 哪些必须收敛到 long-lived helper
 
 ---
 
-## 九、要点总结
+## 七、工作流设计：AI 不是插件，是一等公民
 
-| 亮点 | 说明 |
-|------|------|
-| 键盘驱动 | 几乎所有操作都有快捷键，减少鼠标依赖 |
-| 任务隔离 | Git Worktree 实现真正的并行任务隔离 |
-| AI 原生集成 | AI CLI 作为一等公民融入工作流 |
-| 上下文感知 | 状态栏实时展示仓库/分支/变更/worktree 状态 |
-| 配置即代码 | 整套环境可版本控制、可复现 |
-| 跨平台 | hybrid-wsl 和 posix-local 双模式支持 |
+### worktree-task 的意义
+
+- 一个任务 = 一个分支 + 一个目录 + 一个 AI 会话
+- AI 在隔离 worktree 里工作，不污染主 worktree
+- 多个任务可以并行推进
+
+### 这里真正重要的不是“开新目录”
+
+- 而是把 AI 会话、Git 分支、tmux window、工作上下文绑定在一起
+- 让 AI 不只是“帮你写代码”，而是真进入你的日常工作流
 
 ---
 
-## 十、Q&A
+## 八、交互哲学：tmux-first，但不牺牲直觉
 
-- 仓库地址：（填入你的仓库链接）
-- 相关工具：[WezTerm](https://wezfurlong.org/wezterm/) / [tmux](https://github.com/tmux/tmux) / [Claude Code](https://claude.ai/claude-code) / [Codex](https://github.com/openai/codex)
+### 现在的方向
+
+- tmux 作为稳定执行层和低延迟命令表面
+- `WezTerm` 负责 UI、快捷键、粘贴和终端能力
+- 宿主动作走 native helper，而不是继续堆临时脚本
+
+### 这页可以举几个点
+
+- `Ctrl+Shift+P` 走 tmux-owned command palette
+- `Ctrl+k` 作为 tmux chord prefix
+- 选择、复制、智能粘贴按层分工
+- `IDE/VS Code`、Chrome、剪贴板这些宿主动作进入统一请求路径
+
+---
+
+## 九、可观测性和验证，为什么是 v1.0 的关键
+
+- 这次不是只做功能，还一起补了：
+  - 结构化日志
+  - helper diagnostics
+  - smoke tests
+  - runtime sync
+  - release fallback
+
+### 讲法建议
+
+- 没有日志和验证，这套东西永远只是“玄学配置”
+- 有了日志、状态、smoke test，它才开始像平台
+
+---
+
+## 十、AI 协作方式：不是自动生成，而是持续纠偏
+
+这部分是分享里很值得讲的点。
+
+### 实际过程更像这样
+
+1. 我先提出目标
+2. AI 快速实现或给结构方案
+3. 我不断纠偏：
+   - 方向对不对
+   - 交互是不是自然
+   - 结构够不够优雅
+   - 验证是不是太浅
+4. 再用真实链路回归
+5. 最后才继续重构和收口
+
+### 这页的关键词
+
+- 不是“AI 自动写完”
+- 是“AI 提速，人把标准抬高”
+- 真正有效的是：`实现 -> 纠偏 -> 验证 -> 收口`
+
+---
+
+## 十一、Demo 路线建议
+
+### 1. 先讲平台，不先讲快捷键
+
+- 展示 `v1.0` 架构图
+- 讲为什么这已经不是单纯的 terminal config
+
+### 2. 再讲日常工作流
+
+- 打开 `work` workspace
+- 展示 tmux 状态栏和 repo-family session
+- 演示 worktree 切换
+- 演示命令面板
+- 演示 AI task worktree 打开
+
+### 3. 最后讲系统能力
+
+- `IDE/VS Code` 打开链路
+- Chrome debug browser 调起
+- clipboard wrapper
+- helper + `IPC` + logs + smoke test
+
+---
+
+## 十二、最后想传达的结论
+
+- 表面上我是在折腾终端环境
+- 实际上我是在搭一个自己的 AI 工作平台
+- 作为前端，这次最有价值的不是“配置更顺手了”
+- 而是第一次把 `C#`、`IPC`、Windows `exe`、长驻 helper、混合语言架构这些以前更抽象的东西真正做深了
+
+一句话收尾：
+
+> 软件做到后面，很多问题本质上都是系统设计问题。
+
+---
+
+## 十三、Q&A
+
+- 这套平台适合什么样的开发者？
+- 哪些部分最值得迁移到其他环境？
+- 如果不是 Windows + WSL，这套设计还能保留什么？
+- AI 协作里，哪些是必须由人把控的？
+
