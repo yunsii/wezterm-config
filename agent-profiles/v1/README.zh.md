@@ -45,14 +45,15 @@ Source of truth:
 
 - [en/AGENTS.md](./en/AGENTS.md)
 
-推荐兼容映射：
+推荐的用户级集成方式：
+
+- `~/.codex/AGENTS.md -> /absolute/path/to/repo/agent-profiles/v1/en/AGENTS.md`
+- `~/.claude/CLAUDE.md -> /absolute/path/to/repo/agent-profiles/v1/en/AGENTS.md`
+
+可选的仓库兼容映射：
 
 - `AGENTS.md -> agent-profiles/v1/en/AGENTS.md`
 - `CLAUDE.md -> agent-profiles/v1/en/AGENTS.md`
-
-建议的用户级 Claude 接入：
-
-- `~/.claude/CLAUDE.md -> /absolute/path/to/repo/agent-profiles/v1/en/AGENTS.md`
 
 优先采用单一真实来源配合符号链接的兼容入口。
 避免把同样内容复制到多个文件。

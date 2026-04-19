@@ -32,12 +32,13 @@ If wording differs, `en/` takes precedence.
 Default entrypoint:
 - [en/AGENTS.md](./en/AGENTS.md)
 
-Recommended compatibility mappings:
+Recommended user-level integrations:
+- `~/.codex/AGENTS.md -> /absolute/path/to/repo/agent-profiles/v1/en/AGENTS.md`
+- `~/.claude/CLAUDE.md -> /absolute/path/to/repo/agent-profiles/v1/en/AGENTS.md`
+
+Optional repository compatibility mappings:
 - `AGENTS.md -> agent-profiles/v1/en/AGENTS.md`
 - `CLAUDE.md -> agent-profiles/v1/en/AGENTS.md`
-
-Suggested user-level Claude setup:
-- `~/.claude/CLAUDE.md -> /absolute/path/to/repo/agent-profiles/v1/en/AGENTS.md`
 
 Prefer a single source of truth plus symlink-based compatibility entrypoints.
 Avoid copying the same content into multiple files.

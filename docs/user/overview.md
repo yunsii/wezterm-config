@@ -40,7 +40,7 @@ The terminal font uses a platform-aware fallback chain defined in `default_termi
 ## Repo Entry Points
 
 - `wezterm.lua`: main WezTerm config
-- `agent-profiles/`: versioned source for user-level reusable agent profiles hosted in this repo; these files are for external user-level entrypoints such as `~/AGENTS.md` or `~/.claude/CLAUDE.md`, not for repo-local runtime behavior
+- `agent-profiles/`: versioned source for user-level reusable agent profiles hosted in this repo; these files are for external user-level entrypoints such as `~/.codex/AGENTS.md` or `~/.claude/CLAUDE.md`, not for repo-local runtime behavior
 - `wezterm-x/workspaces.lua`: shared public workspace baseline and per-project startup defaults
 - `wezterm-x/local.example/`: tracked templates for private machine-local overrides
 - `wezterm-x/local.example/command-panel.sh`: tracked template for private machine-local tmux command palette items
