@@ -14,6 +14,73 @@ local function current_runtime_dir(config_dir)
   return join_path(config_dir, '.wezterm-x')
 end
 
+local function runtime_script_roots(constants)
+  local roots = {}
+  local seen = {}
+
+  for _, root in ipairs {
+    constants.repo_root,
+    constants.main_repo_root,
+  } do
+    if root and root ~= '' and not seen[root] then
+      roots[#roots + 1] = root
+      seen[root] = true
+    end
+  end
+
+  return roots
+end
+
+local function default_wsl_tmux_program(constants)
+  if constants.runtime_mode ~= 'hybrid-wsl' or constants.host_os ~= 'windows' then
+    return nil
+  end
+
+  if not constants.default_domain or constants.default_domain == '' then
+    return nil
+  end
+
+  local roots = runtime_script_roots(constants)
+  if #roots == 0 then
+    return nil
+  end
+
+  local primary_script = roots[1] and (roots[1] .. '/scripts/runtime/open-default-shell-session.sh') or ''
+  local fallback_script = roots[2] and (roots[2] .. '/scripts/runtime/open-default-shell-session.sh') or ''
+
+  return {
+    '/bin/sh',
+    '-lc',
+    [[
+primary_script="$1"
+fallback_script="$2"
+cwd="${PWD:-$HOME}"
+shift 2
+
+run_script() {
+  script_path="$1"
+  shift
+
+  if [ -n "$script_path" ] && [ -f "$script_path" ]; then
+    exec bash "$script_path" "$@"
+  fi
+}
+
+run_script "$primary_script" "$cwd"
+run_script "$fallback_script" "$cwd"
+
+printf 'Default WSL tmux runtime script is unavailable: %s\n' "$primary_script" >&2
+if [ -n "$fallback_script" ]; then
+  printf 'Fallback default WSL tmux runtime script is unavailable: %s\n' "$fallback_script" >&2
+fi
+exit 1
+    ]],
+    'sh',
+    primary_script,
+    fallback_script,
+  }
+end
+
 local function workspace_keybinding(wezterm, workspace, key, name)
   return {
     key = key,
@@ -116,6 +183,7 @@ end
 local function forward_shortcut_to_pane(wezterm, window, pane, shortcut, sequence, logger, category, workspace_name, trace_id)
   logger.info(category, 'forwarding shortcut to pane', merge_fields(trace_id, {
     shortcut = shortcut,
+    sequence = sequence,
     workspace = workspace_name,
     domain = pane:get_domain_name(),
   }))
@@ -221,7 +289,7 @@ local function open_current_dir_in_vscode(wezterm, window, pane, constants, logg
       raw_cwd = tostring(raw_cwd),
       workspace = workspace_name,
     }))
-    window:toast_notification('WezTerm', 'Alt+o failed: current pane working directory is unavailable', nil, 3000)
+    window:toast_notification('WezTerm', 'Alt+v failed: current pane working directory is unavailable', nil, 3000)
     return
   end
 
@@ -232,7 +300,7 @@ local function open_current_dir_in_vscode(wezterm, window, pane, constants, logg
         cwd = cwd,
         domain = domain_name,
       }))
-      window:toast_notification('WezTerm', 'Alt+o failed: current pane is not backed by a WSL domain', nil, 3000)
+      window:toast_notification('WezTerm', 'Alt+v failed: current pane is not backed by a WSL domain', nil, 3000)
       return
     end
 
@@ -250,12 +318,12 @@ local function open_current_dir_in_vscode(wezterm, window, pane, constants, logg
       return
     end
 
-    logger.error('alt_o', 'windows helper Alt+o request failed', merge_fields(trace_id, {
+    logger.error('alt_o', 'windows helper Alt+v request failed', merge_fields(trace_id, {
       reason = helper_reason,
       cwd = cwd,
       distro = distro,
     }))
-    window:toast_notification('WezTerm', 'Alt+o failed. Check WezTerm logs.', nil, 3000)
+    window:toast_notification('WezTerm', 'Alt+v failed. Check WezTerm logs.', nil, 3000)
     return
   else
     local posix_command = copy_args(integration.posix_command)
@@ -287,7 +355,7 @@ local function open_current_dir_in_vscode(wezterm, window, pane, constants, logg
   }))
   local ok, err = pcall(wezterm.background_child_process, command)
   if not ok then
-    window:toast_notification('WezTerm', 'Alt+o failed. Check WezTerm logs.', nil, 3000)
+    window:toast_notification('WezTerm', 'Alt+v failed. Check WezTerm logs.', nil, 3000)
     logger.error('alt_o', 'background_child_process failed', merge_fields(trace_id, {
       error = err,
     }))
@@ -355,6 +423,10 @@ function M.apply(opts)
   config.front_end = 'WebGpu'
   if constants.default_domain and constants.default_domain ~= '' then
     config.default_domain = constants.default_domain
+  end
+  local default_program = default_wsl_tmux_program(constants)
+  if default_program then
+    config.default_prog = default_program
   end
   config.notification_handling = 'NeverShow'
   config.audible_bell = 'Disabled'
@@ -435,10 +507,8 @@ function M.apply(opts)
   config.command_palette_fg_color = palette.foreground
 
   config.keys = {
-    { key = 'v', mods = 'ALT', action = wezterm.action.SplitVertical { domain = 'CurrentPaneDomain' } },
-    { key = 's', mods = 'ALT', action = wezterm.action.SplitHorizontal { domain = 'CurrentPaneDomain' } },
     {
-      key = 'o',
+      key = 'v',
       mods = 'ALT',
       action = wezterm.action_callback(function(window, pane)
         local trace_id = logger.trace_id('alt_o')
@@ -449,28 +519,28 @@ function M.apply(opts)
         local distro = wsl_distro_from_domain(pane:get_domain_name()) or wsl_distro_from_domain(constants.default_domain)
 
         if is_managed_workspace(workspace_name) then
-          forward_shortcut_to_pane(wezterm, window, pane, 'Alt+o', '\x1bo', logger, 'alt_o', workspace_name, trace_id)
+          forward_shortcut_to_pane(wezterm, window, pane, 'Alt+v', '\x1bv', logger, 'alt_o', workspace_name, trace_id)
           return
         end
 
-        -- Outside managed workspaces, WezTerm owns Alt+o and only delegates when its cwd view is unusable.
+        -- Outside managed workspaces, WezTerm owns Alt+v and only delegates when its cwd view is unusable.
         if foreground_process == 'tmux' and (not cwd or cwd == '/') then
-          logger.info('alt_o', 'forwarding Alt+o to pane fallback', merge_fields(trace_id, {
+          logger.info('alt_o', 'forwarding Alt+v to pane fallback', merge_fields(trace_id, {
             cwd = cwd,
             domain = pane:get_domain_name(),
             foreground_process = foreground_process,
           }))
-          window:perform_action(wezterm.action.SendString '\x1bo', pane)
+          window:perform_action(wezterm.action.SendString '\x1bv', pane)
           return
         end
 
         if runtime_mode == 'hybrid-wsl' and distro and is_windows_host_path(cwd) then
-          logger.info('alt_o', 'forwarding Alt+o to pane fallback', merge_fields(trace_id, {
+          logger.info('alt_o', 'forwarding Alt+v to pane fallback', merge_fields(trace_id, {
             cwd = cwd,
             domain = pane:get_domain_name(),
             foreground_process = foreground_process,
           }))
-          window:perform_action(wezterm.action.SendString '\x1bo', pane)
+          window:perform_action(wezterm.action.SendString '\x1bv', pane)
           return
         end
 
@@ -514,6 +584,35 @@ function M.apply(opts)
       end),
     },
     {
+      key = 'P',
+      mods = 'CTRL|SHIFT',
+      action = wezterm.action_callback(function(window, pane)
+        local workspace_name = active_workspace_name(window)
+        local foreground_process = foreground_process_basename(pane)
+        local trace_id = logger.trace_id('command_panel')
+
+        if is_managed_workspace(workspace_name) or foreground_process == 'tmux' then
+          logger.info('command_panel', 'forwarding Ctrl+Shift+P to tmux command palette via tmux user-key transport', merge_fields(trace_id, {
+            decision_path = 'user_key_transport',
+            transport = 'User0',
+            foreground_process = foreground_process,
+            workspace = workspace_name,
+            domain = pane:get_domain_name(),
+          }))
+          forward_shortcut_to_pane(wezterm, window, pane, 'Ctrl+Shift+P', '\x1b[20099~', logger, 'command_panel', workspace_name, trace_id)
+          return
+        end
+
+        logger.info('command_panel', 'falling back to wezterm native command palette', merge_fields(trace_id, {
+          decision_path = 'wezterm_native_palette',
+          foreground_process = foreground_process,
+          workspace = workspace_name,
+          domain = pane:get_domain_name(),
+        }))
+        window:perform_action(wezterm.action.ActivateCommandPalette, pane)
+      end),
+    },
+    {
       key = 'k',
       mods = 'CTRL',
       action = wezterm.action_callback(function(window, pane)
@@ -530,8 +629,18 @@ function M.apply(opts)
           foreground_process = foreground_process,
           workspace = workspace_name,
         }))
-        window:toast_notification('WezTerm', 'Ctrl+k is only available when the current pane is running tmux', nil, 3000)
+        window:toast_notification('WezTerm', 'Ctrl+k chords are only available when the current pane is running tmux', nil, 3000)
       end),
+    },
+    {
+      key = ';',
+      mods = 'CTRL|SHIFT',
+      action = wezterm.action.ActivateCommandPalette,
+    },
+    {
+      key = ':',
+      mods = 'CTRL|SHIFT',
+      action = wezterm.action.ActivateCommandPalette,
     },
     workspace_keybinding(wezterm, workspace, 'w', 'work'),
     {

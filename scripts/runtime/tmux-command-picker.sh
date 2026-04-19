@@ -33,13 +33,12 @@ command_panel_load_items || {
 
 mapfile -t visible_indexes < <(command_panel_visible_indexes "$runtime_mode")
 if (( ${#visible_indexes[@]} == 0 )); then
-  printf 'No command panel items are available for %s.\n' "$runtime_mode"
+  printf 'No command palette items are available for %s.\n' "$runtime_mode"
   printf 'Press any key to close.'
   IFS= read -rsn1 _ || true
   exit 0
 fi
 
-accelerators=(1 2 3 4 5 6 7 8 9 0 a b c d e f g h i j l m n o p q r s t u v w x y z)
 item_ids=()
 item_labels=()
 item_descriptions=()
@@ -52,17 +51,15 @@ for list_index in "${!visible_indexes[@]}"; do
   item_labels+=("${COMMAND_PANEL_LABELS[$index]}")
   item_descriptions+=("${COMMAND_PANEL_DESCRIPTIONS[$index]}")
   item_confirm_messages+=("${COMMAND_PANEL_CONFIRM_MESSAGES[$index]}")
-  if (( list_index < ${#accelerators[@]} )); then
-    item_accelerators+=("${accelerators[$list_index]}")
-  else
-    item_accelerators+=("")
-  fi
+  item_accelerators+=("${COMMAND_PANEL_ACCELERATORS[$index],,}")
 done
 
 item_count="${#item_ids[@]}"
+query=""
 selected_index=0
+filtered_indexes=()
 
-runtime_log_info command_panel "running command popup picker" "runtime_mode=$runtime_mode" "session_name=$session_name" "item_count=$item_count"
+runtime_log_info command_panel "running command palette popup" "runtime_mode=$runtime_mode" "session_name=$session_name" "item_count=$item_count"
 
 cleanup() {
   printf '\033[0m\033[?25h'
@@ -79,22 +76,52 @@ terminal_size() {
   printf '%s %s\n' "${rows:-24}" "${cols:-80}"
 }
 
+update_filtered_indexes() {
+  local lowered_query="${query,,}"
+  local index
+  local haystack=""
+
+  filtered_indexes=()
+
+  for index in "${!item_ids[@]}"; do
+    if [[ -z "$lowered_query" ]]; then
+      filtered_indexes+=("$index")
+      continue
+    fi
+
+    haystack="${item_labels[$index]} ${item_descriptions[$index]} ${item_ids[$index]} ${item_accelerators[$index]}"
+    if [[ "${haystack,,}" == *"$lowered_query"* ]]; then
+      filtered_indexes+=("$index")
+    fi
+  done
+
+  if (( ${#filtered_indexes[@]} == 0 )); then
+    selected_index=0
+    return
+  fi
+
+  if (( selected_index >= ${#filtered_indexes[@]} )); then
+    selected_index=$((${#filtered_indexes[@]} - 1))
+  fi
+}
+
 render_picker() {
-  local rows cols visible_rows start_index end_index accelerator line top_index description
+  local rows cols visible_rows filtered_count start_index end_index top_index actual_index accelerator line description
 
   IFS=' ' read -r rows cols <<< "$(terminal_size)"
-  visible_rows=$((rows - 6))
+  visible_rows=$((rows - 8))
   if (( visible_rows < 1 )); then
     visible_rows=1
   fi
 
+  filtered_count="${#filtered_indexes[@]}"
   start_index=0
   if (( selected_index >= visible_rows )); then
     start_index=$((selected_index - visible_rows + 1))
   fi
   end_index=$((start_index + visible_rows - 1))
-  if (( end_index >= item_count )); then
-    end_index=$((item_count - 1))
+  if (( end_index >= filtered_count )); then
+    end_index=$((filtered_count - 1))
     start_index=$((end_index - visible_rows + 1))
     if (( start_index < 0 )); then
       start_index=0
@@ -102,20 +129,26 @@ render_picker() {
   fi
 
   printf '\033[H\033[2J'
-  printf '%-*.*s\n' "$cols" "$cols" 'Commands'
+  printf '%-*.*s\n' "$cols" "$cols" 'Command Palette'
   printf '%-*.*s\n' "$cols" "$cols" "Runtime mode: $runtime_mode"
+  printf '%-*.*s\n' "$cols" "$cols" "Search: $query"
   printf '\n'
 
+  if (( filtered_count == 0 )); then
+    printf '%-*.*s\n' "$cols" "$cols" 'No matching commands.'
+  fi
+
   for (( top_index = start_index; top_index <= end_index; top_index += 1 )); do
-    accelerator="${item_accelerators[$top_index]}"
+    actual_index="${filtered_indexes[$top_index]}"
+    accelerator="${item_accelerators[$actual_index]}"
     if [[ -n "$accelerator" ]]; then
       accelerator="[$accelerator]"
     else
       accelerator="   "
     fi
 
-    line="$accelerator ${item_labels[$top_index]}"
-    description="${item_descriptions[$top_index]}"
+    line="$accelerator ${item_labels[$actual_index]}"
+    description="${item_descriptions[$actual_index]}"
     if [[ -n "$description" ]]; then
       line="$line - $description"
     fi
@@ -128,7 +161,7 @@ render_picker() {
   done
 
   printf '\n'
-  printf '%-*.*s' "$cols" "$cols" 'Enter run | Up/Down move | 1-9,0,a-z run | Esc close'
+  printf '%-*.*s' "$cols" "$cols" 'Type to search | Enter run | Up/Down move | Backspace delete | Esc clear/close'
 }
 
 read_key() {
@@ -145,16 +178,24 @@ read_key() {
 
 move_selection() {
   local delta="${1:-0}"
+  local filtered_count="${#filtered_indexes[@]}"
+
+  if (( filtered_count == 0 )); then
+    selected_index=0
+    return
+  fi
+
   selected_index=$((selected_index + delta))
   if (( selected_index < 0 )); then
-    selected_index=$((item_count - 1))
-  elif (( selected_index >= item_count )); then
+    selected_index=$((filtered_count - 1))
+  elif (( selected_index >= filtered_count )); then
     selected_index=0
   fi
 }
 
 confirm_selection() {
-  local message="${item_confirm_messages[$selected_index]:-}"
+  local actual_index="${filtered_indexes[$selected_index]:-}"
+  local message="${item_confirm_messages[$actual_index]:-}"
   local answer=""
 
   [[ -n "$message" ]] || return 0
@@ -167,43 +208,41 @@ confirm_selection() {
 }
 
 run_selection() {
-  local item_id="${item_ids[$selected_index]}"
+  local actual_index="${filtered_indexes[$selected_index]:-}"
+  local item_id="${item_ids[$actual_index]:-}"
+
+  if [[ -z "$item_id" ]]; then
+    return 2
+  fi
 
   if ! confirm_selection; then
     return 2
   fi
 
-  runtime_log_info command_panel "command picker running selection" \
+  runtime_log_info command_panel "command palette running selection" \
     "runtime_mode=$runtime_mode" \
     "session_name=$session_name" \
     "current_window_id=$current_window_id" \
     "selected_index=$selected_index" \
+    "query=$query" \
     "item_id=$item_id" \
     "cwd=$cwd"
 
   WEZTERM_RUNTIME_TRACE_ID="$trace_id" bash "$script_dir/tmux-command-run.sh" "$session_name" "$item_id" "$current_window_id" "$cwd"
 }
 
-find_accelerator_index() {
+append_query_char() {
   local key="${1:-}"
-  local index
-
-  for index in "${!item_accelerators[@]}"; do
-    if [[ "${item_accelerators[$index]}" == "$key" ]]; then
-      printf '%s\n' "$index"
-      return 0
-    fi
-  done
-
-  return 1
+  query+="$key"
+  update_filtered_indexes
 }
 
 trap cleanup EXIT
 printf '\033[?25l'
+update_filtered_indexes
 
 while true; do
   key=""
-  accel_index=""
   status=0
 
   render_picker
@@ -217,7 +256,7 @@ while true; do
         status="$?"
       fi
       if [[ "$status" == "0" ]]; then
-        runtime_log_info command_panel "command popup picker completed" "runtime_mode=$runtime_mode" "session_name=$session_name" "duration_ms=$(runtime_log_duration_ms "$start_ms")"
+        runtime_log_info command_panel "command palette popup completed" "runtime_mode=$runtime_mode" "session_name=$session_name" "duration_ms=$(runtime_log_duration_ms "$start_ms")"
         exit 0
       fi
       if [[ "$status" == "2" ]]; then
@@ -225,32 +264,33 @@ while true; do
       fi
       exit "$status"
       ;;
-    $'\033' | $'\003')
-      exit 0
-      ;;
     $'\033[B' | $'\033OB')
       move_selection 1
       ;;
     $'\033[A' | $'\033OA')
       move_selection -1
       ;;
+    $'\177' | $'\010')
+      if [[ -n "$query" ]]; then
+        query="${query%?}"
+        update_filtered_indexes
+      fi
+      ;;
+    $'\025')
+      query=""
+      update_filtered_indexes
+      ;;
+    $'\033' | $'\003')
+      if [[ -n "$query" ]]; then
+        query=""
+        update_filtered_indexes
+      else
+        exit 0
+      fi
+      ;;
     *)
-      accel_index="$(find_accelerator_index "${key,,}" || true)"
-      if [[ -n "$accel_index" ]]; then
-        selected_index="$accel_index"
-        if run_selection; then
-          status=0
-        else
-          status="$?"
-        fi
-        if [[ "$status" == "0" ]]; then
-          runtime_log_info command_panel "command popup picker completed" "runtime_mode=$runtime_mode" "session_name=$session_name" "duration_ms=$(runtime_log_duration_ms "$start_ms")"
-          exit 0
-        fi
-        if [[ "$status" == "2" ]]; then
-          continue
-        fi
-        exit "$status"
+      if [[ "$key" =~ [[:print:]] ]]; then
+        append_query_char "$key"
       fi
       ;;
   esac

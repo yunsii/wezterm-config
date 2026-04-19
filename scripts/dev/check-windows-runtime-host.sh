@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WINDOWS_SHELL_LIB="$SCRIPT_DIR/../runtime/windows-shell-lib.sh"
+
+# shellcheck disable=SC1091
+source "$WINDOWS_SHELL_LIB"
+
 usage() {
   cat <<'EOF'
 usage:
@@ -39,6 +45,10 @@ pass() {
 
 warn() {
   printf 'WARN %s\n' "$*" >&2
+}
+
+trace() {
+  printf '[host-check] %s\n' "$*"
 }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -102,7 +112,7 @@ runtime_home_win="${userprofile_win}\\.wezterm-x"
 runtime_home_wsl="${userprofile_wsl}/.wezterm-x"
 debug_log_wsl="${runtime_state_wsl}/wezterm-debug.log"
 
-helper_ensure_win="${runtime_home_win}\\scripts\\ensure-windows-runtime-helper.ps1"
+helper_ensure_wsl="${runtime_home_wsl}/scripts/ensure-windows-runtime-helper.ps1"
 helper_state_win="${localappdata_win}\\wezterm-runtime-helper\\state.env"
 helper_state_wsl="${localappdata_wsl}/wezterm-runtime-helper/state.env"
 helper_window_cache_wsl="${localappdata_wsl}/wezterm-runtime-helper/window-cache.json"
@@ -203,8 +213,10 @@ wait_for_trace_event() {
 }
 
 ensure_helper() {
-  powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-    -File "$helper_ensure_win" \
+  local helper_ensure_win=""
+  helper_ensure_win="$(wslpath -w "$helper_ensure_wsl")"
+  trace "step=ensure-helper helper_ensure_win=$helper_ensure_win state_path=$helper_state_win"
+  windows_run_powershell_script_utf8 "$helper_ensure_win" \
     -StatePath "$helper_state_win" \
     -ClipboardOutputDir "$clipboard_output_win" \
     -ClipboardWslDistro "$distro" \
@@ -281,7 +293,9 @@ enqueue_chrome_request() {
 
   wait_for_trace_event "$trace_id" "helper completed request.*status=\"(reused|launched|launch_handoff_existing)\"" || return 1
   wait_for_trace_event "$trace_id" "(focused cached debug chrome window|rebound existing debug chrome window|bound launched debug chrome window|launched debug chrome)" || return 1
-  wait_for_trace_event "$trace_id" "launched debug chrome but did not bind a reusable window" && return 1
+  if wait_for_trace_event "$trace_id" "launched debug chrome but did not bind a reusable window"; then
+    return 1
+  fi
   return 0
 }
 

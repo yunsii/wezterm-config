@@ -278,55 +278,6 @@ function M:ensure_helper_running_sync(reason)
   return true, nil
 end
 
-function M:read_helper_state(trace_id)
-  local integration = self:helper_integration()
-  local state_path = integration.helper_state_path
-  if not state_path or state_path == '' then
-    return nil, 'state_path_unconfigured'
-  end
-
-  local ok, helper_state = pcall(self.helpers.load_optional_env_file, state_path)
-  if not ok then
-    self.logger.warn('alt_o', 'failed to parse windows runtime helper state', merge_fields(trace_id, {
-      error = helper_state,
-      state_path = state_path,
-    }))
-    return nil, 'state_parse_failed'
-  end
-
-  if not helper_state or next(helper_state) == nil then
-    return nil, 'state_missing'
-  end
-
-  helper_state.__state_path = state_path
-  return helper_state, nil
-end
-
-function M:helper_state_is_fresh(helper_state)
-  local integration = self:helper_integration()
-  local heartbeat_timeout = tonumber(integration.helper_heartbeat_timeout_seconds or 5) or 5
-  local heartbeat_at_ms = tonumber(helper_state.heartbeat_at_ms or '') or 0
-  local pid = tonumber(helper_state.pid or '') or 0
-
-  if helper_state.ready ~= '1' then
-    return false, 'not_ready'
-  end
-
-  if pid <= 0 then
-    return false, 'missing_pid'
-  end
-
-  if heartbeat_at_ms <= 0 then
-    return false, 'missing_heartbeat'
-  end
-
-  if current_epoch_ms() - heartbeat_at_ms > heartbeat_timeout * 1000 then
-    return false, 'stale_heartbeat'
-  end
-
-  return true, nil
-end
-
 function M:write_request(trace_id, category, request_kind, payload_body_factory)
   local response, reason = self:write_request_with_response(trace_id, category, request_kind, payload_body_factory)
   if not response then
@@ -340,34 +291,54 @@ function M:write_request(trace_id, category, request_kind, payload_body_factory)
   return true, nil
 end
 
+function M:invoke_helper_request(trace_id, category, request_command, phase)
+  self.logger.info(category, 'sending request via windows runtime helper ipc', merge_fields(trace_id, {
+    phase = phase or 'direct',
+  }))
+
+  local ok, success, stdout, stderr = pcall(self.wezterm.run_child_process, request_command)
+  if not ok then
+    self.logger.warn(category, 'windows runtime helper ipc request raised an error', merge_fields(trace_id, {
+      error = success,
+      phase = phase or 'direct',
+    }))
+    return nil, 'request_spawn_error'
+  end
+
+  if not success then
+    self.logger.warn(category, 'windows runtime helper ipc request failed', merge_fields(trace_id, {
+      stdout = stdout,
+      stderr = stderr,
+      phase = phase or 'direct',
+    }))
+    return nil, 'request_failed'
+  end
+
+  local response = nil
+  if stdout and stdout ~= '' then
+    local parsed_ok, parsed_response = pcall(self.helpers.load_env_text, stdout, '<helper-response>')
+    if not parsed_ok then
+      self.logger.warn(category, 'failed to parse windows runtime helper ipc response', merge_fields(trace_id, {
+        error = parsed_response,
+        stdout = stdout,
+        phase = phase or 'direct',
+      }))
+      return nil, 'response_parse_failed'
+    end
+
+    response = parsed_response
+  end
+
+  self.logger.info(category, 'windows runtime helper ipc request completed', merge_fields(trace_id, {
+    status = response and response.status or nil,
+    decision_path = response and response.decision_path or nil,
+    phase = phase or 'direct',
+  }))
+
+  return response or { ok = '1' }, nil
+end
+
 function M:write_request_with_response(trace_id, category, request_kind, payload_body_factory)
-  local helper_state, helper_state_reason = self:read_helper_state(trace_id)
-  local helper_ready = false
-  local helper_ready_reason = helper_state_reason
-  local ensure_reason = nil
-
-  if helper_state then
-    helper_ready, helper_ready_reason = self:helper_state_is_fresh(helper_state)
-  end
-
-  if not helper_ready then
-    local ensured, ensured_reason = self:ensure_helper_running_sync('state-' .. (helper_ready_reason or 'missing'))
-    if not ensured then
-      return false, ensured_reason
-    end
-
-    ensure_reason = 'state_' .. (helper_ready_reason or 'missing')
-    helper_state, helper_state_reason = self:read_helper_state(trace_id)
-    if not helper_state then
-      return false, helper_state_reason or 'state_missing_after_ensure'
-    end
-
-    helper_ready, helper_ready_reason = self:helper_state_is_fresh(helper_state)
-    if not helper_ready then
-      return false, helper_ready_reason or 'state_not_fresh_after_ensure'
-    end
-  end
-
   local request_trace_id = trace_id or tostring(os.time())
   local payload_body = payload_body_factory(request_trace_id)
   local request_body = table.concat {
@@ -383,51 +354,17 @@ function M:write_request_with_response(trace_id, category, request_kind, payload
     return false, request_command_reason
   end
 
-  self.logger.info(category, 'sending request via windows runtime helper ipc', merge_fields(trace_id, {
-    ensure_reason = ensure_reason or helper_ready_reason or 'ready',
-  }))
-
-  local ok, success, stdout, stderr = pcall(self.wezterm.run_child_process, request_command)
-  if not ok or not success then
-    self:ensure_helper_running_sync 'request-ipc-retry'
-    ok, success, stdout, stderr = pcall(self.wezterm.run_child_process, request_command)
+  local response, reason = self:invoke_helper_request(trace_id, category, request_command, 'direct')
+  if response then
+    return response, nil
   end
 
-  if not ok then
-    self.logger.warn(category, 'windows runtime helper ipc request raised an error', merge_fields(trace_id, {
-      error = success,
-    }))
-    return nil, 'request_spawn_error'
+  local ensured, ensured_reason = self:ensure_helper_running_sync('request-' .. (reason or 'failed'))
+  if not ensured then
+    return nil, ensured_reason
   end
 
-  if not success then
-    self.logger.warn(category, 'windows runtime helper ipc request failed', merge_fields(trace_id, {
-      stdout = stdout,
-      stderr = stderr,
-    }))
-    return nil, 'request_failed'
-  end
-
-  local response = nil
-  if stdout and stdout ~= '' then
-    local parsed_ok, parsed_response = pcall(self.helpers.load_env_text, stdout, '<helper-response>')
-    if not parsed_ok then
-      self.logger.warn(category, 'failed to parse windows runtime helper ipc response', merge_fields(trace_id, {
-        error = parsed_response,
-        stdout = stdout,
-      }))
-      return nil, 'response_parse_failed'
-    end
-
-    response = parsed_response
-  end
-
-  self.logger.info(category, 'windows runtime helper ipc request completed', merge_fields(trace_id, {
-    status = response and response.status or nil,
-    decision_path = response and response.decision_path or nil,
-  }))
-
-  return response or { ok = '1' }, nil
+  return self:invoke_helper_request(trace_id, category, request_command, 'after_ensure')
 end
 
 return M

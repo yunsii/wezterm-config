@@ -31,18 +31,18 @@ The terminal font uses a platform-aware fallback chain defined in `default_termi
 ## Local Setup
 
 1. Copy `wezterm-x/local.example/` to `wezterm-x/local/`.
-2. Edit `wezterm-x/local/constants.lua` for your `runtime_mode`, runtime shell, managed CLI theme variant, and any optional OS-specific integrations such as `default_domain` or Chrome debug profile path. In `hybrid-wsl`, `Alt+b` and `Alt+o` are handled by the native Windows host helper over the stable local IPC endpoint and require `chrome_debug_browser.user_data_dir` for the debug-browser path.
+2. Edit `wezterm-x/local/constants.lua` for your `runtime_mode`, runtime shell, managed CLI theme variant, and any optional OS-specific integrations such as `default_domain` or Chrome debug profile path. In `hybrid-wsl`, WSL tabs now boot through tmux by default, while `Alt+b` and `Alt+v` are handled by the native Windows host helper over the stable local IPC endpoint and require `chrome_debug_browser.user_data_dir` for the debug-browser path.
 3. Edit `wezterm-x/local/shared.env` for shared scalar values that both Lua and shell scripts need, such as `WAKATIME_API_KEY` and the machine-local `MANAGED_AGENT_PROFILE`.
 4. Optionally create `~/.config/worktree-task/config.env` when you need to point globally installed `worktree-task` back at a tracked `wezterm-config` repo with `WEZTERM_CONFIG_REPO=/absolute/path`.
 5. Edit `wezterm-x/local/workspaces.lua` for your private project directories.
-6. Optionally edit `wezterm-x/local/command-panel.sh` for machine-local `Ctrl+k` command panel entries.
+6. Optionally edit `wezterm-x/local/command-panel.sh` for machine-local tmux command palette entries exposed through `Ctrl+Shift+P`.
 
  ## Repo Entry Points
 
 - `wezterm.lua`: main WezTerm config
 - `wezterm-x/workspaces.lua`: shared public workspace baseline and per-project startup defaults
 - `wezterm-x/local.example/`: tracked templates for private machine-local overrides
-- `wezterm-x/local.example/command-panel.sh`: tracked template for private machine-local `Ctrl+k` command panel items
+- `wezterm-x/local.example/command-panel.sh`: tracked template for private machine-local tmux command palette items
 - `wezterm-x/local.example/shared.env`: tracked template for simple shared scalar values used by both Lua and shell runtime code
 - `wezterm-x/local/`: gitignored machine-local overrides that are still copied by the sync skill
 - `config/worktree-task.env`: tracked repo profile for the self-contained worktree-task skill, including the explicit `wezterm-config` repo pointer used to collect shared task-launch conventions; legacy `.worktree-task/config.env` remains a compatibility fallback

@@ -31,6 +31,7 @@ command_panel_join_by_comma() {
 command_panel_reset_items() {
   COMMAND_PANEL_IDS=()
   COMMAND_PANEL_LABELS=()
+  COMMAND_PANEL_ACCELERATORS=()
   COMMAND_PANEL_DESCRIPTIONS=()
   COMMAND_PANEL_RUNTIME_MODES=()
   COMMAND_PANEL_BACKGROUNDS=()
@@ -41,7 +42,7 @@ command_panel_reset_items() {
 }
 
 command_panel_register_item() {
-  local id="" label="" description="" background=0
+  local id="" label="" accelerator="" description="" background=0
   local confirm_message="" success_message="" failure_message=""
   local -a runtime_modes=()
   local -a command=()
@@ -55,6 +56,10 @@ command_panel_register_item() {
         ;;
       --label)
         label="${2:?missing value for --label}"
+        shift 2
+        ;;
+      --accelerator)
+        accelerator="${2:?missing value for --accelerator}"
         shift 2
         ;;
       --description)
@@ -113,6 +118,7 @@ command_panel_register_item() {
 
   COMMAND_PANEL_IDS+=("$id")
   COMMAND_PANEL_LABELS+=("$label")
+  COMMAND_PANEL_ACCELERATORS+=("${accelerator,,}")
   COMMAND_PANEL_DESCRIPTIONS+=("$description")
   COMMAND_PANEL_RUNTIME_MODES+=("$(command_panel_join_by_comma "${runtime_modes[@]}")")
   COMMAND_PANEL_BACKGROUNDS+=("$background")
@@ -124,8 +130,27 @@ command_panel_register_item() {
 
 command_panel_register_builtin_items() {
   command_panel_register_item \
+    --id split-vertical \
+    --label 'Split vertically' \
+    --accelerator 'v' \
+    --description 'Create a top/bottom tmux split in the current pane' \
+    --success-message 'Created a vertical split.' \
+    --failure-message 'Failed to create a vertical split.' \
+    -- bash -lc 'tmux split-window -v -c "$PWD"'
+
+  command_panel_register_item \
+    --id split-horizontal \
+    --label 'Split horizontally' \
+    --accelerator 'h' \
+    --description 'Create a left/right tmux split in the current pane' \
+    --success-message 'Created a horizontal split.' \
+    --failure-message 'Failed to create a horizontal split.' \
+    -- bash -lc 'tmux split-window -h -c "$PWD"'
+
+  command_panel_register_item \
     --id force-close-vscode-windows \
     --label 'Force close all VS Code windows' \
+    --accelerator 'x' \
     --description 'Run taskkill /IM code.exe /F on the Windows host' \
     --runtime-mode hybrid-wsl \
     --confirm-message 'Force close all VS Code windows? Unsaved editor state will be lost.' \

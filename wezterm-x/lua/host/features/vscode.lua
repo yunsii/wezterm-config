@@ -16,7 +16,7 @@ return function(runtime)
     category = 'alt_o',
     recover_reason_prefix = 'alt_o',
     failure_notification = {
-      title = 'WezTerm Alt+o',
+      title = 'WezTerm Alt+v',
       message = 'Windows helper failed to focus VS Code. Check wezterm diagnostics.',
     },
     request = function(trace_id, payload)

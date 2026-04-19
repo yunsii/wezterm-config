@@ -4,12 +4,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYNC_PROMPT_LIB="$SCRIPT_DIR/sync-prompt-lib.sh"
 RUNTIME_LOG_LIB="$SCRIPT_DIR/../../../scripts/runtime/runtime-log-lib.sh"
+WINDOWS_SHELL_LIB="$SCRIPT_DIR/../../../scripts/runtime/windows-shell-lib.sh"
 
 # Shared with the prompt test script so output regressions are easy to verify.
 source "$SYNC_PROMPT_LIB"
 # shellcheck disable=SC1091
 source "$RUNTIME_LOG_LIB"
+# shellcheck disable=SC1091
+source "$WINDOWS_SHELL_LIB"
 export WEZTERM_RUNTIME_LOG_SOURCE="sync-runtime"
+
+sync_trace() {
+  printf '[sync] %s\n' "$*"
+}
 
 usage() {
   cat <<'EOF'
@@ -31,23 +38,24 @@ EOF
 install_windows_helper_manager() {
   local target_runtime_dir="${1:?missing target runtime dir}"
   local install_script="$target_runtime_dir/scripts/install-windows-runtime-helper-manager.ps1"
-  local runtime_dir_win="" install_output="" manager_path=""
+  local install_script_win="" runtime_dir_win="" install_output="" manager_path=""
 
   [[ "$target_runtime_dir" =~ ^/mnt/[A-Za-z]/Users/ ]] || return 0
   command -v powershell.exe >/dev/null 2>&1 || return 0
   command -v wslpath >/dev/null 2>&1 || return 0
   [[ -f "$install_script" ]] || return 0
 
+  install_script_win="$(wslpath -w "$install_script" 2>/dev/null || true)"
   runtime_dir_win="$(wslpath -w "$target_runtime_dir" 2>/dev/null || true)"
-  [[ -n "$runtime_dir_win" ]] || return 0
+  [[ -n "$install_script_win" && -n "$runtime_dir_win" ]] || return 0
 
-  printf 'Installing Windows helper manager from %s\n' "$target_runtime_dir"
+  sync_trace "step=helper-install status=starting target_runtime_dir=$target_runtime_dir runtime_dir_win=$runtime_dir_win install_script_win=$install_script_win"
   if ! install_output="$(
-    powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-      -File "$(wslpath -w "$install_script")" \
+    windows_run_powershell_script_utf8 "$install_script_win" \
       -RuntimeDir "$runtime_dir_win" 2>&1 | tr -d '\r'
   )"; then
     [[ -n "$install_output" ]] && printf '%s\n' "$install_output" >&2
+    sync_trace "step=helper-install status=failed target_runtime_dir=$target_runtime_dir"
     runtime_log_error sync "failed to install windows helper manager after sync" \
       "target_runtime_dir=$target_runtime_dir"
     return 1
@@ -55,6 +63,7 @@ install_windows_helper_manager() {
 
   [[ -n "$install_output" ]] && printf '%s\n' "$install_output"
   manager_path="$(printf '%s\n' "$install_output" | tail -n 1)"
+  sync_trace "step=helper-install status=completed manager_path=${manager_path:-unknown}"
   runtime_log_info sync "installed windows helper manager after sync" \
     "target_runtime_dir=$target_runtime_dir" \
     "manager_path=${manager_path:-unknown}"
@@ -99,31 +108,37 @@ lua_runtime_path() {
 maybe_reload_tmux() {
   local repo_root="${1:?missing repo root}"
   local reload_script="$repo_root/scripts/dev/reload-tmux.sh"
+  sync_trace "step=tmux-reload status=checking reload_script=$reload_script"
 
   if [[ ! -f "$reload_script" ]]; then
     runtime_log_info sync "skipped tmux reload after sync" "reason=reload_script_missing" "reload_script=$reload_script"
+    sync_trace "step=tmux-reload status=skipped reason=reload_script_missing"
     printf 'Skipped tmux reload: missing reload script %s\n' "$reload_script"
     return 0
   fi
 
   if ! command -v tmux >/dev/null 2>&1; then
     runtime_log_info sync "skipped tmux reload after sync" "reason=tmux_not_installed"
+    sync_trace "step=tmux-reload status=skipped reason=tmux_not_installed"
     printf 'Skipped tmux reload: tmux is not installed\n'
     return 0
   fi
 
   if ! tmux list-sessions >/dev/null 2>&1; then
     runtime_log_info sync "skipped tmux reload after sync" "reason=no_accessible_tmux_server"
+    sync_trace "step=tmux-reload status=skipped reason=no_accessible_tmux_server"
     printf 'Skipped tmux reload: no accessible tmux server\n'
     return 0
   fi
 
   if bash "$reload_script"; then
     runtime_log_info sync "reloaded tmux config after sync" "reload_script=$reload_script"
+    sync_trace "step=tmux-reload status=completed reload_script=$reload_script"
     return 0
   fi
 
   runtime_log_error sync "tmux reload after sync failed" "reload_script=$reload_script"
+  sync_trace "step=tmux-reload status=failed reload_script=$reload_script"
   printf 'Warning: synced runtime files, but tmux reload failed: %s\n' "$reload_script" >&2
 }
 
@@ -374,17 +389,22 @@ runtime_log_info sync "sync-runtime invoked" \
   "target_home=$TARGET_HOME" \
   "target_file=$TARGET_FILE" \
   "target_runtime_dir=$TARGET_RUNTIME_DIR"
+sync_trace "step=init repo_root=$REPO_ROOT main_repo_root=$MAIN_REPO_ROOT"
+sync_trace "step=target target_home=$TARGET_HOME target_file=$TARGET_FILE"
+sync_trace "step=target target_runtime_dir=$TARGET_RUNTIME_DIR target_native_dir=$TARGET_NATIVE_DIR"
 
 mkdir -p "$TARGET_HOME"
 mkdir -p "$TARGET_RUNTIME_STATE_DIR"
 rm -rf "$TEMP_RUNTIME_DIR" "$TEMP_NATIVE_DIR"
 mkdir -p "$TEMP_RUNTIME_DIR"
 mkdir -p "$TEMP_NATIVE_DIR"
+sync_trace "step=prepare temp_runtime_dir=$TEMP_RUNTIME_DIR temp_native_dir=$TEMP_NATIVE_DIR"
 
 cp -R "$RUNTIME_SOURCE_DIR"/. "$TEMP_RUNTIME_DIR"/
 if [[ -d "$NATIVE_SOURCE_DIR" ]]; then
   cp -R "$NATIVE_SOURCE_DIR"/. "$TEMP_NATIVE_DIR"/
 fi
+sync_trace "step=copy-source status=completed runtime_source=$RUNTIME_SOURCE_DIR native_source=$NATIVE_SOURCE_DIR"
 
 repo_root_path="${WEZTERM_REPO_ROOT:-}"
 if [[ -z "$repo_root_path" ]]; then
@@ -392,14 +412,17 @@ if [[ -z "$repo_root_path" ]]; then
 fi
 printf '%s\n' "$repo_root_path" > "$TEMP_RUNTIME_DIR/repo-root.txt"
 printf '%s\n' "$MAIN_REPO_ROOT" > "$TEMP_RUNTIME_DIR/repo-main-root.txt"
+sync_trace "step=write-metadata repo_root_path=$repo_root_path repo_main_root=$MAIN_REPO_ROOT"
 
 rm -rf "$TARGET_RUNTIME_DIR" "$TARGET_NATIVE_DIR"
 mv "$TEMP_RUNTIME_DIR" "$TARGET_RUNTIME_DIR"
 mv "$TEMP_NATIVE_DIR" "$TARGET_NATIVE_DIR"
+sync_trace "step=publish-runtime status=completed target_runtime_dir=$TARGET_RUNTIME_DIR target_native_dir=$TARGET_NATIVE_DIR"
 
 install_windows_helper_manager "$TARGET_RUNTIME_DIR"
 copy_file_atomic "$SOURCE_FILE" "$TARGET_FILE"
 touch "$TARGET_FILE"
+sync_trace "step=refresh-bootstrap status=completed target_file=$TARGET_FILE"
 
 maybe_reload_tmux "$REPO_ROOT"
 
@@ -409,6 +432,7 @@ runtime_log_info sync "sync-runtime completed" \
   "target_file=$TARGET_FILE" \
   "target_runtime_dir=$TARGET_RUNTIME_DIR" \
   "duration_ms=$(runtime_log_duration_ms "$start_ms")"
+sync_trace "step=completed duration_ms=$(runtime_log_duration_ms "$start_ms")"
 printf 'Synced %s -> %s\n' "$SOURCE_FILE" "$TARGET_FILE"
 printf 'Synced %s -> %s\n' "$RUNTIME_SOURCE_DIR" "$TARGET_RUNTIME_DIR"
 if [[ -d "$NATIVE_SOURCE_DIR" ]]; then
