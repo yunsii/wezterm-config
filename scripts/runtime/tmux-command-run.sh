@@ -11,6 +11,7 @@ session_name="${1:-}"
 item_id="${2:-}"
 current_window_id="${3:-}"
 cwd="${4:-$PWD}"
+client_tty="${5:-}"
 runtime_mode="$(command_panel_runtime_mode)"
 start_ms="$(runtime_log_now_ms)"
 
@@ -19,6 +20,11 @@ if [[ -z "$session_name" || -z "$item_id" ]]; then
   printf 'Command runner failed: missing required arguments.\n'
   exit 1
 fi
+
+export COMMAND_PANEL_SESSION_NAME="$session_name"
+export COMMAND_PANEL_WINDOW_ID="$current_window_id"
+export COMMAND_PANEL_CWD="$cwd"
+export COMMAND_PANEL_CLIENT_TTY="$client_tty"
 
 command_panel_load_items || {
   tmux display-message 'Command panel failed while loading items'
@@ -49,6 +55,7 @@ runtime_log_info command_panel "running command panel item" \
   "runtime_mode=$runtime_mode" \
   "session_name=$session_name" \
   "current_window_id=$current_window_id" \
+  "client_tty=$client_tty" \
   "cwd=$cwd"
 
 if [[ "$background" == "1" ]]; then

@@ -10,6 +10,7 @@ source "$script_dir/tmux-command-panel-lib.sh"
 session_name="${1:-}"
 current_window_id="${2:-}"
 cwd="${3:-$PWD}"
+client_tty="${4:-}"
 runtime_mode="$(command_panel_runtime_mode)"
 start_ms="$(runtime_log_now_ms)"
 trace_id="$(runtime_log_current_trace_id)"
@@ -106,7 +107,7 @@ update_filtered_indexes() {
 }
 
 render_picker() {
-  local rows cols visible_rows filtered_count start_index end_index top_index actual_index accelerator line description
+  local rows cols visible_rows filtered_count start_index end_index top_index actual_index line description
 
   IFS=' ' read -r rows cols <<< "$(terminal_size)"
   visible_rows=$((rows - 8))
@@ -140,14 +141,7 @@ render_picker() {
 
   for (( top_index = start_index; top_index <= end_index; top_index += 1 )); do
     actual_index="${filtered_indexes[$top_index]}"
-    accelerator="${item_accelerators[$actual_index]}"
-    if [[ -n "$accelerator" ]]; then
-      accelerator="[$accelerator]"
-    else
-      accelerator="   "
-    fi
-
-    line="$accelerator ${item_labels[$actual_index]}"
+    line="${item_labels[$actual_index]}"
     description="${item_descriptions[$actual_index]}"
     if [[ -n "$description" ]]; then
       line="$line - $description"
@@ -223,12 +217,13 @@ run_selection() {
     "runtime_mode=$runtime_mode" \
     "session_name=$session_name" \
     "current_window_id=$current_window_id" \
+    "client_tty=$client_tty" \
     "selected_index=$selected_index" \
     "query=$query" \
     "item_id=$item_id" \
     "cwd=$cwd"
 
-  WEZTERM_RUNTIME_TRACE_ID="$trace_id" bash "$script_dir/tmux-command-run.sh" "$session_name" "$item_id" "$current_window_id" "$cwd"
+  WEZTERM_RUNTIME_TRACE_ID="$trace_id" bash "$script_dir/tmux-command-run.sh" "$session_name" "$item_id" "$current_window_id" "$cwd" "$client_tty"
 }
 
 append_query_char() {

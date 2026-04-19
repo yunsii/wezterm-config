@@ -177,6 +177,18 @@ runtime_log_format_fields() {
   printf '%s' "${parts[*]}"
 }
 
+runtime_log_shell_join() {
+  local part=""
+  local rendered=""
+
+  for part in "$@"; do
+    printf -v rendered '%s%q ' "$rendered" "$part"
+  done
+
+  rendered="${rendered% }"
+  printf '%s\n' "$rendered"
+}
+
 runtime_log_emit() {
   runtime_log_init
 

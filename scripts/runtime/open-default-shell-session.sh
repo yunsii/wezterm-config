@@ -9,7 +9,10 @@ source "$SCRIPT_DIR/runtime-log-lib.sh"
 source "$SCRIPT_DIR/tmux-worktree-lib.sh"
 
 start_ms="$(runtime_log_now_ms)"
-cwd="${1:-$PWD}"
+cwd="${1:-}"
+if [[ -z "$cwd" || "$cwd" =~ ^/mnt/[a-z]/Users/[^/]+$ ]]; then
+  cwd="${HOME:-$PWD}"
+fi
 cwd="$(tmux_worktree_abs_path "$cwd")"
 
 tmux_version() {
@@ -103,19 +106,20 @@ fi
 runtime_log_info workspace "opening default WSL tmux session" \
   "cwd=$cwd" \
   "session_name=$session_name" \
-  "window_label=$window_label"
+  "window_label=$window_label" \
+  "primary_shell_command=$primary_shell_command"
 
-window_id="$(tmux new-session -d -P -F '#{window_id}' -s "$session_name" -c "$cwd" "$primary_shell_command")"
-tmux rename-window -t "$window_id" "$window_label"
-tmux_worktree_ensure_tmux_config_loaded "$TMUX_CONF" "$(repo_root_path)"
-tmux set-option -t "$session_name" status off
-tmux set-option -t "$session_name" destroy-unattached on >/dev/null 2>&1 || true
-tmux select-window -t "$window_id"
+window_id="$(tmux new-session -d -P -F '#{window_id}' \
+  -s "$session_name" \
+  -n "$window_label" \
+  -c "$cwd" \
+  "$primary_shell_command")"
 
-runtime_log_info workspace "default WSL tmux session prepared" \
-  "cwd=$cwd" \
-  "session_name=$session_name" \
-  "window_id=$window_id" \
-  "duration_ms=$(runtime_log_duration_ms "$start_ms")"
+tmux source-file "$TMUX_CONF"
+# Enable destroy-unattached only after a client really attaches. Setting it on
+# a freshly detached session can reap the session before attach-session runs.
+tmux set-hook -t "$session_name" client-attached "set-option -t '$session_name' destroy-unattached on"
+tmux_worktree_set_session_metadata "$session_name" default default
+tmux_worktree_set_window_metadata "$window_id" shell "$cwd" "$window_label" "$primary_shell_command" single
 
 exec tmux attach-session -t "$session_name"

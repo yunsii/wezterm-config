@@ -11,6 +11,7 @@ session_name="${1:-}"
 current_window_id="${2:-}"
 cwd="${3:-$PWD}"
 trigger_source="${4:-unknown}"
+client_tty="${5:-}"
 runtime_mode="$(command_panel_runtime_mode)"
 start_ms="$(runtime_log_now_ms)"
 trace_id="$(runtime_log_current_trace_id)"
@@ -41,7 +42,7 @@ fi
 
 runtime_log_info command_panel "opening tmux command panel" "runtime_mode=$runtime_mode" "session_name=$session_name" "item_count=${#visible_indexes[@]}" "trigger_source=$trigger_source"
 
-picker_command="WEZTERM_RUNTIME_TRACE_ID=$(command_panel_shell_quote "$trace_id") bash $(command_panel_shell_quote "$script_dir/tmux-command-picker.sh") $(command_panel_shell_quote "$session_name") $(command_panel_shell_quote "$current_window_id") $(command_panel_shell_quote "$cwd")"
+picker_command="WEZTERM_RUNTIME_TRACE_ID=$(command_panel_shell_quote "$trace_id") bash $(command_panel_shell_quote "$script_dir/tmux-command-picker.sh") $(command_panel_shell_quote "$session_name") $(command_panel_shell_quote "$current_window_id") $(command_panel_shell_quote "$cwd") $(command_panel_shell_quote "$client_tty")"
 
 if tmux display-popup -x C -y C -w 70% -h 75% -T "Command Palette" -E "$picker_command"; then
   runtime_log_info command_panel "tmux command panel popup completed" "runtime_mode=$runtime_mode" "session_name=$session_name" "trigger_source=$trigger_source" "duration_ms=$(runtime_log_duration_ms "$start_ms")"
@@ -80,7 +81,7 @@ for index in "${visible_indexes[@]}"; do
     done
   fi
 
-  command_string="run-shell -b 'WEZTERM_RUNTIME_TRACE_ID=$(command_panel_shell_quote "$trace_id") bash $(command_panel_shell_quote "$script_dir/tmux-command-run.sh") $(command_panel_shell_quote "$session_name") $(command_panel_shell_quote "$item_id") $(command_panel_shell_quote "$current_window_id") $(command_panel_shell_quote "$cwd")'"
+  command_string="run-shell -b 'WEZTERM_RUNTIME_TRACE_ID=$(command_panel_shell_quote "$trace_id") bash $(command_panel_shell_quote "$script_dir/tmux-command-run.sh") $(command_panel_shell_quote "$session_name") $(command_panel_shell_quote "$item_id") $(command_panel_shell_quote "$current_window_id") $(command_panel_shell_quote "$cwd") $(command_panel_shell_quote "$client_tty")'"
   if [[ -n "$confirm_message" ]]; then
     command_string="confirm-before -p $(command_panel_shell_quote "$confirm_message") \"$command_string\""
   fi

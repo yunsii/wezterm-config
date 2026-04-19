@@ -13,13 +13,11 @@ WezTerm workspaces are the top-level session unit.
 ## Managed Workspace Behavior
 
 - If the target workspace already exists, the shortcut switches to it.
-- When a managed workspace already exists, the shortcut re-syncs its configured project tabs before switching to it.
-- Tabs that no longer belong to the managed workspace definition are removed during that re-sync.
-- If it does not exist, WezTerm creates it and opens the configured project tabs.
-- `default` stays the built-in WezTerm workspace at the top level, but in `hybrid-wsl` its WSL tabs now launch straight into a single-pane tmux session so terminal rendering and copy-mode behavior stay tmux-owned there as well.
+- If it does not exist, WezTerm creates the workspace window first and then switches to it, opening the first configured project as that workspace's entry window.
+- `default` stays the built-in WezTerm workspace at the top level, but in `hybrid-wsl` its WSL tabs now launch straight into a single-pane tmux session so terminal rendering, copy-mode behavior, tmux-owned shortcut handling, and tmux status rendering stay unified there as well.
 - Non-default managed workspaces still use the heavier managed tmux bootstrap with repo-aware session reuse, workspace tab sync, and the shared managed status layout.
 - Each managed project tab boots through `tmux`.
-- Each managed git project tab now attaches to one tmux session per repo family, even when that repo has multiple linked worktrees.
+- Each managed git project tab still attaches to one tmux session per repo family, even when that repo has multiple linked worktrees.
 - Inside that tmux session, each git worktree gets its own tmux window.
 - Worktree switching inside that tmux session now follows the live git state of the current pane or window layout, so manually created linked worktrees are discoverable without prewritten tmux metadata.
 - The `worktree-task` skill creates linked task worktrees under the repository parent's `.worktrees/<repo>/` directory and opens them as additional tmux windows inside that same repo-family session.
@@ -31,6 +29,9 @@ WezTerm workspaces are the top-level session unit.
 - In the tracked baseline, the `codex` profile uses `-c 'tui.theme="github"'` for the light variant and bare `codex` for the dark variant.
 - Managed agent commands run inside the resolved login shell so workspace startup sees the same shell environment as your normal terminal sessions.
 - Raw `command = { ... }` overrides still bypass the managed launcher profile entirely.
+- To keep startup behavior consistent across managed workspaces, prefer `launcher = managed_launcher` in local workspace overrides instead of hard-coded wrapper commands such as `codex-github-theme`.
+- Existing tmux worktree sessions are reused as-is; changing the launcher affects newly created or recreated worktree sessions, and the runtime logs now record both the desired launch command and the reused primary pane startup command to help spot stale panes.
+- `workspace.open()` no longer auto-syncs additional top-level WezTerm tabs from the workspace definition. The top-level workspace switch now opens only its first configured entry window immediately; wider navigation is expected to happen inside tmux or through explicit follow-up opens instead of automatic tab fan-out during the initial switch.
 
 ## Public Vs Local Config
 

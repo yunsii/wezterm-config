@@ -15,19 +15,20 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 ## Tmux Behavior
 
 - tmux status follows the active pane working directory.
-- `default` stays the built-in WezTerm workspace at the top level, but in `hybrid-wsl` its WSL tabs now start inside tmux as well; tmux-backed panes therefore own `Alt+v`, `Alt+g`, `Alt+Shift+g`, `Ctrl+k`, and `Ctrl+Shift+P`.
+- `default` stays the built-in WezTerm workspace at the top level, but in `hybrid-wsl` its WSL tabs now start inside tmux as well; tmux-backed panes therefore own `Alt+v`, `Alt+g`, `Alt+Shift+g`, `Ctrl+k`, and `Ctrl+Shift+P` there too.
 - Managed workspace creation only requires `default_domain` in `hybrid-wsl` mode.
 - Managed tmux flows no longer require shell rc `OSC 7` integration; tmux status and tmux-owned shortcuts resolve cwd from tmux's own `pane_current_path`.
-- In `hybrid-wsl`, a plain WSL tab in the `default` workspace now starts in a single-pane tmux session too, but that default session keeps tmux `status` hidden and does not add the managed two-pane project layout.
+- In `hybrid-wsl`, a plain WSL tab in the `default` workspace now starts in a single-pane tmux session too; it uses the same tmux status rendering as other tmux-backed panes, but it still does not add the managed two-pane project layout.
 - Outside tmux in `hybrid-wsl`, `Alt+v` hands the current pane directory to the Windows native helper request path, which resolves the current worktree root, re-focuses a cached matching VS Code project window when available, and otherwise opens the target with VS Code's `--folder-uri vscode-remote://wsl+<distro>/...` entrypoint.
 - Outside tmux in `posix-local`, `Alt+v` hands the current pane directory to the runtime-side VS Code launcher, which resolves the current worktree root and then launches the configured local VS Code opener there.
 - Outside git worktrees, `Alt+v` still opens the current directory.
-- In managed workspaces, `Alt+v` is forwarded directly to tmux so the active tmux window resolves the live worktree path first and, in `hybrid-wsl`, then uses the same Windows native helper/front-focus path as the `default` workspace instead of `code .`.
+- In any tmux-backed pane, `Alt+v` is forwarded directly to tmux so the active tmux window resolves the live worktree path first and, in `hybrid-wsl`, then uses the same Windows native helper/front-focus path instead of `code .`.
 - If WezTerm only sees the WSL host fallback path such as `/C:/Users/...` in `hybrid-wsl`, `Alt+v` also forwards to the pane instead of using the stale host-side path.
 - In `hybrid-wsl`, `Alt+b` uses the same Windows native helper/front-focus path as `Alt+v` for the debug Chrome profile.
 - In `posix-local`, `Alt+b` stays unavailable until a native host helper exists.
 - `Ctrl+Shift+P` opens a centered tmux popup command palette whenever the current pane is running tmux; repo-shared commands appear there alongside any machine-local entries from `wezterm-x/local/command-panel.sh`.
-- That tmux command palette now behaves like a search-first launcher: start typing immediately to filter by label, description, id, or explicit accelerator, then use `Up/Down` and `Enter` to run the highlighted item.
+- That tmux command palette now behaves like a search-first launcher: start typing immediately to filter by label, description, or id, then use `Up/Down` and `Enter` to run the highlighted item.
+- tmux refresh is now command-palette-owned instead of WezTerm-shortcut-owned. `Refresh current tmux window` respawns only the focused window in place, while `Refresh current tmux session`, `Refresh current workspace sessions`, and `Refresh all tmux sessions` rebuild sessions through replacement sessions so attached tmux clients can switch first and keep the WezTerm pane rendering chain intact.
 - `Ctrl+k` is a tmux chord prefix for memorized low-latency actions such as `Ctrl+k v` for vertical split and `Ctrl+k h` for horizontal split in the current pane.
 - In `hybrid-wsl`, `Ctrl+k x` force-closes all VS Code windows on the Windows host with `taskkill /IM code.exe /F`.
 - After `Ctrl+k`, tmux temporarily replaces one status line with a generic VS Code-style waiting hint. In lightweight default-session tmux tabs where the status bar is normally hidden, tmux briefly enables a single status line for that hint and then restores the hidden state once the chord completes or is cancelled.
@@ -50,7 +51,7 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 - Any enabled status section keeps a stable on-screen slot. If live data is unavailable, that section renders placeholder text instead of disappearing, which avoids status-bar flicker.
 - A section only disappears completely when its toggle is disabled. If an entire line has no enabled sections, that line does not reserve a status row.
 - Managed git project tabs keep one tmux session per repo family and use tmux windows, not WezTerm tabs, to switch between linked worktrees.
-- Within managed workspaces, `Alt+g` and `Alt+Shift+g` work for any tmux window whose current pane or active window layout still resolves to a git worktree, including linked worktrees created outside the managed launcher flow.
+- Within any tmux-backed pane, `Alt+g` and `Alt+Shift+g` work for any tmux window whose current pane or active window layout still resolves to a git worktree, including linked worktrees created outside the managed launcher flow.
 - The `config` workspace stays anchored to the repo family's primary worktree tab, even when the synced runtime came from a linked worktree checkout.
 - If a synced linked checkout disappears after a reclaim, tmux status and `Alt` worktree helpers fall back to that repo family's primary worktree scripts automatically.
 - When `Alt+g` opens a linked worktree that does not already have a tmux window, tmux clones the current window's pane layout and remaps pane directories into the target worktree instead of relying on stored per-session startup metadata.
@@ -66,7 +67,7 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 - The `Alt+g` picker runs inside its own tmux popup pane instead of a `display-menu`, which keeps the picker stable even while the active pane is doing full-screen redraws.
 - Successful worktree switches update the active tmux window silently instead of showing a transient tmux banner.
 - tmux status refresh is hybrid: the draw path reads cached lines, focus and pane/window change hooks trigger debounced background refreshes, and a 30-second `status-interval` acts as a low-frequency fallback poll.
-- `Alt+g` and other tmux worktree switches force an immediate status recompute after selecting the target window, so repo, branch, and git-change state update without waiting for the fallback poll or force-refresh debounce.
+- `Alt+g`, `Alt+Shift+g`, and other tmux worktree switches force an immediate status recompute after selecting the target window, so repo, branch, and git-change state update without waiting for the fallback poll or force-refresh debounce.
 - WakaTime refresh is cache-backed: the status script reuses cached summary data for up to 60 seconds, refreshes asynchronously, and upgrades older JSON cache entries to the current compact summary format.
 - WakaTime status sources `wezterm-x/local/shared.env`, and WezTerm Lua also reads that same file for shared scalar values; both sides currently use it for `WAKATIME_API_KEY`.
 - WakaTime status no longer depends on WezTerm injecting the API key into the WSL shell environment; reloading tmux is enough after updating `shared.env`.

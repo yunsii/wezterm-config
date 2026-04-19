@@ -19,6 +19,46 @@ workspace="$1"
 cwd="$2"
 shift 2
 cwd="$(tmux_worktree_abs_path "$cwd")"
+window_id=""
+session_created=0
+window_created=0
+startup_step="init"
+
+cleanup_failed_startup() {
+  local exit_code=$?
+  if [[ $exit_code -eq 0 ]]; then
+    return 0
+  fi
+
+  runtime_log_error workspace "open-project-session failed" \
+    "workspace=$workspace" \
+    "cwd=$cwd" \
+    "session_name=${session_name:-}" \
+    "window_id=${window_id:-}" \
+    "session_created=$session_created" \
+    "window_created=$window_created" \
+    "step=$startup_step" \
+    "exit_code=$exit_code"
+
+  if (( session_created )) && [[ -n "${session_name:-}" ]]; then
+    runtime_log_warn workspace "cleaning up failed tmux session" \
+      "workspace=$workspace" \
+      "session_name=$session_name" \
+      "step=$startup_step"
+    tmux kill-session -t "$session_name" >/dev/null 2>&1 || true
+  elif (( window_created )) && [[ -n "${window_id:-}" ]]; then
+    runtime_log_warn workspace "cleaning up failed tmux window" \
+      "workspace=$workspace" \
+      "session_name=${session_name:-}" \
+      "window_id=$window_id" \
+      "step=$startup_step"
+    tmux kill-window -t "$window_id" >/dev/null 2>&1 || true
+  fi
+
+  exit "$exit_code"
+}
+
+trap cleanup_failed_startup EXIT
 
 tmux_version() {
   tmux -V 2>/dev/null | awk '{print $2}' | sed 's/[^0-9.]//g'
@@ -107,11 +147,11 @@ build_primary_shell_command() {
     printf -v command_string '%q ' "$@"
     command_string="${command_string% }"
     command_string="$command_string; exec ${quoted_shell} -l"
-    printf '%s -lic %q' "$quoted_shell" "$command_string"
+    printf '%s -lc %q' "$quoted_shell" "$command_string"
     return
   fi
 
-  printf '%s -il' "$quoted_shell"
+  printf '%s -l' "$quoted_shell"
 }
 
 primary_shell_command="$(build_primary_shell_command "$@")"
@@ -132,31 +172,42 @@ worktree_label="$(tmux_worktree_label_for_root "$worktree_root" "$main_worktree_
 session_name="$(tmux_worktree_session_name_for_path "$workspace" "$cwd")"
 runtime_log_info workspace "open-project-session invoked" "workspace=$workspace" "cwd=$cwd" "session_name=$session_name" "worktree_root=$worktree_root" "arg_count=$#"
 
-window_id=""
-session_created=0
 if ! tmux has-session -t "$session_name" 2>/dev/null; then
+  startup_step="create_session"
   runtime_log_info workspace "creating tmux session" "session_name=$session_name" "worktree_root=$worktree_root"
   window_id="$(tmux new-session -d -P -F '#{window_id}' -s "$session_name" -c "$worktree_root" "$primary_shell_command")"
   session_created=1
 else
+  startup_step="reuse_session"
   runtime_log_info workspace "reusing tmux session" "session_name=$session_name" "worktree_root=$worktree_root"
   window_id="$(tmux_worktree_find_window "$session_name" "$worktree_root" || true)"
 fi
 
 if [[ -z "$window_id" ]]; then
+  startup_step="create_window"
   runtime_log_info worktree "creating worktree window" "session_name=$session_name" "worktree_root=$worktree_root" "worktree_label=$worktree_label"
   window_id="$(tmux_worktree_create_window "$session_name" "$worktree_root" "$primary_shell_command" "$worktree_label")"
+  window_created=1
 else
+  startup_step="reuse_window"
   runtime_log_info worktree "reusing worktree window" "session_name=$session_name" "window_id=$window_id" "worktree_root=$worktree_root" "worktree_label=$worktree_label"
   tmux rename-window -t "$window_id" "$worktree_label"
   if (( session_created )); then
+    startup_step="ensure_window_panes"
     tmux_worktree_ensure_window_panes "$window_id" "$worktree_root"
   fi
 fi
 
+tmux_worktree_set_session_metadata "$session_name" "$workspace" managed
+tmux_worktree_set_window_metadata "$window_id" managed_primary "$worktree_root" "$worktree_label" "$primary_shell_command" managed_two_pane
+
+startup_step="load_tmux_config"
 tmux_worktree_ensure_tmux_config_loaded "$TMUX_CONF" "$(repo_root_path)"
+startup_step="select_window"
 tmux select-window -t "$window_id"
 
+startup_step="attach"
 runtime_log_info workspace "open-project-session prepared tmux session" "session_name=$session_name" "window_id=$window_id" "duration_ms=$(runtime_log_duration_ms "$start_ms")"
 runtime_log_info workspace "attaching tmux session" "session_name=$session_name" "window_id=$window_id"
+trap - EXIT
 exec tmux attach-session -t "$session_name"

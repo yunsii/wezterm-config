@@ -8,11 +8,15 @@ Use this doc when you need shortcut behavior.
 - `Alt+p`: rotate through all currently known workspaces
 - `Alt+Shift+x`: open a centered WezTerm confirmation overlay to close the current non-default workspace
 - `Alt+Shift+q`: quit WezTerm and close all windows; WezTerm will handle any built-in confirmation
-- `Alt+v`: in `default`, WezTerm opens the current worktree root in VS Code, re-focuses the matching project window when it already has a cached match, and still falls back to pane handling when it only sees the WSL host path; in non-default managed workspaces, WezTerm forwards the shortcut to tmux so the active tmux window resolves the live worktree and, in `hybrid-wsl`, uses the same Windows native helper request path
-- `Alt+g`: only in non-default managed workspaces, open a centered tmux popup worktree picker for the current repo family; selecting an unopened worktree creates its tmux window on demand
-- `Alt+Shift+g`: only in non-default managed workspaces, cycle to the next git worktree in the current repo family, creating the tmux window on demand when needed
+- `Alt+v`: in any tmux-backed pane, forward to tmux so the active tmux window resolves the live worktree first and, in `hybrid-wsl`, uses the Windows native helper request path; outside tmux, WezTerm opens the current worktree root in VS Code directly and still falls back to pane handling when it only sees the WSL host path
+- `Alt+g`: in any tmux-backed pane, open a centered tmux popup worktree picker for the current repo family; selecting an unopened worktree creates its tmux window on demand
+- `Alt+Shift+g`: in any tmux-backed pane, cycle to the next git worktree in the current repo family, creating the tmux window on demand when needed
 - `Alt+b`: open the configured Chrome debug browser profile from `wezterm-x/local/constants.lua`; in `hybrid-wsl` it uses the same Windows native helper/front-focus path as `Alt+v`, and in `posix-local` it stays unavailable until a native host helper exists
-- `Ctrl+Shift+P`: when the current pane is running tmux, open the tmux-owned searchable command palette with repo-shared commands plus optional machine-local extensions from `wezterm-x/local/command-panel.sh`; outside tmux it falls back to WezTerm's native command palette
+- `Ctrl+Shift+P`: when the current pane is running tmux, open the tmux-owned searchable command palette with repo-shared commands plus optional machine-local extensions from `wezterm-x/local/command-panel.sh`; outside tmux it falls back to WezTerm's native command palette. tmux refresh commands now live here:
+- `Refresh current tmux window`: respawn only the focused tmux window in place
+- `Refresh current tmux session`: rebuild the attached tmux session through a replacement session so the attached client keeps rendering
+- `Refresh current workspace sessions`: confirm and rebuild every tmux session in the current workspace through replacement sessions
+- `Refresh all tmux sessions`: confirm and rebuild every tmux session on the current tmux server through replacement sessions
 - `Ctrl+k`: tmux chord prefix; in tmux-backed panes, built-in follow-up keys include `v` for vertical split, `h` for horizontal split, and `x` for force-closing all VS Code windows on the Windows host in `hybrid-wsl`. After `Ctrl+k`, tmux temporarily overlays a generic VS Code-style waiting hint in the status area until you press a follow-up key or cancel with `Esc`
 - `Ctrl+Shift+;`: open WezTerm's native command palette directly
 - `LeftClick`: inside tmux, use the click only to focus the pane under the mouse; it does not start tmux selection and is not forwarded as a mouse click into the pane application

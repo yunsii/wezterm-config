@@ -129,6 +129,49 @@ command_panel_register_item() {
 }
 
 command_panel_register_builtin_items() {
+  local repo_root reset_script
+
+  repo_root="$(command_panel_repo_root)"
+  reset_script="$repo_root/scripts/runtime/tmux-reset.sh"
+
+  command_panel_register_item \
+    --id refresh-current-window \
+    --label 'Refresh current tmux window' \
+    --accelerator 'r' \
+    --description 'Respawn only the focused tmux window in place' \
+    --success-message 'Refreshed current tmux window.' \
+    --failure-message 'Failed to refresh current tmux window.' \
+    -- bash "$reset_script" refresh-current-window
+
+  command_panel_register_item \
+    --id refresh-current-session \
+    --label 'Refresh current tmux session' \
+    --accelerator 's' \
+    --description 'Rebuild the attached tmux session via replacement session' \
+    --success-message 'Refreshed current tmux session.' \
+    --failure-message 'Failed to refresh current tmux session.' \
+    -- bash "$reset_script" refresh-current-session
+
+  command_panel_register_item \
+    --id refresh-current-workspace \
+    --label 'Refresh current workspace sessions' \
+    --accelerator 'w' \
+    --description 'Rebuild every tmux session that belongs to this workspace' \
+    --confirm-message 'Refresh every tmux session in the current workspace?' \
+    --success-message 'Refreshed current workspace sessions.' \
+    --failure-message 'Failed to refresh current workspace sessions.' \
+    -- bash "$reset_script" refresh-current-workspace
+
+  command_panel_register_item \
+    --id refresh-all-sessions \
+    --label 'Refresh all tmux sessions' \
+    --accelerator 'a' \
+    --description 'Rebuild every tmux session on the current tmux server' \
+    --confirm-message 'Refresh every tmux session on this tmux server?' \
+    --success-message 'Refreshed all tmux sessions.' \
+    --failure-message 'Failed to refresh all tmux sessions.' \
+    -- bash "$reset_script" refresh-all
+
   command_panel_register_item \
     --id split-vertical \
     --label 'Split vertically' \

@@ -14,6 +14,50 @@ local function current_runtime_dir(config_dir)
   return join_path(config_dir, '.wezterm-x')
 end
 
+local function windows_path_to_wsl_path(path)
+  if not path or path == '' then
+    return nil
+  end
+
+  local normalized = tostring(path):gsub('\\', '/')
+  local drive, remainder = normalized:match '^([A-Za-z]):/?(.*)$'
+  if not drive then
+    return normalized
+  end
+
+  drive = drive:lower()
+  if remainder == '' then
+    return '/mnt/' .. drive
+  end
+
+  return '/mnt/' .. drive .. '/' .. remainder
+end
+
+local function read_runtime_metadata_file(filename)
+  local runtime_dir = rawget(_G, 'WEZTERM_RUNTIME_DIR')
+  if not runtime_dir or runtime_dir == '' then
+    return nil
+  end
+
+  local file = io.open(join_path(runtime_dir, filename), 'r')
+  if not file then
+    return nil
+  end
+
+  local value = file:read '*l'
+  file:close()
+  if not value then
+    return nil
+  end
+
+  value = tostring(value):gsub('^%s+', ''):gsub('%s+$', '')
+  if value == '' then
+    return nil
+  end
+
+  return value
+end
+
 local function runtime_script_roots(constants)
   local roots = {}
   local seen = {}
@@ -21,6 +65,8 @@ local function runtime_script_roots(constants)
   for _, root in ipairs {
     constants.repo_root,
     constants.main_repo_root,
+    read_runtime_metadata_file 'repo-root.txt',
+    read_runtime_metadata_file 'repo-main-root.txt',
   } do
     if root and root ~= '' and not seen[root] then
       roots[#roots + 1] = root
@@ -29,6 +75,14 @@ local function runtime_script_roots(constants)
   end
 
   return roots
+end
+
+local function wsl_distro_from_domain(domain_name)
+  if not domain_name then
+    return nil
+  end
+
+  return domain_name:match '^WSL:(.+)$'
 end
 
 local function default_wsl_tmux_program(constants)
@@ -54,7 +108,10 @@ local function default_wsl_tmux_program(constants)
     [[
 primary_script="$1"
 fallback_script="$2"
-cwd="${PWD:-$HOME}"
+cwd="${PWD:-}"
+if [ -z "$cwd" ] || printf '%s' "$cwd" | grep -Eq '^/mnt/[a-z]/Users/[^/]+$'; then
+  cwd="$HOME"
+fi
 shift 2
 
 run_script() {
@@ -81,6 +138,52 @@ exit 1
   }
 end
 
+local function configured_wsl_domains(wezterm, constants)
+  local ok, domains = pcall(wezterm.default_wsl_domains)
+  if not ok or type(domains) ~= 'table' then
+    return nil
+  end
+
+  local default_program = default_wsl_tmux_program(constants)
+  if not default_program then
+    return domains
+  end
+
+  local target_distro = wsl_distro_from_domain(constants.default_domain)
+  if not target_distro or target_distro == '' then
+    return domains
+  end
+
+  local configured = {}
+  local matched = false
+  for _, domain in ipairs(domains) do
+    local item = {}
+    for key, value in pairs(domain) do
+      item[key] = value
+    end
+    if item.name == constants.default_domain or item.distribution == target_distro then
+      local program = {}
+      for _, part in ipairs(default_program) do
+        program[#program + 1] = part
+      end
+      item.default_prog = program
+      matched = true
+    end
+    configured[#configured + 1] = item
+  end
+
+  if not matched and wezterm.log_warn then
+    wezterm.log_warn(
+      'default WSL tmux program was not applied because no WSL domain matched default_domain='
+        .. tostring(constants.default_domain)
+        .. ' distribution='
+        .. tostring(target_distro)
+    )
+  end
+
+  return configured
+end
+
 local function workspace_keybinding(wezterm, workspace, key, name)
   return {
     key = key,
@@ -102,6 +205,27 @@ end
 
 local function is_managed_workspace(workspace_name)
   return workspace_name ~= nil and workspace_name ~= 'default'
+end
+
+local function is_tmux_backed_pane(constants, window, pane)
+  local workspace_name = active_workspace_name(window)
+  if is_managed_workspace(workspace_name) then
+    return true, 'managed_workspace'
+  end
+
+  if constants.runtime_mode == 'hybrid-wsl' and constants.host_os == 'windows' then
+    local domain_name = pane and pane:get_domain_name() or nil
+    if wsl_distro_from_domain(domain_name) then
+      return true, 'hybrid_wsl_domain'
+    end
+  end
+
+  local foreground_process = foreground_process_basename(pane)
+  if foreground_process == 'tmux' then
+    return true, 'foreground_tmux'
+  end
+
+  return false, 'not_tmux_backed'
 end
 
 local function file_path_from_cwd(cwd)
@@ -151,6 +275,14 @@ local function copy_args(values)
   return result
 end
 
+local function trim(text)
+  if not text then
+    return ''
+  end
+
+  return (tostring(text):gsub('^%s+', ''):gsub('%s+$', ''))
+end
+
 local function merge_fields(trace_id, fields)
   local merged = {}
 
@@ -164,20 +296,150 @@ local function merge_fields(trace_id, fields)
   return merged
 end
 
+local function runtime_script_command(constants, script_rel_path, script_args, trace_id)
+  local roots = runtime_script_roots(constants)
+  local primary_script = roots[1] and (roots[1] .. '/' .. script_rel_path) or ''
+  local fallback_script = roots[2] and (roots[2] .. '/' .. script_rel_path) or ''
+  local runner = [[
+primary_script="${WEZTERM_RUNTIME_PRIMARY_SCRIPT:-}"
+fallback_script="${WEZTERM_RUNTIME_FALLBACK_SCRIPT:-}"
+trace_id="${WEZTERM_RUNTIME_TRACE_ID:-}"
+
+run_script() {
+  script_path="$1"
+  shift
+
+  if [ -n "$script_path" ] && [ -f "$script_path" ]; then
+    if [ -n "$trace_id" ]; then
+      exec env WEZTERM_RUNTIME_TRACE_ID="$trace_id" bash "$script_path" "$@"
+    fi
+    exec bash "$script_path" "$@"
+  fi
+}
+
+run_script "$primary_script" "$@"
+run_script "$fallback_script" "$@"
+
+printf 'Runtime script is unavailable: %s\n' "$primary_script" >&2
+if [ -n "$fallback_script" ]; then
+  printf 'Fallback runtime script is unavailable: %s\n' "$fallback_script" >&2
+fi
+exit 1
+    ]]
+  local command
+
+  if constants.runtime_mode == 'hybrid-wsl' and constants.host_os == 'windows' then
+    local distro = wsl_distro_from_domain(constants.default_domain)
+    primary_script = windows_path_to_wsl_path(primary_script) or ''
+    fallback_script = windows_path_to_wsl_path(fallback_script) or ''
+    local script_to_run = primary_script
+    if script_to_run == '' then
+      script_to_run = fallback_script
+    end
+    command = { 'wsl.exe' }
+    if distro and distro ~= '' then
+      command[#command + 1] = '-d'
+      command[#command + 1] = distro
+    end
+    command[#command + 1] = '--'
+    if script_to_run == '' then
+      command[#command + 1] = 'bash'
+      command[#command + 1] = '-lc'
+      command[#command + 1] = "printf 'Runtime script is unavailable\\n' >&2; exit 1"
+    else
+      command[#command + 1] = 'env'
+      command[#command + 1] = 'WEZTERM_RUNTIME_TRACE_ID=' .. (trace_id or '')
+      command[#command + 1] = 'bash'
+      command[#command + 1] = script_to_run
+    end
+  else
+    command = {
+      'env',
+      'WEZTERM_RUNTIME_PRIMARY_SCRIPT=' .. primary_script,
+      'WEZTERM_RUNTIME_FALLBACK_SCRIPT=' .. fallback_script,
+      'WEZTERM_RUNTIME_TRACE_ID=' .. (trace_id or ''),
+      '/bin/sh',
+      '-lc',
+      runner,
+      'sh',
+    }
+  end
+
+  for _, value in ipairs(script_args or {}) do
+    command[#command + 1] = value
+  end
+
+  return command
+end
+
+local function run_runtime_script_capture(wezterm, constants, logger, trace_id, category, script_rel_path, script_args)
+  local command = runtime_script_command(constants, script_rel_path, script_args, trace_id)
+  local ok, success, stdout, stderr = pcall(wezterm.run_child_process, command)
+  if not ok then
+    logger.warn(category, 'runtime script raised an error', merge_fields(trace_id, {
+      script = script_rel_path,
+      error = success,
+    }))
+    return nil, 'spawn_error'
+  end
+
+  if not success then
+    logger.warn(category, 'runtime script failed', merge_fields(trace_id, {
+      script = script_rel_path,
+      stdout = stdout,
+      stderr = stderr,
+    }))
+    return nil, 'script_failed'
+  end
+
+  return stdout or '', nil
+end
+
+local function split_nonempty_lines(text)
+  local lines = {}
+  local normalized = trim(text)
+  if normalized == '' then
+    return lines
+  end
+
+  for line in normalized:gmatch '[^\r\n]+' do
+    local value = trim(line)
+    if value ~= '' then
+      lines[#lines + 1] = value
+    end
+  end
+
+  return lines
+end
+
+local function cwd_matches_root(cwd, root)
+  if not cwd or not root or cwd == '' or root == '' then
+    return false
+  end
+
+  return cwd == root or cwd:match('^' .. root:gsub('([^%w])', '%%%1') .. '/')
+end
+
+local function current_managed_item(items, cwd)
+  local best_item = nil
+  local best_length = -1
+
+  for _, item in ipairs(items or {}) do
+    if item.cwd and cwd_matches_root(cwd, item.cwd) and #item.cwd > best_length then
+      best_item = item
+      best_length = #item.cwd
+    end
+  end
+
+  return best_item
+end
+
 local function is_windows_host_path(path)
   if not path or path == '' then
     return false
   end
 
   return path:match '^/[A-Za-z]:/' ~= nil
-end
-
-local function wsl_distro_from_domain(domain_name)
-  if not domain_name then
-    return nil
-  end
-
-  return domain_name:match '^WSL:(.+)$'
 end
 
 local function forward_shortcut_to_pane(wezterm, window, pane, shortcut, sequence, logger, category, workspace_name, trace_id)
@@ -190,12 +452,12 @@ local function forward_shortcut_to_pane(wezterm, window, pane, shortcut, sequenc
   window:perform_action(wezterm.action.SendString(sequence), pane)
 end
 
-local function managed_workspace_only_shortcut(window, logger, shortcut, trace_id)
-  logger.warn('workspace', 'shortcut requires a managed workspace', merge_fields(trace_id, {
+local function tmux_only_shortcut(window, logger, shortcut, trace_id)
+  logger.warn('workspace', 'shortcut requires a tmux-backed pane', merge_fields(trace_id, {
     shortcut = shortcut,
     workspace = active_workspace_name(window),
   }))
-  window:toast_notification('WezTerm', shortcut .. ' is only available in managed tmux workspaces', nil, 3000)
+  window:toast_notification('WezTerm', shortcut .. ' is only available when the current pane is running tmux', nil, 3000)
 end
 
 local function paste_clipboard_or_image_path(wezterm, window, pane, constants, logger, trace_id, host)
@@ -416,6 +678,30 @@ function M.apply(opts)
     helpers = helpers,
     logger = logger,
   }
+  local helper_prewarm_started = false
+
+  if constants.runtime_mode == 'hybrid-wsl' and constants.host_os == 'windows' then
+    wezterm.on('gui-startup', function()
+      if helper_prewarm_started then
+        return
+      end
+
+      helper_prewarm_started = true
+      logger.info('host_helper', 'prewarming windows helper in background', {
+        reason = 'gui-startup',
+      })
+
+      local ensured, ensure_reason = host:ensure_running('gui-startup-prewarm', false)
+      if ensured then
+        return
+      end
+
+      logger.warn('host_helper', 'background prewarm for windows helper failed', {
+        reason = 'gui-startup',
+        ensure_reason = ensure_reason,
+      })
+    end)
+  end
 
   config.font = constants.fonts.terminal
   config.font_size = 12.0
@@ -427,6 +713,10 @@ function M.apply(opts)
   local default_program = default_wsl_tmux_program(constants)
   if default_program then
     config.default_prog = default_program
+  end
+  local wsl_domains = configured_wsl_domains(wezterm, constants)
+  if wsl_domains then
+    config.wsl_domains = wsl_domains
   end
   config.notification_handling = 'NeverShow'
   config.audible_bell = 'Disabled'
@@ -517,13 +807,21 @@ function M.apply(opts)
         local foreground_process = foreground_process_basename(pane)
         local runtime_mode = constants.runtime_mode or 'hybrid-wsl'
         local distro = wsl_distro_from_domain(pane:get_domain_name()) or wsl_distro_from_domain(constants.default_domain)
+        local tmux_backed, decision_path = is_tmux_backed_pane(constants, window, pane)
 
-        if is_managed_workspace(workspace_name) then
+        if tmux_backed then
+          logger.info('alt_o', 'forwarding Alt+v to tmux-backed pane', merge_fields(trace_id, {
+            cwd = cwd,
+            decision_path = decision_path,
+            domain = pane:get_domain_name(),
+            foreground_process = foreground_process,
+            workspace = workspace_name,
+          }))
           forward_shortcut_to_pane(wezterm, window, pane, 'Alt+v', '\x1bv', logger, 'alt_o', workspace_name, trace_id)
           return
         end
 
-        -- Outside managed workspaces, WezTerm owns Alt+v and only delegates when its cwd view is unusable.
+        -- Outside tmux-backed panes, WezTerm owns Alt+v and only delegates when its cwd view is unusable.
         if foreground_process == 'tmux' and (not cwd or cwd == '/') then
           logger.info('alt_o', 'forwarding Alt+v to pane fallback', merge_fields(trace_id, {
             cwd = cwd,
@@ -553,12 +851,18 @@ function M.apply(opts)
       action = wezterm.action_callback(function(window, pane)
         local trace_id = logger.trace_id('workspace')
         local workspace_name = active_workspace_name(window)
-        if is_managed_workspace(workspace_name) then
+        local tmux_backed, decision_path = is_tmux_backed_pane(constants, window, pane)
+        if tmux_backed then
+          logger.info('workspace', 'forwarding Alt+g to tmux-backed pane', merge_fields(trace_id, {
+            decision_path = decision_path,
+            domain = pane:get_domain_name(),
+            workspace = workspace_name,
+          }))
           forward_shortcut_to_pane(wezterm, window, pane, 'Alt+g', '\x1bg', logger, 'workspace', workspace_name, trace_id)
           return
         end
 
-        managed_workspace_only_shortcut(window, logger, 'Alt+g', trace_id)
+        tmux_only_shortcut(window, logger, 'Alt+g', trace_id)
       end),
     },
     {
@@ -567,12 +871,18 @@ function M.apply(opts)
       action = wezterm.action_callback(function(window, pane)
         local trace_id = logger.trace_id('workspace')
         local workspace_name = active_workspace_name(window)
-        if is_managed_workspace(workspace_name) then
+        local tmux_backed, decision_path = is_tmux_backed_pane(constants, window, pane)
+        if tmux_backed then
+          logger.info('workspace', 'forwarding Alt+Shift+g to tmux-backed pane', merge_fields(trace_id, {
+            decision_path = decision_path,
+            domain = pane:get_domain_name(),
+            workspace = workspace_name,
+          }))
           forward_shortcut_to_pane(wezterm, window, pane, 'Alt+Shift+g', '\x1bG', logger, 'workspace', workspace_name, trace_id)
           return
         end
 
-        managed_workspace_only_shortcut(window, logger, 'Alt+Shift+g', trace_id)
+        tmux_only_shortcut(window, logger, 'Alt+Shift+g', trace_id)
       end),
     },
     {
@@ -588,12 +898,13 @@ function M.apply(opts)
       mods = 'CTRL|SHIFT',
       action = wezterm.action_callback(function(window, pane)
         local workspace_name = active_workspace_name(window)
-        local foreground_process = foreground_process_basename(pane)
         local trace_id = logger.trace_id('command_panel')
+        local tmux_backed, decision_path = is_tmux_backed_pane(constants, window, pane)
+        local foreground_process = foreground_process_basename(pane)
 
-        if is_managed_workspace(workspace_name) or foreground_process == 'tmux' then
+        if tmux_backed then
           logger.info('command_panel', 'forwarding Ctrl+Shift+P to tmux command palette via tmux user-key transport', merge_fields(trace_id, {
-            decision_path = 'user_key_transport',
+            decision_path = decision_path,
             transport = 'User0',
             foreground_process = foreground_process,
             workspace = workspace_name,
@@ -617,10 +928,17 @@ function M.apply(opts)
       mods = 'CTRL',
       action = wezterm.action_callback(function(window, pane)
         local workspace_name = active_workspace_name(window)
-        local foreground_process = foreground_process_basename(pane)
         local trace_id = logger.trace_id('command_panel')
+        local tmux_backed, decision_path = is_tmux_backed_pane(constants, window, pane)
+        local foreground_process = foreground_process_basename(pane)
 
-        if is_managed_workspace(workspace_name) or foreground_process == 'tmux' then
+        if tmux_backed then
+          logger.info('command_panel', 'forwarding Ctrl+k to tmux chord handler', merge_fields(trace_id, {
+            decision_path = decision_path,
+            foreground_process = foreground_process,
+            workspace = workspace_name,
+            domain = pane:get_domain_name(),
+          }))
           forward_shortcut_to_pane(wezterm, window, pane, 'Ctrl+k', '\x0b', logger, 'command_panel', workspace_name, trace_id)
           return
         end
@@ -667,30 +985,6 @@ function M.apply(opts)
     {
       key = 'Q',
       mods = 'ALT|SHIFT',
-  local helper_prewarm_started = false
-
-  if constants.runtime_mode == 'hybrid-wsl' and constants.host_os == 'windows' then
-    wezterm.on('gui-startup', function()
-      if helper_prewarm_started then
-        return
-      end
-
-      helper_prewarm_started = true
-      logger.info('host_helper', 'prewarming windows helper in background', {
-        reason = 'gui-startup',
-      })
-
-      local ensured, ensure_reason = host:ensure_running('gui-startup-prewarm', false)
-      if ensured then
-        return
-      end
-
-      logger.warn('host_helper', 'background prewarm for windows helper failed', {
-        reason = 'gui-startup',
-        ensure_reason = ensure_reason,
-      })
-    end)
-  end
       action = wezterm.action.QuitApplication,
     },
     {

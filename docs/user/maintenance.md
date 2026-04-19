@@ -39,6 +39,14 @@ Recreate affected sessions only if a simple reload is not enough.
 For WakaTime key changes in `wezterm-x/local/shared.env`, a tmux reload is sufficient; that path no longer depends on WezTerm injecting environment variables into WSL.
 5. If runtime shell rc files changed, reload the interactive shell in affected tmux panes or recreate those sessions.
 
+For tmux reset regressions, prefer the isolated repo test suite before touching your live tmux workspace:
+
+```bash
+bash tests/tmux-reset/run.sh
+```
+
+That suite uses a dedicated temporary `tmux -L ...` socket, a temporary `HOME`, and an internal shim so it does not touch the live default tmux server. The current cases cover default-session resolution, in-place reset, current-workspace cleanup, global cleanup, and fallback-to-home behavior when the cwd is unusable.
+
 In `hybrid-wsl`, `Ctrl+v` smart image paste now resolves clipboard state through the Windows host helper over IPC at paste time. The clipboard decision no longer depends on a separate clipboard state file or listener log; the live paste result comes directly from the helper request/response path, and request diagnostics are unified in `%USERPROFILE%\.wezterm-runtime\wezterm-debug.log`. If text paste is fast but image-path paste stops working, sync the runtime, let WezTerm auto-reload, and inspect the shared `clipboard` trace lines there.
 The Windows host smoke test now validates clipboard behavior with controlled IPC writes as well: it writes a formatted timestamp string to the Windows clipboard, resolves it back as text, waits one second, then writes the tracked [`assets/copy-test.png`](/home/yuns/github/wezterm-config/assets/copy-test.png) image to the clipboard and resolves it back as image. The one-second gap is intentional so clipboard history tools like Ditto do not treat the second write as an update that happened "too fast" and skip it. This keeps clipboard regression checks independent of whatever is currently on the desktop clipboard.
 
@@ -85,7 +93,7 @@ flowchart LR
 
 ### Active Hybrid Flow
 
-- In `hybrid-wsl`, new WSL tabs in the built-in `default` workspace now start through `scripts/runtime/open-default-shell-session.sh`, which creates a lightweight single-pane tmux session, hides the tmux status bar for that session, and marks it `destroy-unattached on` so closing the tab still behaves like an ephemeral shell.
+- In `hybrid-wsl`, new WSL tabs in the built-in `default` workspace now start through `scripts/runtime/open-default-shell-session.sh`, which creates a lightweight single-pane tmux session, keeps tmux status rendering enabled, and marks it `destroy-unattached on` so closing the tab still behaves like an ephemeral shell.
 - WezTerm Lua generates a request payload with a `trace_id` and invokes `%LOCALAPPDATA%\wezterm-runtime-helper\bin\helperctl.exe` against the stable named pipe `\\.\pipe\wezterm-host-helper-v1`.
 - The steady-state path now sends that IPC request first; only when the request fails does WezTerm synchronously run `wezterm-x/scripts/ensure-windows-runtime-helper.ps1` and retry once.
 - `wezterm-x/scripts/ensure-windows-runtime-helper.ps1` is only a thin bootstrap: it checks the installed helper heartbeat/config, writes `manager-config.json`, and launches the stable native helper if needed.
@@ -228,7 +236,6 @@ Reclaim only removes skill-managed linked worktrees under the repository parent'
 - Clipboard image monitoring now runs inside that same `helper-manager.exe` process without launching a second standalone listener PowerShell window. `Ctrl+v` no longer depends on the state-file heartbeat to decide whether to paste an image path; it issues a live clipboard IPC request instead.
 - In `hybrid-wsl`, WezTerm now prewarms the host helper once in the background during GUI startup, then still falls back to on-demand ensure when the helper later goes stale or a request path detects missing bootstrap state.
 - For a repeatable live smoke test of the Windows runtime host, run [`scripts/dev/check-windows-runtime-host.sh`](../../scripts/dev/check-windows-runtime-host.sh) from WSL; it verifies helper health plus the current `Alt+v`, `Alt+b`, and clipboard IPC control paths against the synced Windows runtime.
-
 ## Hybrid WSL Agent Startup Measurement
 
 - Use [`scripts/dev/install-hybrid-wsl-agent-startup-desktop-script.sh`](../../scripts/dev/install-hybrid-wsl-agent-startup-desktop-script.sh) from WSL when you want a Windows-side PowerShell test script for the currently configured managed agent CLI across the full hybrid `WSL + login shell + agent CLI` launch path.

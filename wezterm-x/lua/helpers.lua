@@ -164,8 +164,13 @@ function M.unique_dirs_from_panes(panes)
       end
     end
 
-    if not cwd and source.get_current_working_dir then
-      cwd = source:get_current_working_dir()
+    if not cwd then
+      local ok, getter = pcall(function()
+        return source.get_current_working_dir
+      end)
+      if ok and getter then
+        cwd = source:get_current_working_dir()
+      end
     end
 
     local path = M.cwd_to_path(cwd)
