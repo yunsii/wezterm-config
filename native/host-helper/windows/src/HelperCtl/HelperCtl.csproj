@@ -12,6 +12,6 @@
   <ItemGroup>
     <Compile Include="../Shared/NamedPipeTransport.cs" Link="Shared/NamedPipeTransport.cs" />
     <Compile Include="../Shared/Protocol.cs" Link="Shared/Protocol.cs" />
-    <Compile Include="Program.cs" />
+    <Compile Include="*.cs" />
   </ItemGroup>
 </Project>
