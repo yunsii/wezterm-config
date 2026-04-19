@@ -36,13 +36,14 @@ When you need the Windows helper to install on machines without a local Windows 
 
 1. Run the GitHub Actions workflow [`.github/workflows/host-helper-release.yml`](/home/yuns/github/wezterm-config/.github/workflows/host-helper-release.yml) with a new `host-helper-v...` tag, or push that tag to trigger the workflow automatically.
 2. Copy the release tag and SHA-256 from the workflow summary.
-3. Update the pinned fallback manifest from a repo checkout:
+3. For non-draft releases, the workflow now opens a PR that updates `native/host-helper/windows/release-manifest.json` on top of the default branch.
+4. If you need to update the manifest manually from a repo checkout:
 
 ```bash
 scripts/dev/update-host-helper-release-manifest.sh --tag host-helper-v2026.04.19.1 --sha256 <sha256>
 ```
 
-4. Sync the runtime as usual so the updated manifest is copied to Windows targets.
+5. Sync the runtime as usual so the updated manifest is copied to Windows targets.
 
 To force the release path even on a machine that already has Windows `dotnet`, set:
 

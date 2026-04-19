@@ -25,12 +25,22 @@ on:
         default: false
         type: boolean
 
+concurrency:
+  group: host-helper-release-${{ inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   build:
     runs-on: windows-latest
+    outputs:
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      release_name: ${{ steps.meta.outputs.release_name }}
+      asset_name: ${{ steps.meta.outputs.asset_name }}
+      sha256: ${{ steps.package.outputs.sha256 }}
     steps:
       - uses: actions/checkout@v4
 
@@ -73,3 +83,36 @@ jobs:
           -AssetName '${{ steps.meta.outputs.asset_name }}'
           -Sha256 '${{ steps.package.outputs.sha256 }}'
           -Repository '${{ github.repository }}'
+
+  update-manifest:
+    needs: build
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Update release manifest
+        run: >
+          scripts/dev/update-host-helper-release-manifest.sh
+          --tag '${{ needs.build.outputs.release_tag }}'
+          --sha256 '${{ needs.build.outputs.sha256 }}'
+          --repo '${{ github.repository }}'
+          --asset-name '${{ needs.build.outputs.asset_name }}'
+
+      - name: Create manifest update PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: 'chore(scripts): update host helper release manifest'
+          title: 'chore(scripts): update host helper release manifest for ${{ needs.build.outputs.release_tag }}'
+          body: |
+            Update the Windows host-helper release manifest after publishing `${{ needs.build.outputs.release_tag }}`.
+
+            Release asset: `${{ needs.build.outputs.asset_name }}`
+            SHA-256: `${{ needs.build.outputs.sha256 }}`
+          branch: ci/update-host-helper-manifest-${{ needs.build.outputs.release_tag }}
+          base: ${{ github.event.repository.default_branch }}
+          add-paths: |
+            native/host-helper/windows/release-manifest.json
+          delete-branch: true
