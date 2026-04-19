@@ -177,14 +177,16 @@ host_check_chrome_registry_has_entry() {
 
 host_check_chrome_process_exists() {
   local chrome_profile="$1"
-  local escaped_profile="${chrome_profile//\\/\\\\}"
-  powershell.exe -NoProfile -NonInteractive -Command "
-    \$profile = '$escaped_profile';
-    \$matches = @(Get-CimInstance Win32_Process -Filter \"Name = 'chrome.exe'\" | Where-Object {
-      \$_.CommandLine -and
-      \$_.CommandLine.IndexOf('--remote-debugging-port=9222', [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
-      \$_.CommandLine.IndexOf(\$profile, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
-    });
-    if (\$matches.Count -gt 0) { exit 0 } else { exit 1 }
-  " >/dev/null 2>&1
+  local command=""
+  command="$(cat <<EOF
+\$profile = $(windows_powershell_quote "$chrome_profile")
+\$matches = @(Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" | Where-Object {
+  \$_.CommandLine -and
+  \$_.CommandLine.IndexOf('--remote-debugging-port=9222', [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+  \$_.CommandLine.IndexOf(\$profile, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+})
+if (\$matches.Count -gt 0) { exit 0 } else { exit 1 }
+EOF
+)"
+  windows_run_powershell_command_utf8 "$command" >/dev/null 2>&1
 }

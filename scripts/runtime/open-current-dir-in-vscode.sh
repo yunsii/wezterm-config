@@ -8,6 +8,8 @@ source "$SCRIPT_DIR/runtime-log-lib.sh"
 source "$SCRIPT_DIR/tmux-worktree-lib.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/windows-runtime-paths-lib.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/windows-shell-lib.sh"
 
 usage() {
   cat <<'EOF' >&2
@@ -63,8 +65,7 @@ ensure_helper() {
   runtime_log_info alt_o "tmux Alt+o ensuring windows helper" \
     "state_path=$HELPER_STATE_WSL"
 
-  if ! powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-    -File "$WINDOWS_HELPER_ENSURE_SCRIPT_WIN" \
+  if ! windows_run_powershell_script_utf8 "$WINDOWS_HELPER_ENSURE_SCRIPT_WIN" \
     -StatePath "$HELPER_STATE_WIN" \
     -HeartbeatTimeoutSeconds 5 \
     -HeartbeatIntervalMs 1000 \
@@ -102,10 +103,12 @@ run_direct_windows_open() {
   local trace_id="$1"
   local folder_uri="vscode-remote://wsl+${WSL_DISTRO_NAME}${target_dir}"
   local code_exe="${code_command[0]}"
-  local escaped_code="${code_exe//\\/\\\\}"
-  local escaped_uri="${folder_uri//\\/\\\\}"
-  powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \
-    "Start-Process -FilePath '$escaped_code' -ArgumentList @('--folder-uri', '$escaped_uri')" >/dev/null 2>&1
+  local command=""
+  command="$(cat <<EOF
+Start-Process -FilePath $(windows_powershell_quote "$code_exe") -ArgumentList @('--folder-uri', $(windows_powershell_quote "$folder_uri"))
+EOF
+)"
+  windows_run_powershell_command_utf8 "$command" >/dev/null 2>&1
 }
 
 code_command=()

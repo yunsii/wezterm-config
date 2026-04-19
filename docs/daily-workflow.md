@@ -74,6 +74,21 @@ scripts/dev/reload-tmux.sh
 - When changing repo-local helper wrappers under `scripts/runtime/`, add or update a narrow command-level check before relying on broader host smoke tests.
 - When task-worktree launch behavior changes, verify a new linked task worktree opens as another tmux window in the same repo-family session and later windows still fall back to the session default launcher.
 
+## Agent Windows Checks
+
+- When an agent needs to verify Windows helper behavior from WSL, run the repo entrypoints such as `scripts/dev/check-windows-runtime-host.sh` or `scripts/dev/check-agent-clipboard.sh` instead of direct `cmd.exe` probes.
+- When an agent needs to inspect `%LOCALAPPDATA%\wezterm-runtime\...`, source `scripts/runtime/windows-runtime-paths-lib.sh`, call `windows_runtime_detect_paths`, and then use `ls`, `cat`, or `rg` on the resolved `*_WSL` paths.
+- If an agent needs to execute inline PowerShell from shell code, source `scripts/runtime/windows-shell-lib.sh` and use `windows_run_powershell_script_utf8` or `windows_run_powershell_command_utf8` so UTF-8 output stays stable and shell interpolation does not corrupt the command body.
+
+Example runtime-state inspection from WSL:
+
+```bash
+source scripts/runtime/windows-runtime-paths-lib.sh
+windows_runtime_detect_paths
+ls "$WINDOWS_RUNTIME_STATE_WSL/cache/downloads"
+cat "$WINDOWS_RUNTIME_STATE_WSL/bin/helper-install-state.json"
+```
+
 For tmux reset regressions, prefer the isolated repo test suite before touching your live tmux workspace:
 
 ```bash

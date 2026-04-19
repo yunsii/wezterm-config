@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WT_LIB_DIR="$REPO_ROOT/skills/worktree-task/scripts/lib"
+WINDOWS_SHELL_LIB="$REPO_ROOT/scripts/runtime/windows-shell-lib.sh"
 
 # shellcheck disable=SC1091
 source "$WT_LIB_DIR/helpers.sh"
@@ -13,6 +14,8 @@ source "$WT_LIB_DIR/git.sh"
 source "$WT_LIB_DIR/config.sh"
 # shellcheck disable=SC1091
 source "$WT_LIB_DIR/core.sh"
+# shellcheck disable=SC1091
+source "$WINDOWS_SHELL_LIB"
 
 usage() {
   cat <<'EOF'
@@ -85,7 +88,7 @@ resolve_windows_desktop_wsl_path() {
   fi
 
   if command -v powershell.exe >/dev/null 2>&1; then
-    desktop_win="$(powershell.exe -NoProfile -Command "[Environment]::GetFolderPath('Desktop')" | tr -d '\r' | tail -n 1)"
+    desktop_win="$(windows_run_powershell_command_utf8 "[Environment]::GetFolderPath('Desktop')" | tr -d '\r' | tail -n 1)"
   fi
 
   [[ -n "$desktop_win" ]] || wt_die "failed to resolve Windows Desktop path; use --desktop-path"

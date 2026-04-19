@@ -31,6 +31,8 @@ Read `AGENTS.md` first, then open only the matching file under `docs/`. Read add
 - This repository is the source of truth.
 - Treat `agent-profiles/` as hosted user-level profile source, not as the project-level instruction source for this repo.
 - Windows runtime files are generated from this repo by the `wezterm-runtime-sync` skill in `skills/wezterm-runtime-sync/`.
+- When agents run Windows-related scripts or smoke tests from WSL, prefer the repo-local wrappers and `scripts/dev/...` entrypoints in this repository over direct `cmd.exe` invocations or ad-hoc `powershell.exe -Command ...`.
+- For Windows file inspection from agents, resolve runtime paths through `scripts/runtime/windows-runtime-paths-lib.sh` and then use WSL-native tools on the `*_WSL` paths instead of `cmd.exe /c dir`, `cmd.exe /c type`, or similar console commands.
 - Keep workspace definitions in `wezterm-x/workspaces.lua`, not inline in `wezterm.lua`.
 - Keep private machine and project overrides in `wezterm-x/local/` and keep tracked templates in `wezterm-x/local.example/`.
 - Prefer updating an existing doc in `docs/` over adding a new sibling file; keep presentations under `docs/presentations/`.
