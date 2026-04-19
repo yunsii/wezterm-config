@@ -6,16 +6,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/runtime-log-lib.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/tmux-worktree-lib.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/windows-runtime-paths-lib.sh"
 
 usage() {
   cat <<'EOF' >&2
 usage:
   open-current-dir-in-vscode.sh [--window WINDOW_ID] [--code-command ARG ... --] [target_dir]
 EOF
-}
-
-trim_cr() {
-  printf '%s' "${1-}" | tr -d '\r'
 }
 
 json_escape() {
@@ -29,27 +27,12 @@ json_escape() {
 }
 
 detect_windows_paths() {
-  local localappdata_win="" userprofile_win=""
-  localappdata_win="$(trim_cr "$(cmd.exe /c echo %LOCALAPPDATA% 2>/dev/null || true)")"
-  userprofile_win="$(trim_cr "$(cmd.exe /c echo %USERPROFILE% 2>/dev/null || true)")"
-
-  [[ -n "$localappdata_win" && -n "$userprofile_win" ]] || return 1
-
-  WINDOWS_LOCALAPPDATA_WIN="$localappdata_win"
-  WINDOWS_USERPROFILE_WIN="$userprofile_win"
-  WINDOWS_LOCALAPPDATA_WSL="$(wslpath -u "$WINDOWS_LOCALAPPDATA_WIN")"
-  WINDOWS_USERPROFILE_WSL="$(wslpath -u "$WINDOWS_USERPROFILE_WIN")"
-  WINDOWS_RUNTIME_STATE_WIN="${WINDOWS_LOCALAPPDATA_WIN}\\wezterm-runtime"
-  WINDOWS_RUNTIME_STATE_WSL="${WINDOWS_LOCALAPPDATA_WSL}/wezterm-runtime"
-  HELPER_STATE_WIN="${WINDOWS_RUNTIME_STATE_WIN}\\state\\helper\\state.env"
-  HELPER_STATE_WSL="${WINDOWS_RUNTIME_STATE_WSL}/state/helper/state.env"
-  HELPER_CLIENT_WSL="${WINDOWS_RUNTIME_STATE_WSL}/bin/helperctl.exe"
-  HELPER_IPC_ENDPOINT='\\.\pipe\wezterm-host-helper-v1'
-  WINDOWS_RUNTIME_HOME_WIN="${WINDOWS_USERPROFILE_WIN}\\.wezterm-x"
-  WINDOWS_RUNTIME_HOME_WSL="${WINDOWS_USERPROFILE_WSL}/.wezterm-x"
+  windows_runtime_detect_paths || return 1
+  HELPER_STATE_WIN="$WINDOWS_HELPER_STATE_WIN"
+  HELPER_STATE_WSL="$WINDOWS_HELPER_STATE_WSL"
+  HELPER_CLIENT_WSL="$WINDOWS_HELPER_CLIENT_WSL"
+  HELPER_IPC_ENDPOINT="$WINDOWS_HELPER_IPC_ENDPOINT"
   WINDOWS_DIAGNOSTICS_FILE_WIN="${WINDOWS_RUNTIME_STATE_WIN}\\logs\\helper.log"
-
-  WINDOWS_HELPER_ENSURE_SCRIPT_WIN="${WINDOWS_RUNTIME_HOME_WIN}\\scripts\\ensure-windows-runtime-helper.ps1"
 }
 
 detect_code_command() {
@@ -67,28 +50,7 @@ detect_code_command() {
 }
 
 helper_state_is_fresh() {
-  [[ -f "$HELPER_STATE_WSL" ]] || return 1
-
-  local ready="" pid="" heartbeat_at_ms="" line key value now_ms
-  while IFS= read -r line; do
-    [[ -n "$line" ]] || continue
-    key="${line%%=*}"
-    value="$(trim_cr "${line#*=}")"
-    case "$key" in
-      ready) ready="$value" ;;
-      pid) pid="$value" ;;
-      heartbeat_at_ms) heartbeat_at_ms="$value" ;;
-    esac
-  done < "$HELPER_STATE_WSL"
-
-  [[ "$ready" == "1" ]] || return 1
-  [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 0 ]] || return 1
-  [[ "$heartbeat_at_ms" =~ ^[0-9]+$ && "$heartbeat_at_ms" -gt 0 ]] || return 1
-
-  now_ms="$(runtime_log_now_ms)"
-  [[ "$now_ms" =~ ^[0-9]+$ ]] || return 1
-  (( now_ms - heartbeat_at_ms <= 5000 )) || return 1
-  return 0
+  windows_runtime_helper_state_is_fresh "$HELPER_STATE_WSL" 5000
 }
 
 ensure_helper() {
