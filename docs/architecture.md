@@ -8,6 +8,44 @@ Use this doc when you need ownership boundaries, entry points, or runtime design
 - Windows runtime files are generated from this repo by the `wezterm-runtime-sync` skill in `skills/wezterm-runtime-sync/`.
 - Live targets include `%USERPROFILE%\.wezterm.lua`, `%USERPROFILE%\.wezterm-x\...`, and `%USERPROFILE%\.wezterm-native\...`.
 
+## Interaction Layers
+
+This config nests two terminal multiplexers — WezTerm outside, tmux inside a single pane of each managed project tab — and several concept names collide between the two layers. Keep the ownership split below in mind when routing a new binding, script, or diagnostic.
+
+### Nested structure
+
+```
+WezTerm process
+  └─ OS window
+     └─ Workspace  (default / work / config / ...)
+        └─ Tab
+           └─ WezTerm pane
+              └─ tmux  (inside a managed project tab)
+                 └─ tmux session  (one per repo family)
+                    └─ tmux window  (one per linked git worktree)
+                       └─ tmux pane  (left agent / right shell layout)
+```
+
+### Semantic mapping in this repo
+
+- **WezTerm tab** = one project / repo family. A managed project tab typically runs exactly one tmux session.
+- **tmux window** = one git worktree inside that repo family. `Alt+g` / `Alt+Shift+g` create or select tmux windows; see [`workspaces.md`](./workspaces.md).
+- **tmux pane** = the intra-worktree split (usually left agent / right shell).
+- **WezTerm pane** outside tmux only appears in the `default` workspace or while a managed tab is still bootstrapping.
+
+### Ownership rule
+
+- Cross-tab and cross-workspace navigation lives in `wezterm-x/lua/ui/keymaps.lua`. `Alt+n` / `Alt+Shift+n` / `Alt+1..9` switch WezTerm tabs; `Alt+d` / `Alt+w` / `Alt+c` / `Alt+p` switch workspaces.
+- `tmux.conf` only owns behavior that happens inside one WezTerm tab — pane splits, copy-mode, mouse handling, chord dispatch, worktree-window switching, and status-line rendering.
+- WezTerm keys that mutate tmux state (`Alt+v` / `Alt+g` / `Alt+Shift+g` / `Ctrl+k` / `Ctrl+Shift+P`) are still declared in `keymaps.lua`; they forward into the active tmux-backed pane via short escape sequences so tmux owns the execution.
+
+### Naming guidance for code and docs
+
+- "Window" is ambiguous. Use **WezTerm OS window**, **tmux window**, or **workspace** — never bare "window" in a sentence that crosses layers.
+- "Pane" is also overloaded. Use **WezTerm pane** vs **tmux pane** when the layer matters.
+- "Tab" is unambiguous — it only exists in WezTerm.
+- In `wezterm-x/commands/manifest.json`, `context: tmux-backed` implies the command only makes sense when the focused WezTerm pane is running tmux; `layer: wezterm | tmux | tmux-chord` identifies which keymap owns the binding.
+
 ## Command Manifest
 
 `wezterm-x/commands/manifest.json` is the single source of truth for invocable commands across the WezTerm keymap, the `tmux.conf` bindings, the tmux-owned command palette, and the `docs/keybindings.md` reference. Consumers (palette reader, WezTerm keymap codegen, tmux.conf codegen, docs generator) resolve commands by `id` and must not re-declare keys or palette entries outside the manifest.

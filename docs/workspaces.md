@@ -4,7 +4,7 @@ Use this doc when you need to understand or edit managed workspaces.
 
 ## Workspace Model
 
-WezTerm workspaces are the top-level session unit.
+WezTerm workspaces are the top-level session unit. For the full WezTerm-vs-tmux nesting picture and the cross-layer ownership rule, see [`architecture.md`](./architecture.md#interaction-layers).
 
 - `default`: WezTerm built-in workspace
 - `work`: managed business workspace
