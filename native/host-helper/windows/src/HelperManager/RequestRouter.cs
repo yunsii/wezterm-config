@@ -9,17 +9,20 @@ internal sealed class RequestRouter
     private readonly ClipboardRequestHandler clipboardHandler;
     private readonly VscodeRequestHandler vscodeHandler;
     private readonly ChromeRequestHandler chromeHandler;
+    private readonly ImeRequestHandler imeHandler;
 
     public RequestRouter(
         StructuredLogger logger,
         ClipboardRequestHandler clipboardHandler,
         VscodeRequestHandler vscodeHandler,
-        ChromeRequestHandler chromeHandler)
+        ChromeRequestHandler chromeHandler,
+        ImeRequestHandler imeHandler)
     {
         this.logger = logger;
         this.clipboardHandler = clipboardHandler;
         this.vscodeHandler = vscodeHandler;
         this.chromeHandler = chromeHandler;
+        this.imeHandler = imeHandler;
     }
 
     public string HandleRequestJson(string requestJson, string transport, Action<string> reportFailure)
@@ -100,6 +103,7 @@ internal sealed class RequestRouter
             ("clipboard", "resolve_for_paste") => clipboardHandler.ResolveForPaste(traceId),
             ("clipboard", "write_text") => clipboardHandler.WriteText(payload, traceId),
             ("clipboard", "write_image_file") => clipboardHandler.WriteImageFile(payload, traceId),
+            ("ime", "query_state") => imeHandler.QueryState(payload, traceId),
             _ => throw new InvalidOperationException($"unknown request route: {requestDomain}/{requestAction}"),
         };
     }
@@ -111,6 +115,7 @@ internal sealed class RequestRouter
             "chrome" => "chrome",
             "clipboard" => "clipboard",
             "vscode" => "vscode",
+            "ime" => "ime",
             _ => "host_helper",
         };
     }

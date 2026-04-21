@@ -134,8 +134,8 @@ flowchart LR
 ### Constraints
 
 - The hot path should stay on one chain: `Lua -> helperctl.exe -> named pipe -> helper-manager.exe -> response`.
-- `helper-manager.exe` is the single decision point for VS Code directory normalization, Chrome debug instance reuse, and clipboard text or image decisions.
-- Response types stay explicit: current-window reuse returns `result_type=window_ref`, clipboard reads return `clipboard_text` or `clipboard_image`.
+- `helper-manager.exe` is the single decision point for VS Code directory normalization, Chrome debug instance reuse, clipboard text or image decisions, and foreground-window IME state queries.
+- Response types stay explicit: current-window reuse returns `result_type=window_ref`, clipboard reads return `clipboard_text` or `clipboard_image`, IME queries return `ime_state` with flat `mode` / `lang` / `reason` fields.
 - Reuse logic depends on persisted cache, process command-line matching, visible window scanning, and foreground binding compensation.
 - Clipboard reads and writes must stay in an STA-aware path so Windows data formats remain stable.
 

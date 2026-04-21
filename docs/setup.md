@@ -46,6 +46,19 @@ For `hybrid-wsl` on Windows, pin WezTerm to the taskbar together with the two ap
 
 Pin each app, then drag the icons so WezTerm sits in slot 1, the browser in slot 2, and the IM client in slot 3. The binding survives reboots, needs no extra tooling, and stays out of the in-WezTerm keymap documented in [`keybindings.md`](./keybindings.md).
 
+## IME State Indicator
+
+In `hybrid-wsl` the WezTerm right status bar renders a compact IME state badge so keyboard-first interactions (chord prefixes, `y/n` confirmations, single-letter shortcuts) do not have to guess which input mode is active.
+
+The badge reflects what the Windows host-helper reads from the foreground window, not WezTerm's internal `use_ime` flag:
+
+- `中`: a CJK IME is loaded and currently in native composition mode (about to produce Chinese/Japanese/Korean characters).
+- `英`: a CJK IME is loaded but the user has toggled the IME itself to English mode (typically via `Shift` on Microsoft Pinyin, Sogou, QQ, etc.).
+- `EN`: the active keyboard layout is a non-CJK language (e.g. `en-US`); IMM composition is not in play.
+- `中?` (italic, dim): the helper is unreachable or the IME did not expose a conversion state. Usually transient while the helper is restarting.
+
+The badge is hidden entirely in `posix-local` because no Windows host-helper is running to query IMM. On Windows the helper samples state every heartbeat via `GetForegroundWindow` → `GetKeyboardLayout` → `ImmGetDefaultIMEWnd` + `SendMessage(WM_IME_CONTROL)` and writes `ime_mode` / `ime_lang` / `ime_reason` into `state.env`. Lua reads the existing state snapshot on every `update-status` tick, so toggling the IME (e.g. `Shift` on Microsoft Pinyin or Rime) updates the badge within ~250–500ms without any additional IPC spawn.
+
 ## Windows Script Execution
 
 - For Windows-facing shell automation in this repo, source `scripts/runtime/windows-shell-lib.sh` and run PowerShell through `windows_run_powershell_script_utf8` or `windows_run_powershell_command_utf8`.

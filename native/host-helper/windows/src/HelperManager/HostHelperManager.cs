@@ -13,6 +13,7 @@ internal sealed class HostHelperManager : IDisposable
     private string lastError = string.Empty;
     private int heartbeatTickActive;
     private bool disposed;
+    private ImeStateSample currentImeSample = new("unknown", null, "uninitialized", "uninitialized");
 
     public HostHelperManager(HelperConfig config)
     {
@@ -26,7 +27,8 @@ internal sealed class HostHelperManager : IDisposable
             logger,
             new ClipboardRequestHandler(clipboardService, logger),
             new VscodeRequestHandler(logger, windowReuseService),
-            new ChromeRequestHandler(logger, windowReuseService));
+            new ChromeRequestHandler(logger, windowReuseService),
+            new ImeRequestHandler(logger));
 
         heartbeatTimer = new System.Threading.Timer(_ => RunHeartbeatTick(), null, Timeout.Infinite, Timeout.Infinite);
     }
@@ -93,6 +95,7 @@ internal sealed class HostHelperManager : IDisposable
 
         try
         {
+            currentImeSample = ImeStateSampler.Sample();
             WriteHelperState("1", lastError);
         }
         catch (Exception ex)
@@ -150,6 +153,7 @@ internal sealed class HostHelperManager : IDisposable
         {
             FileSystemUtil.EnsureDirectory(Path.GetDirectoryName(config.StatePath));
 
+            var sample = currentImeSample;
             var lines = new[]
             {
                 "version=3",
@@ -161,6 +165,9 @@ internal sealed class HostHelperManager : IDisposable
                 $"config_hash={FileSystemUtil.Sanitize(config.ConfigHash)}",
                 $"runtime_dir={FileSystemUtil.Sanitize(config.RuntimeDir)}",
                 $"last_error={FileSystemUtil.Sanitize(lastErrorValue)}",
+                $"ime_mode={FileSystemUtil.Sanitize(sample.Mode)}",
+                $"ime_lang={FileSystemUtil.Sanitize(sample.Lang ?? string.Empty)}",
+                $"ime_reason={FileSystemUtil.Sanitize(sample.Reason ?? string.Empty)}",
             };
 
             FileSystemUtil.WriteAtomicTextFile(config.StatePath, string.Join("\r\n", lines) + "\r\n");

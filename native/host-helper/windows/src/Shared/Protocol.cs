@@ -137,6 +137,18 @@ internal sealed class HelperClipboardImageResult
     public string? LastError { get; init; }
 }
 
+internal sealed class HelperImeStateResult
+{
+    [JsonPropertyName("mode")]
+    public string Mode { get; init; } = "unknown";
+
+    [JsonPropertyName("lang")]
+    public string? Lang { get; init; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; init; }
+}
+
 internal sealed class HelperError
 {
     [JsonPropertyName("code")]

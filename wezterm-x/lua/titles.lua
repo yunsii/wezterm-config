@@ -21,7 +21,57 @@ local M = {}
 function M.register(opts)
   local wezterm = opts.wezterm
   local palette = opts.palette
+  local host = opts.host
   local workspace_label_cache = {}
+
+  local function ime_snapshot()
+    if not host or not host.feature then
+      return nil, 'host_unavailable'
+    end
+    local feature = host:feature('ime_state')
+    if not feature or not feature.query then
+      return nil, 'feature_unavailable'
+    end
+    return feature.query('ime-status')
+  end
+
+  local function render_ime_segment()
+    local state, reason = ime_snapshot()
+    if state then
+      local mode = state.mode
+      if mode == 'native' then
+        return wezterm.format {
+          { Background = { Color = palette.ime_native_bg } },
+          { Foreground = { Color = palette.ime_native_fg } },
+          { Attribute = { Intensity = 'Bold' } },
+          { Text = ' 中 ' },
+        }
+      elseif mode == 'alpha' then
+        return wezterm.format {
+          { Background = { Color = palette.ime_alpha_bg } },
+          { Foreground = { Color = palette.ime_alpha_fg } },
+          { Text = ' 英 ' },
+        }
+      elseif mode == 'en' then
+        return wezterm.format {
+          { Background = { Color = palette.tab_bar_background } },
+          { Foreground = { Color = palette.ime_en_fg } },
+          { Text = ' EN ' },
+        }
+      end
+    end
+
+    if reason == 'unsupported_runtime' then
+      return nil
+    end
+
+    return wezterm.format {
+      { Background = { Color = palette.tab_bar_background } },
+      { Foreground = { Color = palette.ime_unknown_fg } },
+      { Attribute = { Italic = true } },
+      { Text = ' 中? ' },
+    }
+  end
 
   local function workspace_badge_style(name)
     local badges = palette.workspace_badges or {}
@@ -115,7 +165,9 @@ function M.register(opts)
 
     local workspace = window:active_workspace() or 'default'
     window:set_left_status(format_workspace_label(workspace))
-    window:set_right_status ''
+
+    local ime_segment = render_ime_segment()
+    window:set_right_status(ime_segment or '')
   end)
 end
 

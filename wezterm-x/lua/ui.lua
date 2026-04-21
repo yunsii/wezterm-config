@@ -27,17 +27,8 @@ function M.apply(opts)
   local runtime_dir = current_runtime_dir(wezterm.config_dir)
   local runtime = load_ui_module(runtime_dir, 'runtime')
   local keymaps = load_ui_module(runtime_dir, 'keymaps')
-  local helpers = dofile(join_path(runtime_dir, 'lua', 'helpers.lua'))
-  local logger = dofile(join_path(runtime_dir, 'lua', 'logger.lua')).new {
-    wezterm = wezterm,
-    constants = constants,
-  }
-  local host = dofile(join_path(runtime_dir, 'lua', 'host.lua')).new {
-    wezterm = wezterm,
-    constants = constants,
-    helpers = helpers,
-    logger = logger,
-  }
+  local logger = opts.logger
+  local host = opts.host
   local helper_prewarm_started = false
 
   if constants.runtime_mode == 'hybrid-wsl' and constants.host_os == 'windows' then
@@ -197,6 +188,7 @@ function M.apply(opts)
   config.use_ime = true
   config.ime_preedit_rendering = 'Builtin'
   config.cell_width = 1.0
+  config.status_update_interval = 250
 end
 
 return M

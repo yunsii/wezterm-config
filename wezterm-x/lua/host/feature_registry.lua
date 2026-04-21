@@ -16,6 +16,7 @@ local feature_builders = {
   vscode = load_feature 'vscode',
   chrome_debug = load_feature 'chrome_debug',
   clipboard_image = load_feature 'clipboard_image',
+  ime_state = load_feature 'ime_state',
 }
 
 function M.build(runtime)

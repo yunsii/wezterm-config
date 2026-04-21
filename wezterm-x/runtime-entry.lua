@@ -16,9 +16,20 @@ local function load_module(name)
 end
 
 local constants = load_module 'constants'
+local helpers = load_module 'helpers'
 local titles = load_module 'titles'
 local ui = load_module 'ui'
 local workspace_manager = load_module 'workspace_manager'
+local logger = load_module('logger').new {
+  wezterm = wezterm,
+  constants = constants,
+}
+local host = load_module('host').new {
+  wezterm = wezterm,
+  constants = constants,
+  helpers = helpers,
+  logger = logger,
+}
 
 config.debug_key_events = constants.diagnostics
   and constants.diagnostics.wezterm
@@ -34,6 +45,7 @@ local workspace = workspace_manager.new {
 titles.register {
   wezterm = wezterm,
   palette = constants.palette,
+  host = host,
 }
 
 ui.apply {
@@ -41,6 +53,8 @@ ui.apply {
   config = config,
   constants = constants,
   workspace = workspace,
+  logger = logger,
+  host = host,
 }
 
 return config

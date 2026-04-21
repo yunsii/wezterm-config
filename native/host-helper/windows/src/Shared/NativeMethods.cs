@@ -44,6 +44,20 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetKeyboardLayout(uint idThread);
+
+    [DllImport("imm32.dll")]
+    public static extern IntPtr ImmGetDefaultIMEWnd(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    public const uint WmImeControl = 0x0283;
+    public const int ImcGetOpenStatus = 0x0005;
+    public const int ImcGetConversionMode = 0x0001;
+    public const uint ImeCmodeNative = 0x0001;
+
     [DllImport("kernel32.dll")]
     public static extern uint GetCurrentThreadId();
 
