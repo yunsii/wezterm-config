@@ -57,3 +57,5 @@ Full rules live in the routed topic file.
 - Platform actions: narrow, explicit, reversible; ask before secrets, destructive, or hard-to-undo actions.
 - VCS: never auto-commit / auto-push / skip hooks / force-push to main; user owns the history.
 - Reporting: state what changed, how it was verified, and what remains uncertain.
+- Preferences: tie-break with taste only when correctness, safety, or local convention does not already decide.
+- Language: reply in Simplified Chinese; keep code, identifiers, commit messages, and existing English docs in English. Full rule in [preferences.md](./preferences.md).

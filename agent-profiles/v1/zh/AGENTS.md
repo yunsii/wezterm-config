@@ -62,3 +62,5 @@ Source of truth:
 - 宿主动作：窄、显式、可回退；secret、破坏性或难回退的动作先确认
 - 版本控制：永不自动 commit / push / 跳 hook / 强推 main；历史归用户所有
 - 汇报：说明改了什么、如何验证、还剩哪些不确定
+- 偏好：仅当正确性、安全性或本地约定没有先行决定时，才按偏好打破平局
+- 语言：默认用简体中文回复；代码、标识符、commit message、现存英文文档保持英文。完整规则见 [preferences.md](./preferences.md)
