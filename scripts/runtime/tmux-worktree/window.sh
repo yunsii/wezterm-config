@@ -125,12 +125,14 @@ tmux_worktree_create_window_from_template() {
   local mapped_cwd=""
   local resolved_command=""
   local active_pane_index=""
+  local first_pane_index=""
   local first_command=""
   local window_id=""
   local new_pane_count=0
   local new_pane_index=""
   local new_pane_id=""
   local target_window_ref=""
+  local template_primary_command=""
   local -a pane_cwds=()
   local -a pane_commands=()
 
@@ -147,6 +149,14 @@ tmux_worktree_create_window_from_template() {
   esac
 
   if [[ -n "$template_window" ]]; then
+    # Prefer the base64-round-tripped window metadata over #{pane_start_command}:
+    # tmux display-formats the latter with backslash escapes, so passing that
+    # back to `tmux new-window` is not idempotent once primary_shell_command
+    # contains nested single quotes (e.g. the `trap 'exec shell -l' INT;` wrap
+    # added by the Ctrl+C-safe primary pane fix). The option is decoded by
+    # tmux_worktree_window_metadata.
+    template_primary_command="$(tmux_worktree_window_metadata "$template_window" @wezterm_window_primary_command 2>/dev/null || true)"
+
     layout="$(tmux display-message -p -t "$template_window" '#{window_layout}' 2>/dev/null || true)"
     while IFS= read -r pane_index; do
       [[ -n "$pane_index" ]] || continue
@@ -157,6 +167,13 @@ tmux_worktree_create_window_from_template() {
       pane_start_command="$(tmux display-message -p -t "${template_window}.${pane_index}" '#{pane_start_command}' 2>/dev/null || true)"
       mapped_cwd="$(tmux_worktree_map_path_to_root "$pane_path" "$source_worktree_root" "$worktree_root")"
       resolved_command="$(tmux_worktree_pane_template_command "$pane_start_command" "$pane_current_command")"
+
+      if [[ -z "$first_pane_index" ]]; then
+        first_pane_index="$pane_index"
+        if [[ -n "$template_primary_command" ]]; then
+          resolved_command="$template_primary_command"
+        fi
+      fi
 
       pane_cwds+=("$mapped_cwd")
       pane_commands+=("$resolved_command")
@@ -181,6 +198,14 @@ tmux_worktree_create_window_from_template() {
     window_id="$(tmux "${tmux_args[@]}")"
   fi
   tmux rename-window -t "$window_id" "$worktree_label"
+
+  # Propagate the template's primary command to the new window so the next
+  # cycle step from here can resolve it without re-reading the display-escaped
+  # #{pane_start_command}. Window role/layout are left for the caller to set.
+  if [[ -n "$template_primary_command" ]]; then
+    tmux set-window-option -t "$window_id" -q @wezterm_window_primary_command \
+      "$(tmux_worktree_metadata_encode_primary_command "$template_primary_command")"
+  fi
 
   target_window_ref="$window_id"
   while (( new_pane_count < pane_count - 1 )); do
