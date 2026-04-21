@@ -92,6 +92,51 @@ install_windows_helper_manager() {
   return 0
 }
 
+ensure_windows_helper_running() {
+  local target_runtime_dir="${1:?missing target runtime dir}"
+  local ensure_script="$target_runtime_dir/scripts/ensure-windows-runtime-helper.ps1"
+  local ensure_script_win="" target_home="" target_home_win=""
+  local state_path_win="" diagnostics_file_win="" ensure_output=""
+
+  [[ "$target_runtime_dir" =~ ^/mnt/[A-Za-z]/Users/ ]] || return 0
+  command -v powershell.exe >/dev/null 2>&1 || return 0
+  command -v wslpath >/dev/null 2>&1 || return 0
+  [[ -f "$ensure_script" ]] || return 0
+
+  ensure_script_win="$(wslpath -w "$ensure_script" 2>/dev/null || true)"
+  target_home="$(dirname "$target_runtime_dir")"
+  target_home_win="$(wslpath -w "$target_home" 2>/dev/null || true)"
+  [[ -n "$ensure_script_win" && -n "$target_home_win" ]] || return 0
+
+  state_path_win="${target_home_win}\\AppData\\Local\\wezterm-runtime\\state\\helper\\state.env"
+  diagnostics_file_win="${target_home_win}\\AppData\\Local\\wezterm-runtime\\logs\\helper.log"
+
+  sync_trace "step=helper-ensure status=starting target_runtime_dir=$target_runtime_dir ensure_script_win=$ensure_script_win"
+  if ! ensure_output="$(
+    windows_run_powershell_script_utf8 "$ensure_script_win" \
+      -StatePath "$state_path_win" \
+      -HeartbeatIntervalMs 250 \
+      -HeartbeatTimeoutSeconds 5 \
+      -DiagnosticsEnabled 1 \
+      -DiagnosticsCategoryEnabled 1 \
+      -DiagnosticsLevel info \
+      -DiagnosticsFile "$diagnostics_file_win" \
+      -DiagnosticsMaxBytes 5242880 \
+      -DiagnosticsMaxFiles 5 2>&1 | tr -d '\r'
+  )"; then
+    [[ -n "$ensure_output" ]] && printf '%s\n' "$ensure_output" >&2
+    sync_trace "step=helper-ensure status=failed target_runtime_dir=$target_runtime_dir"
+    runtime_log_warn sync "failed to ensure windows helper running after install" \
+      "target_runtime_dir=$target_runtime_dir"
+    return 0
+  fi
+
+  sync_trace "step=helper-ensure status=completed target_runtime_dir=$target_runtime_dir"
+  runtime_log_info sync "ensured windows helper running after install" \
+    "target_runtime_dir=$target_runtime_dir"
+  return 0
+}
+
 write_text_file_atomic() {
   local target_path="${1:?missing target path}"
   local temp_path="${target_path}.tmp.$$"
@@ -487,6 +532,7 @@ run_runtime_native_flow() {
   sync_trace "step=publish-runtime status=completed target_runtime_dir=$TARGET_RUNTIME_DIR target_native_dir=$TARGET_NATIVE_DIR"
 
   install_windows_helper_manager "$TARGET_RUNTIME_DIR"
+  ensure_windows_helper_running "$TARGET_RUNTIME_DIR"
   sync_trace "flow=runtime-native status=completed target_runtime_dir=$TARGET_RUNTIME_DIR target_native_dir=$TARGET_NATIVE_DIR"
 }
 
