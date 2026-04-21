@@ -5,5 +5,5 @@
   "tasks": "{\"tasks\": \"{}\"}",
   "snippets": "{\"snippets\": {}}",
   "globalState": "{\"storage\": {}}",
-  "extensions": "[{\"identifier\": {\"id\": \"eamodio.gitlens\"}, \"displayName\": \"GitLens\"}, {\"identifier\": {\"id\": \"antfu.theme-vitesse\"}, \"displayName\": \"Vitesse Theme\"}]"
+  "extensions": "[{\"identifier\": {\"id\": \"eamodio.gitlens\"}, \"displayName\": \"GitLens\"}, {\"identifier\": {\"id\": \"antfu.theme-vitesse\"}, \"displayName\": \"Vitesse Theme\"}, {\"identifier\": {\"id\": \"wakatime.vscode-wakatime\"}, \"displayName\": \"WakaTime\"}]"
 }
