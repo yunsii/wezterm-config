@@ -45,6 +45,7 @@ item_labels=()
 item_descriptions=()
 item_confirm_messages=()
 item_accelerators=()
+item_hotkeys=()
 
 for list_index in "${!visible_indexes[@]}"; do
   index="${visible_indexes[$list_index]}"
@@ -53,6 +54,7 @@ for list_index in "${!visible_indexes[@]}"; do
   item_descriptions+=("${COMMAND_PANEL_DESCRIPTIONS[$index]}")
   item_confirm_messages+=("${COMMAND_PANEL_CONFIRM_MESSAGES[$index]}")
   item_accelerators+=("${COMMAND_PANEL_ACCELERATORS[$index],,}")
+  item_hotkeys+=("${COMMAND_PANEL_HOTKEYS[$index]}")
 done
 
 item_count="${#item_ids[@]}"
@@ -90,7 +92,7 @@ update_filtered_indexes() {
       continue
     fi
 
-    haystack="${item_labels[$index]} ${item_descriptions[$index]} ${item_ids[$index]} ${item_accelerators[$index]}"
+    haystack="${item_labels[$index]} ${item_descriptions[$index]} ${item_ids[$index]} ${item_accelerators[$index]} ${item_hotkeys[$index]}"
     if [[ "${haystack,,}" == *"$lowered_query"* ]]; then
       filtered_indexes+=("$index")
     fi
@@ -107,7 +109,8 @@ update_filtered_indexes() {
 }
 
 render_picker() {
-  local rows cols visible_rows filtered_count start_index end_index top_index actual_index line description
+  local rows cols visible_rows filtered_count start_index end_index top_index actual_index hotkey
+  local main_part hotkey_part main_width available
 
   IFS=' ' read -r rows cols <<< "$(terminal_size)"
   visible_rows=$((rows - 8))
@@ -141,16 +144,33 @@ render_picker() {
 
   for (( top_index = start_index; top_index <= end_index; top_index += 1 )); do
     actual_index="${filtered_indexes[$top_index]}"
-    line="${item_labels[$actual_index]}"
-    description="${item_descriptions[$actual_index]}"
-    if [[ -n "$description" ]]; then
-      line="$line - $description"
+    main_part="${item_labels[$actual_index]}"
+
+    hotkey="${item_hotkeys[$actual_index]:-}"
+    hotkey_part=""
+    if [[ -n "$hotkey" ]]; then
+      hotkey_part="[$hotkey]"
     fi
 
+    if [[ -z "$hotkey_part" ]]; then
+      if (( top_index == selected_index )); then
+        printf '\033[7m%-*.*s\033[0m\n' "$cols" "$cols" "$main_part"
+      else
+        printf '%-*.*s\n' "$cols" "$cols" "$main_part"
+      fi
+      continue
+    fi
+
+    available=$((cols - ${#hotkey_part} - 1))
+    if (( available < 1 )); then
+      available=1
+    fi
+    main_width="$available"
+
     if (( top_index == selected_index )); then
-      printf '\033[7m%-*.*s\033[0m\n' "$cols" "$cols" "$line"
+      printf '\033[7m%-*.*s %s\033[0m\n' "$main_width" "$main_width" "$main_part" "$hotkey_part"
     else
-      printf '%-*.*s\n' "$cols" "$cols" "$line"
+      printf '%-*.*s %s\n' "$main_width" "$main_width" "$main_part" "$hotkey_part"
     fi
   done
 
@@ -158,16 +178,25 @@ render_picker() {
   printf '%-*.*s' "$cols" "$cols" 'Type to search | Enter run | Up/Down move | Backspace delete | Esc clear/close'
 }
 
+current_key=""
 read_key() {
+  # Writes into $current_key instead of printing so the main loop can read the
+  # result without a `$(...)` subshell fork per keypress. Matters most on the
+  # bare-Esc path: no subshell teardown before `exit 0`.
   local key extra
 
+  current_key=""
   IFS= read -rsn1 key || return 1
   if [[ "$key" == $'\033' ]]; then
-    if IFS= read -rsn2 -t 0.01 extra; then
+    # The terminal writes an entire escape sequence in one syscall, so the
+    # trailing bytes of a real sequence are already queued when Esc arrives.
+    # Use a near-zero timeout instead of 10 ms so a bare Esc exits the picker
+    # without a perceivable wait.
+    if IFS= read -rsn2 -t 0.001 extra; then
       key+="$extra"
     fi
   fi
-  printf '%s' "$key"
+  current_key="$key"
 }
 
 move_selection() {
@@ -241,7 +270,8 @@ while true; do
   status=0
 
   render_picker
-  key="$(read_key)" || exit 0
+  read_key || exit 0
+  key="$current_key"
 
   case "$key" in
     "")

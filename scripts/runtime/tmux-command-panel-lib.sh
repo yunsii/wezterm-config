@@ -33,6 +33,7 @@ command_panel_reset_items() {
   COMMAND_PANEL_LABELS=()
   COMMAND_PANEL_ACCELERATORS=()
   COMMAND_PANEL_DESCRIPTIONS=()
+  COMMAND_PANEL_HOTKEYS=()
   COMMAND_PANEL_RUNTIME_MODES=()
   COMMAND_PANEL_BACKGROUNDS=()
   COMMAND_PANEL_CONFIRM_MESSAGES=()
@@ -45,6 +46,8 @@ command_panel_register_item() {
   local id="" label="" accelerator="" description="" background=0
   local confirm_message="" success_message="" failure_message=""
   local -a runtime_modes=()
+  local -a hotkeys=()
+  local hotkeys_joined=""
   local -a command=()
   local command_text=""
 
@@ -64,6 +67,10 @@ command_panel_register_item() {
         ;;
       --description)
         description="${2:?missing value for --description}"
+        shift 2
+        ;;
+      --hotkey)
+        hotkeys+=("${2:?missing value for --hotkey}")
         shift 2
         ;;
       --runtime-mode)
@@ -116,10 +123,15 @@ command_panel_register_item() {
   printf -v command_text '%q ' "${command[@]}"
   command_text="${command_text% }"
 
+  if (( ${#hotkeys[@]} > 0 )); then
+    hotkeys_joined="$(IFS=','; printf '%s' "${hotkeys[*]}")"
+  fi
+
   COMMAND_PANEL_IDS+=("$id")
   COMMAND_PANEL_LABELS+=("$label")
   COMMAND_PANEL_ACCELERATORS+=("${accelerator,,}")
   COMMAND_PANEL_DESCRIPTIONS+=("$description")
+  COMMAND_PANEL_HOTKEYS+=("$hotkeys_joined")
   COMMAND_PANEL_RUNTIME_MODES+=("$(command_panel_join_by_comma "${runtime_modes[@]}")")
   COMMAND_PANEL_BACKGROUNDS+=("$background")
   COMMAND_PANEL_CONFIRM_MESSAGES+=("$confirm_message")
@@ -128,78 +140,111 @@ command_panel_register_item() {
   COMMAND_PANEL_COMMANDS+=("$command_text")
 }
 
-command_panel_register_builtin_items() {
-  local repo_root reset_script
-
+command_panel_manifest_path() {
+  local repo_root
   repo_root="$(command_panel_repo_root)"
-  reset_script="$repo_root/scripts/runtime/tmux-reset.sh"
+  printf '%s\n' "$repo_root/wezterm-x/commands/manifest.json"
+}
 
-  command_panel_register_item \
-    --id refresh-current-window \
-    --label 'Refresh current tmux window' \
-    --accelerator 'r' \
-    --description 'Respawn only the focused tmux window in place' \
-    --success-message 'Refreshed current tmux window.' \
-    --failure-message 'Failed to refresh current tmux window.' \
-    -- bash "$reset_script" refresh-current-window
+command_panel_register_manifest_items() {
+  local manifest_path="${1:-$(command_panel_manifest_path)}"
+  local repo_root="${2:-$(command_panel_repo_root)}"
+  local id label description context accelerator display_only hotkey_display
+  local confirm success failure hotkey_keys_joined palette_command_sh
+  local first_hotkey
+  local -a command_argv=()
+  local -a hotkey_keys=()
+  local -a hotkey_args=()
+  local -a register_args=()
+  local key key_index
 
-  command_panel_register_item \
-    --id refresh-current-session \
-    --label 'Refresh current tmux session' \
-    --accelerator 's' \
-    --description 'Rebuild the attached tmux session via replacement session' \
-    --success-message 'Refreshed current tmux session.' \
-    --failure-message 'Failed to refresh current tmux session.' \
-    -- bash "$reset_script" refresh-current-session
+  if [[ ! -f "$manifest_path" ]]; then
+    runtime_log_error command_panel "command panel manifest missing" "manifest_path=$manifest_path"
+    return 1
+  fi
 
-  command_panel_register_item \
-    --id refresh-current-workspace \
-    --label 'Refresh current workspace sessions' \
-    --accelerator 'w' \
-    --description 'Rebuild every tmux session that belongs to this workspace' \
-    --confirm-message 'Refresh every tmux session in the current workspace?' \
-    --success-message 'Refreshed current workspace sessions.' \
-    --failure-message 'Failed to refresh current workspace sessions.' \
-    -- bash "$reset_script" refresh-current-workspace
+  if ! command -v jq >/dev/null 2>&1; then
+    runtime_log_error command_panel "jq is required to load command panel manifest" "manifest_path=$manifest_path"
+    return 1
+  fi
 
-  command_panel_register_item \
-    --id refresh-all-sessions \
-    --label 'Refresh all tmux sessions' \
-    --accelerator 'a' \
-    --description 'Rebuild every tmux session on the current tmux server' \
-    --confirm-message 'Refresh every tmux session on this tmux server?' \
-    --success-message 'Refreshed all tmux sessions.' \
-    --failure-message 'Failed to refresh all tmux sessions.' \
-    -- bash "$reset_script" refresh-all
+  # Flatten every palette-visible entry into one row so the whole manifest
+  # resolves in a single jq invocation (~168 → 1 process). Fields are joined
+  # with ASCII Unit Separator (\x1f) instead of a tab because bash `read` would
+  # otherwise collapse consecutive empty fields whenever IFS only contains
+  # whitespace characters — which shifted every field past the first empty
+  # `confirm_message` by one slot.
+  local jq_filter='
+    [.[] | select(has("palette"))]
+    | sort_by(.palette.display_only // false)
+    | .[]
+    | [
+        .id,
+        .label,
+        (.description // ""),
+        (.context // "any"),
+        (.palette.display_only // false | tostring),
+        (.hotkey_display // ""),
+        (.palette.accelerator // ""),
+        (.palette.confirm_message // ""),
+        (.palette.success_message // ""),
+        (.palette.failure_message // ""),
+        ([.hotkeys[]?.keys] | join(",")),
+        (.palette.command // [] | @sh)
+      ]
+    | join("\u001f")
+  '
 
-  command_panel_register_item \
-    --id split-vertical \
-    --label 'Split vertically' \
-    --accelerator 'v' \
-    --description 'Create a top/bottom tmux split in the current pane' \
-    --success-message 'Created a vertical split.' \
-    --failure-message 'Failed to create a vertical split.' \
-    -- bash -lc 'tmux split-window -v -c "$PWD"'
+  while IFS=$'\x1f' read -r id label description context display_only hotkey_display accelerator confirm success failure hotkey_keys_joined palette_command_sh; do
+    [[ -n "$id" ]] || continue
 
-  command_panel_register_item \
-    --id split-horizontal \
-    --label 'Split horizontally' \
-    --accelerator 'h' \
-    --description 'Create a left/right tmux split in the current pane' \
-    --success-message 'Created a horizontal split.' \
-    --failure-message 'Failed to create a horizontal split.' \
-    -- bash -lc 'tmux split-window -h -c "$PWD"'
+    if [[ -n "$hotkey_display" ]]; then
+      hotkey_keys=("$hotkey_display")
+    elif [[ -n "$hotkey_keys_joined" ]]; then
+      IFS=',' read -ra hotkey_keys <<<"$hotkey_keys_joined"
+    else
+      hotkey_keys=()
+    fi
 
-  command_panel_register_item \
-    --id force-close-vscode-windows \
-    --label 'Force close all VS Code windows' \
-    --accelerator 'x' \
-    --description 'Run taskkill /IM code.exe /F on the Windows host' \
-    --runtime-mode hybrid-wsl \
-    --confirm-message 'Force close all VS Code windows? Unsaved editor state will be lost.' \
-    --success-message 'Closed all VS Code windows.' \
-    --failure-message 'Failed to close VS Code windows.' \
-    -- cmd.exe /c taskkill /IM code.exe /F
+    command_argv=()
+    if [[ "$display_only" == "true" ]]; then
+      if (( ${#hotkey_keys[@]} == 0 )); then
+        runtime_log_warn command_panel "manifest display-only entry has no hotkey" "id=$id"
+        continue
+      fi
+      first_hotkey="${hotkey_keys[0]}"
+      command_argv=(tmux display-message -d 2000 "Press ${first_hotkey} to trigger this command.")
+    else
+      if [[ -z "$palette_command_sh" ]]; then
+        runtime_log_warn command_panel "manifest palette entry missing command" "id=$id"
+        continue
+      fi
+      # palette.command was emitted by jq's `@sh` as a space-separated list of
+      # single-quoted tokens; eval resolves it back into a bash array without
+      # invoking an extra jq process per entry.
+      eval "command_argv=( $palette_command_sh )"
+      for key_index in "${!command_argv[@]}"; do
+        command_argv[$key_index]="${command_argv[$key_index]//\{repo_root\}/$repo_root}"
+      done
+    fi
+
+    hotkey_args=()
+    for key in "${hotkey_keys[@]}"; do
+      [[ -n "$key" ]] || continue
+      hotkey_args+=(--hotkey "$key")
+    done
+
+    register_args=(--id "$id" --label "$label")
+    [[ -n "$description" ]] && register_args+=(--description "$description")
+    [[ -n "$accelerator" ]] && register_args+=(--accelerator "$accelerator")
+    [[ -n "$confirm" ]] && register_args+=(--confirm-message "$confirm")
+    [[ -n "$success" ]] && register_args+=(--success-message "$success")
+    [[ -n "$failure" ]] && register_args+=(--failure-message "$failure")
+    [[ "$context" == "hybrid-wsl" ]] && register_args+=(--runtime-mode hybrid-wsl)
+    register_args+=("${hotkey_args[@]}")
+
+    command_panel_register_item "${register_args[@]}" -- "${command_argv[@]}"
+  done < <(jq -r "$jq_filter" "$manifest_path")
 }
 
 command_panel_load_local_items() {
@@ -219,7 +264,7 @@ command_panel_load_local_items() {
 
 command_panel_load_items() {
   command_panel_reset_items
-  command_panel_register_builtin_items
+  command_panel_register_manifest_items || return 1
   command_panel_load_local_items
 }
 

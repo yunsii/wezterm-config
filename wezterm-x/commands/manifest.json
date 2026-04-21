@@ -1,0 +1,341 @@
+[
+  {
+    "id": "workspace.switch-default",
+    "label": "Workspace: Switch to default",
+    "description": "Switch to the built-in WezTerm `default` workspace.",
+    "scope": "workspaces",
+    "context": "any",
+    "hotkeys": [
+      { "keys": "Alt+d", "layer": "wezterm" }
+    ],
+    "palette": { "display_only": true }
+  },
+  {
+    "id": "workspace.switch-work",
+    "label": "Workspace: Switch to work",
+    "description": "Open or switch to `work` using directories configured in `wezterm-x/local/workspaces.lua`.",
+    "scope": "workspaces",
+    "context": "any",
+    "hotkeys": [
+      { "keys": "Alt+w", "layer": "wezterm" }
+    ],
+    "palette": { "display_only": true }
+  },
+  {
+    "id": "workspace.switch-config",
+    "label": "Workspace: Switch to config",
+    "description": "Open or switch to the `config` workspace.",
+    "scope": "workspaces",
+    "context": "any",
+    "hotkeys": [
+      { "keys": "Alt+c", "layer": "wezterm" }
+    ],
+    "palette": { "display_only": true }
+  },
+  {
+    "id": "workspace.cycle-next",
+    "label": "Workspace: Cycle to next",
+    "description": "Rotate through all currently known workspaces.",
+    "scope": "workspaces",
+    "context": "any",
+    "hotkeys": [
+      { "keys": "Alt+p", "layer": "wezterm" }
+    ],
+    "palette": { "display_only": true }
+  },
+  {
+    "id": "workspace.close-current",
+    "label": "Workspace: Close current",
+    "description": "Open a centered WezTerm confirmation overlay to close the current non-default workspace.",
+    "scope": "workspaces",
+    "context": "any",
+    "hotkeys": [
+      { "keys": "Alt+Shift+X", "layer": "wezterm" }
+    ]
+  },
+  {
+    "id": "app.quit",
+    "label": "App: Quit WezTerm",
+    "description": "Quit WezTerm and close all windows; WezTerm handles its own confirmation.",
+    "scope": "workspaces",
+    "context": "any",
+    "hotkeys": [
+      { "keys": "Alt+Shift+Q", "layer": "wezterm" }
+    ]
+  },
+  {
+    "id": "vscode.open-current-dir",
+    "label": "VS Code: Open current directory",
+    "description": "In tmux-backed panes forward to tmux; in hybrid-wsl outside tmux open the worktree root on the Windows host.",
+    "scope": "project-navigation",
+    "context": "any",
+    "hotkeys": [
+      { "keys": "Alt+v", "layer": "wezterm" }
+    ],
+    "palette": { "display_only": true }
+  },
+  {
+    "id": "worktree.picker",
+    "label": "Worktree: Pick in this repo family",
+    "description": "Open a centered tmux popup worktree picker; selecting an unopened worktree creates its tmux window on demand.",
+    "scope": "project-navigation",
+    "context": "tmux-backed",
+    "hotkeys": [
+      { "keys": "Alt+g", "layer": "wezterm" }
+    ],
+    "palette": { "display_only": true }
+  },
+  {
+    "id": "worktree.cycle-next",
+    "label": "Worktree: Cycle to next",
+    "description": "Cycle to the next git worktree in the current repo family, creating its tmux window on demand when needed.",
+    "scope": "project-navigation",
+    "context": "tmux-backed",
+    "hotkeys": [
+      { "keys": "Alt+Shift+G", "layer": "wezterm" }
+    ],
+    "palette": { "display_only": true }
+  },
+  {
+    "id": "chrome.open-debug-profile",
+    "label": "Chrome: Open debug profile",
+    "description": "Open the configured Chrome debug browser profile from `wezterm-x/local/constants.lua` via the Windows native helper.",
+    "scope": "project-navigation",
+    "context": "hybrid-wsl",
+    "hotkeys": [
+      { "keys": "Alt+b", "layer": "wezterm" }
+    ],
+    "palette": { "display_only": true }
+  },
+  {
+    "id": "command-palette.open",
+    "label": "Command palette: Open",
+    "description": "Open the tmux-owned searchable command palette (falls back to WezTerm native palette outside tmux).",
+    "scope": "commands-and-splits",
+    "context": "any",
+    "hotkeys": [
+      { "keys": "Ctrl+Shift+P", "layer": "wezterm" }
+    ]
+  },
+  {
+    "id": "command-palette.open-native",
+    "label": "Command palette: Open WezTerm native",
+    "description": "Open WezTerm's built-in command palette directly.",
+    "scope": "commands-and-splits",
+    "context": "any",
+    "hotkeys": [
+      { "keys": "Ctrl+Shift+;", "layer": "wezterm" },
+      { "keys": "Ctrl+Shift+:", "layer": "wezterm" }
+    ]
+  },
+  {
+    "id": "command-palette.chord-prefix",
+    "label": "Command chord: Activate prefix",
+    "description": "Forward `Ctrl+k` to a tmux-backed pane so the follow-up chord keys (`v` / `h` / `o` / `x`) resolve in the tmux `command-chord` table; toast when the current pane is not running tmux.",
+    "scope": "commands-and-splits",
+    "context": "tmux-backed",
+    "hotkeys": [
+      { "keys": "Ctrl+k", "layer": "wezterm" }
+    ]
+  },
+  {
+    "id": "pane.split-vertical",
+    "label": "Pane: Split vertically",
+    "description": "Create a top/bottom tmux split in the current pane.",
+    "scope": "commands-and-splits",
+    "context": "tmux-backed",
+    "hotkeys": [
+      { "keys": "Ctrl+k v", "layer": "tmux-chord" }
+    ],
+    "palette": {
+      "accelerator": "v",
+      "command": ["bash", "-lc", "tmux split-window -v -c \"$PWD\""],
+      "success_message": "Created a vertical split.",
+      "failure_message": "Failed to create a vertical split."
+    }
+  },
+  {
+    "id": "pane.split-horizontal",
+    "label": "Pane: Split horizontally",
+    "description": "Create a left/right tmux split in the current pane.",
+    "scope": "commands-and-splits",
+    "context": "tmux-backed",
+    "hotkeys": [
+      { "keys": "Ctrl+k h", "layer": "tmux-chord" }
+    ],
+    "palette": {
+      "accelerator": "h",
+      "command": ["bash", "-lc", "tmux split-window -h -c \"$PWD\""],
+      "success_message": "Created a horizontal split.",
+      "failure_message": "Failed to create a horizontal split."
+    }
+  },
+  {
+    "id": "vscode.force-close-all-windows",
+    "label": "VS Code: Force close all windows",
+    "description": "Run `taskkill /IM code.exe /F` on the Windows host.",
+    "scope": "commands-and-splits",
+    "context": "hybrid-wsl",
+    "hotkeys": [
+      { "keys": "Ctrl+k x", "layer": "tmux-chord" }
+    ],
+    "palette": {
+      "accelerator": "x",
+      "command": ["cmd.exe", "/c", "taskkill", "/IM", "code.exe", "/F"],
+      "confirm_message": "Force close all VS Code windows? Unsaved editor state will be lost.",
+      "success_message": "Closed all VS Code windows.",
+      "failure_message": "Failed to close VS Code windows."
+    }
+  },
+  {
+    "id": "window.next",
+    "label": "Window: Next",
+    "description": "Go to the next tmux window in the current session.",
+    "scope": "window-and-pane-navigation",
+    "context": "tmux-backed",
+    "hotkeys": [
+      { "keys": "Alt+n", "layer": "tmux" }
+    ],
+    "palette": { "display_only": true }
+  },
+  {
+    "id": "window.previous",
+    "label": "Window: Previous",
+    "description": "Go to the previous tmux window in the current session.",
+    "scope": "window-and-pane-navigation",
+    "context": "tmux-backed",
+    "hotkeys": [
+      { "keys": "Alt+Shift+N", "layer": "tmux" }
+    ],
+    "palette": { "display_only": true }
+  },
+  {
+    "id": "window.select-by-index",
+    "label": "Window: Jump by index",
+    "description": "`Alt+N` jumps to the tmux window at position N (1-9). Numbering is aligned with `base-index 1` so digits match the status line.",
+    "scope": "window-and-pane-navigation",
+    "context": "tmux-backed",
+    "hotkeys": [
+      { "keys": "Alt+1", "layer": "tmux" },
+      { "keys": "Alt+2", "layer": "tmux" },
+      { "keys": "Alt+3", "layer": "tmux" },
+      { "keys": "Alt+4", "layer": "tmux" },
+      { "keys": "Alt+5", "layer": "tmux" },
+      { "keys": "Alt+6", "layer": "tmux" },
+      { "keys": "Alt+7", "layer": "tmux" },
+      { "keys": "Alt+8", "layer": "tmux" },
+      { "keys": "Alt+9", "layer": "tmux" }
+    ],
+    "hotkey_display": "Alt+1..9",
+    "palette": { "display_only": true }
+  },
+  {
+    "id": "pane.rotate-next",
+    "label": "Pane: Rotate focus to next",
+    "description": "Rotate focus to the next pane in the current tmux window (same semantics as tmux `prefix o`).",
+    "scope": "window-and-pane-navigation",
+    "context": "tmux-backed",
+    "hotkeys": [
+      { "keys": "Ctrl+k o", "layer": "tmux-chord" }
+    ],
+    "palette": { "display_only": true }
+  },
+  {
+    "id": "clipboard.copy-or-sigint",
+    "label": "Clipboard: Copy selection or send SIGINT",
+    "description": "With a terminal selection, copy to the system clipboard and clear; otherwise send a normal `Ctrl+c` to the pane.",
+    "scope": "clipboard",
+    "context": "any",
+    "hotkeys": [
+      { "keys": "Ctrl+c", "layer": "wezterm" }
+    ]
+  },
+  {
+    "id": "clipboard.copy-selection-strict",
+    "label": "Clipboard: Copy selection (strict)",
+    "description": "With a terminal selection, copy and clear; otherwise forward `Ctrl+Shift+c` to the pane.",
+    "scope": "clipboard",
+    "context": "any",
+    "hotkeys": [
+      { "keys": "Ctrl+Shift+C", "layer": "wezterm" }
+    ]
+  },
+  {
+    "id": "clipboard.paste-smart",
+    "label": "Clipboard: Paste (smart)",
+    "description": "In hybrid-wsl ask the Windows native helper for the live clipboard at paste time; fall back to plain clipboard paste; paste exported WSL image path for images.",
+    "scope": "clipboard",
+    "context": "any",
+    "hotkeys": [
+      { "keys": "Ctrl+v", "layer": "wezterm" }
+    ]
+  },
+  {
+    "id": "clipboard.paste-plain",
+    "label": "Clipboard: Paste (plain)",
+    "description": "Force a normal clipboard paste without the image-export helper.",
+    "scope": "clipboard",
+    "context": "any",
+    "hotkeys": [
+      { "keys": "Ctrl+Shift+V", "layer": "wezterm" }
+    ]
+  },
+  {
+    "id": "session.refresh-current-window",
+    "label": "Session: Refresh current window",
+    "description": "Respawn only the focused tmux window in place.",
+    "scope": "session-maintenance",
+    "context": "tmux-backed",
+    "hotkeys": [],
+    "palette": {
+      "accelerator": "r",
+      "command": ["bash", "{repo_root}/scripts/runtime/tmux-reset.sh", "refresh-current-window"],
+      "success_message": "Refreshed current tmux window.",
+      "failure_message": "Failed to refresh current tmux window."
+    }
+  },
+  {
+    "id": "session.refresh-current-session",
+    "label": "Session: Refresh current session",
+    "description": "Rebuild the attached tmux session via replacement session.",
+    "scope": "session-maintenance",
+    "context": "tmux-backed",
+    "hotkeys": [],
+    "palette": {
+      "accelerator": "s",
+      "command": ["bash", "{repo_root}/scripts/runtime/tmux-reset.sh", "refresh-current-session"],
+      "success_message": "Refreshed current tmux session.",
+      "failure_message": "Failed to refresh current tmux session."
+    }
+  },
+  {
+    "id": "session.refresh-current-workspace",
+    "label": "Session: Refresh current workspace",
+    "description": "Rebuild every tmux session that belongs to this workspace.",
+    "scope": "session-maintenance",
+    "context": "tmux-backed",
+    "hotkeys": [],
+    "palette": {
+      "accelerator": "w",
+      "command": ["bash", "{repo_root}/scripts/runtime/tmux-reset.sh", "refresh-current-workspace"],
+      "confirm_message": "Refresh every tmux session in the current workspace?",
+      "success_message": "Refreshed current workspace sessions.",
+      "failure_message": "Failed to refresh current workspace sessions."
+    }
+  },
+  {
+    "id": "session.refresh-all-sessions",
+    "label": "Session: Refresh all sessions",
+    "description": "Rebuild every tmux session on the current tmux server.",
+    "scope": "session-maintenance",
+    "context": "tmux-backed",
+    "hotkeys": [],
+    "palette": {
+      "accelerator": "a",
+      "command": ["bash", "{repo_root}/scripts/runtime/tmux-reset.sh", "refresh-all"],
+      "confirm_message": "Refresh every tmux session on this tmux server?",
+      "success_message": "Refreshed all tmux sessions.",
+      "failure_message": "Failed to refresh all tmux sessions."
+    }
+  }
+]

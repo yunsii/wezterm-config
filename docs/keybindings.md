@@ -21,8 +21,15 @@ Use this doc when you need shortcut behavior.
 ## Commands And Splits
 
 - `Ctrl+Shift+P`: when the current pane is running tmux, open the tmux-owned searchable command palette with repo-shared commands plus optional machine-local extensions from `wezterm-x/local/command-panel.sh`; outside tmux it falls back to WezTerm's native command palette
-- `Ctrl+k`: tmux chord prefix; in tmux-backed panes, built-in follow-up keys include `v` for vertical split, `h` for horizontal split, and `x` for force-closing all VS Code windows on the Windows host in `hybrid-wsl`
+- `Ctrl+k`: tmux chord prefix; in tmux-backed panes, built-in follow-up keys include `v` for vertical split, `h` for horizontal split, `o` to rotate focus to the next pane, and `x` for force-closing all VS Code windows on the Windows host in `hybrid-wsl`
 - `Ctrl+Shift+;`: open WezTerm's native command palette directly
+
+## Window And Pane Navigation
+
+- `Alt+1` … `Alt+9`: in any tmux-backed pane, jump to the tmux window at that index; numbering starts at `1` via `base-index 1` in `tmux.conf` so the digit on the keyboard matches the index in the status line, and `renumber-windows on` keeps that sequence contiguous when a window is closed
+- `Alt+n`: in any tmux-backed pane, go to the next tmux window
+- `Alt+Shift+n`: in any tmux-backed pane, go to the previous tmux window
+- `Ctrl+k` `o`: in any tmux-backed pane, rotate focus to the next pane in the current window (same semantics as tmux's `prefix o`)
 
 ## Mouse And Selection
 

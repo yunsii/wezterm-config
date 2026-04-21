@@ -8,10 +8,33 @@ Use this doc when you need ownership boundaries, entry points, or runtime design
 - Windows runtime files are generated from this repo by the `wezterm-runtime-sync` skill in `skills/wezterm-runtime-sync/`.
 - Live targets include `%USERPROFILE%\.wezterm.lua`, `%USERPROFILE%\.wezterm-x\...`, and `%USERPROFILE%\.wezterm-native\...`.
 
+## Command Manifest
+
+`wezterm-x/commands/manifest.json` is the single source of truth for invocable commands across the WezTerm keymap, the `tmux.conf` bindings, the tmux-owned command palette, and the `docs/keybindings.md` reference. Consumers (palette reader, WezTerm keymap codegen, tmux.conf codegen, docs generator) resolve commands by `id` and must not re-declare keys or palette entries outside the manifest.
+
+Entry schema:
+
+- `id` string. Stable dotted identifier used as the cross-reference handler registries and codegen keys resolve to.
+- `label` string. Short human-facing title shown in palette and docs.
+- `description` string. One-line explainer reused by the palette popup and docs.
+- `scope` string. Docs/UI grouping. One of: `workspaces`, `project-navigation`, `commands-and-splits`, `window-and-pane-navigation`, `clipboard`, `session-maintenance`.
+- `context` string. Where the command is usable. One of: `any`, `tmux-backed`, `hybrid-wsl`.
+- `hotkeys` array. Zero or more bindings; each item has `keys` (e.g. `Alt+v`, `Ctrl+k o`) and `layer` (`wezterm`, `tmux`, or `tmux-chord`) so codegen can dispatch into the right layer.
+- `hotkey_display` string, optional. Render-only override for the palette hotkey column; when present, replaces the comma-joined `hotkeys[].keys` text (e.g. `Alt+1..9` instead of `Alt+1,Alt+2,...,Alt+9`). Does not affect codegen — the real bindings still come from `hotkeys[]`.
+- `palette` object, optional. Present only when the command should appear in the tmux command palette. Either `display_only: true` (the entry is rendered for search/discovery and running it prints a toast asking the user to use the hotkey), or a real entry with `accelerator` (single-char hint), `command` (argv array executed by `tmux-command-run.sh`; elements may contain the `{repo_root}` placeholder which is replaced with the current repository root at register time), and optional `confirm_message`, `success_message`, `failure_message`.
+
+Invariants:
+
+- `id` is unique across the manifest.
+- `hotkeys[].keys` is unique across the manifest.
+- `palette.accelerator` is unique within a given runtime-mode visibility set.
+- `context = hybrid-wsl` entries only run when the active runtime mode matches.
+
 ## Entry Points
 
 - `wezterm.lua`: top-level WezTerm config and keybindings
 - `wezterm-x/workspaces.lua`: managed workspace definitions
+- `wezterm-x/commands/manifest.json`: single source of truth for invocable commands (see `Command Manifest`)
 - `wezterm-x/lua/logger.lua`: WezTerm-side structured diagnostics helper
 - `wezterm-x/local/`: gitignored machine-local overrides copied by the sync skill when present
 - `config/worktree-task.env`: tracked repo profile for the self-contained `worktree-task` skill
