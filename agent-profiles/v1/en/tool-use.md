@@ -43,6 +43,15 @@ Do not merge:
 Before editing or overwriting an existing file, read it.
 This avoids harness-level errors and prevents clobbering concurrent user edits.
 
+## Input Precision
+
+Tool arguments must be real, verified values.
+
+- Do not invent paths, command names, or identifiers. Discover them first with a narrow read-only tool (Glob / Grep / Read).
+- Pass multi-line or special-character shell payloads via HEREDOC; inline quoting is prone to silent escape corruption.
+- On failure, do not retry the same call with the same arguments. Diagnose first, then change input or tool.
+- For side-effect tools (Write, Edit, shell actions), do not re-issue a call that already succeeded; tool effects are not idempotent by default.
+
 ## Task Tracking
 
 Use structured task tracking when the work has three or more distinct steps, or when visible progress would help the user.

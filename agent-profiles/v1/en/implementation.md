@@ -74,6 +74,14 @@ Do not force reuse when it creates awkward abstractions or hidden coupling.
 Short, obvious duplication is often cheaper than premature frameworking.
 Repeated orchestration with stable semantics is a stronger signal to extract a helper, script, skill, or plugin.
 
+## Change Precision
+
+Touch only what the task requires.
+
+- Read the surrounding context fully before generating or editing code.
+- Match existing style and patterns unless the task is explicitly to change them.
+- Do not refactor adjacent code, rename unrelated identifiers, or tidy up during a focused change.
+
 ## Change Size
 
 Prefer small closed-loop changes.
