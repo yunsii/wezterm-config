@@ -239,16 +239,20 @@ function M.build(opts)
           local workspace_seg = nonempty(live.workspace) and live.workspace or '?'
           local tab_seg = '?'
           if live.tab_index then
-            tab_seg = '#' .. tostring(live.tab_index)
+            tab_seg = tostring(live.tab_index)
             if nonempty(live.tab_title) then
-              tab_seg = tab_seg .. ' ' .. live.tab_title
+              tab_seg = tab_seg .. '_' .. live.tab_title
             end
+          end
+          local function strip_tmux_prefix(value)
+            if type(value) ~= 'string' then return value end
+            return (value:gsub('^[@%%]', ''))
           end
           local tmux_seg = '?'
           if nonempty(entry.tmux_window) then
-            tmux_seg = entry.tmux_window
+            tmux_seg = strip_tmux_prefix(entry.tmux_window)
             if nonempty(entry.tmux_pane) then
-              tmux_seg = tmux_seg .. ':' .. entry.tmux_pane
+              tmux_seg = tmux_seg .. '_' .. strip_tmux_prefix(entry.tmux_pane)
             end
           end
           local branch_seg = nonempty(entry.git_branch) and entry.git_branch or '?'
