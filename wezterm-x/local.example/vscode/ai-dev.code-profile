@@ -1,0 +1,9 @@
+{
+  "name": "ai-dev",
+  "settings": "{\"settings\": \"{\\n  \\\"workbench.colorTheme\\\": \\\"Vitesse Light Soft\\\",\\n  \\\"editor.fontFamily\\\": \\\"Fira Code Retina, Consolas, monospace\\\",\\n  \\\"terminal.integrated.fontFamily\\\": \\\"Fira Code Retina, Consolas, monospace\\\",\\n  \\\"telemetry.telemetryLevel\\\": \\\"off\\\",\\n  \\\"workbench.startupEditor\\\": \\\"none\\\",\\n  \\\"editor.minimap.enabled\\\": false,\\n  \\\"editor.formatOnSave\\\": false,\\n  \\\"update.mode\\\": \\\"manual\\\",\\n  \\\"extensions.autoUpdate\\\": false,\\n  \\\"extensions.autoCheckUpdates\\\": false,\\n  \\\"git.autofetch\\\": false,\\n  \\\"security.workspace.trust.enabled\\\": false,\\n  \\\"chat.commandCenter.enabled\\\": false\\n}\"}",
+  "keybindings": "{\"keybindings\": \"[]\"}",
+  "tasks": "{\"tasks\": \"{}\"}",
+  "snippets": "{\"snippets\": {}}",
+  "globalState": "{\"storage\": {}}",
+  "extensions": "[{\"identifier\": {\"id\": \"eamodio.gitlens\"}, \"displayName\": \"GitLens\"}, {\"identifier\": {\"id\": \"antfu.theme-vitesse\"}, \"displayName\": \"Vitesse Theme\"}]"
+}

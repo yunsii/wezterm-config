@@ -37,18 +37,36 @@ detect_windows_paths() {
   WINDOWS_DIAGNOSTICS_FILE_WIN="${WINDOWS_RUNTIME_STATE_WIN}\\logs\\helper.log"
 }
 
+load_vscode_profile_from_shared_env() {
+  local shared_env_file="${WEZTERM_VSCODE_SHARED_ENV_FILE:-$SCRIPT_DIR/../../wezterm-x/local/shared.env}"
+  if [[ -z "${WEZTERM_VSCODE_PROFILE+x}" && -f "$shared_env_file" ]]; then
+    # shellcheck disable=SC1090
+    source "$shared_env_file"
+  fi
+}
+
+append_profile_arg() {
+  if [[ -n "${WEZTERM_VSCODE_PROFILE:-}" ]]; then
+    code_command+=(--profile "$WEZTERM_VSCODE_PROFILE")
+  fi
+}
+
 detect_code_command() {
   if (( ${#code_command[@]} > 0 )); then
     return 0
   fi
 
+  load_vscode_profile_from_shared_env
+
   local user_install_wsl="${WINDOWS_LOCALAPPDATA_WSL}/Programs/Microsoft VS Code/Code.exe"
   if [[ -f "$user_install_wsl" ]]; then
     code_command=("${WINDOWS_LOCALAPPDATA_WIN}\\Programs\\Microsoft VS Code\\Code.exe")
+    append_profile_arg
     return 0
   fi
 
   code_command=('C:\Program Files\Microsoft VS Code\Code.exe')
+  append_profile_arg
 }
 
 helper_state_is_fresh() {
@@ -103,9 +121,21 @@ run_direct_windows_open() {
   local trace_id="$1"
   local folder_uri="vscode-remote://wsl+${WSL_DISTRO_NAME}${target_dir}"
   local code_exe="${code_command[0]}"
+  local arg_list=""
+  local i
+  for (( i=1; i<${#code_command[@]}; i++ )); do
+    if [[ -n "$arg_list" ]]; then
+      arg_list+=", "
+    fi
+    arg_list+="$(windows_powershell_quote "${code_command[i]}")"
+  done
+  if [[ -n "$arg_list" ]]; then
+    arg_list+=", "
+  fi
+  arg_list+="'--folder-uri', $(windows_powershell_quote "$folder_uri")"
   local command=""
   command="$(cat <<EOF
-Start-Process -FilePath $(windows_powershell_quote "$code_exe") -ArgumentList @('--folder-uri', $(windows_powershell_quote "$folder_uri"))
+Start-Process -FilePath $(windows_powershell_quote "$code_exe") -ArgumentList @(${arg_list})
 EOF
 )"
   windows_run_powershell_command_utf8 "$command" >/dev/null 2>&1

@@ -5,6 +5,7 @@ local function join_path(...)
   return table.concat({ ... }, path_sep)
 end
 
+
 local runtime_dir = rawget(_G, 'WEZTERM_RUNTIME_DIR')
 if not runtime_dir or runtime_dir == '' then
   runtime_dir = join_path(wezterm.config_dir, '.wezterm-x')
@@ -31,6 +32,19 @@ local user_worktree_task_env = helpers.load_optional_env_file(defaults.default_w
 local repo_managed_cli_env = managed_cli.parse_managed_cli_env(repo_worktree_task_env)
 local user_managed_cli_env = managed_cli.parse_managed_cli_env(user_worktree_task_env)
 local local_managed_cli_profile = managed_cli.normalize_agent_profile_name(shared_env.MANAGED_AGENT_PROFILE)
+
+local function vscode_command(base)
+  local out = {}
+  for _, v in ipairs(base) do
+    out[#out + 1] = v
+  end
+  local profile = shared_env.WEZTERM_VSCODE_PROFILE
+  if profile and profile ~= '' then
+    out[#out + 1] = '--profile'
+    out[#out + 1] = profile
+  end
+  return out
+end
 
 local base_constants = {
   host_os = host_os,
@@ -110,8 +124,8 @@ local base_constants = {
   launch_menu = defaults.default_launch_menu(host_os),
   integrations = {
     vscode = {
-      hybrid_wsl_command = defaults.default_vscode_command(host_os),
-      posix_command = { 'code' },
+      hybrid_wsl_command = vscode_command(defaults.default_vscode_command(host_os)),
+      posix_command = vscode_command({ 'code' }),
       powershell = 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
       runtime_dir = runtime_dir,
       helper_script = 'scripts\\ensure-windows-runtime-helper.ps1',
