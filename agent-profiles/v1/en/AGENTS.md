@@ -3,7 +3,7 @@
 This file defines my default working rules for coding agents across projects.
 
 Read this file first.
-Load only the next relevant topic file.
+Load only the next relevant topic file based on the Task Routing table below.
 Do not preload the whole profile.
 
 ## Scope And Precedence
@@ -24,96 +24,36 @@ Default loop:
 4. Verify automatically.
 5. Report what changed, how it was verified, and what remains uncertain.
 
-Continue unless blocked by missing access, material ambiguity, destructive risk, or unresolved conflicts with user changes.
+Continue unless blocked.
+Detailed escalation criteria live in [validation.md](./validation.md).
 
-## Escalation Policy
+## Task Routing
 
-Ask for human input only when at least one of the following is true:
+Read this file first, then open only the matching topic file.
+Read additional topic files only when the current file points to them or the task crosses that boundary.
 
-- Missing permission, credentials, network access, or required external approval
-- Product intent is materially ambiguous and multiple plausible implementations would diverge
-- The next action is destructive, irreversible, or high-risk
-- Automatic verification is insufficient and the remaining risk is significant
-- The task conflicts directly with existing user changes and cannot be resolved safely
+- Testing strategy, completion criteria, human-verification thresholds → [validation.md](./validation.md)
+- Structure, abstractions, module boundaries, reliability, performance → [implementation.md](./implementation.md)
+- Restructuring existing code or replacing a subsystem → [refactor.md](./refactor.md)
+- Whether a rule belongs in doc, script, hook, skill, or plugin → [automation.md](./automation.md)
+- Choosing, sequencing, or batching tool calls → [tool-use.md](./tool-use.md)
+- Creating, splitting, or maintaining agent-facing docs → [documentation.md](./documentation.md)
+- Host-side side effects (clipboard, app focus, browser, notifications) → [platform-actions.md](./platform-actions.md)
+- Commits, branches, merges, pushes, pull/merge requests → [vcs.md](./vcs.md)
+- Final responses and progress updates → [reporting.md](./reporting.md)
+- Tie-breaking between otherwise valid approaches → [preferences.md](./preferences.md)
 
-Otherwise, continue.
+## Default Posture
 
-## Validation First
+One-line summaries so the entrypoint stays scannable.
+Full rules live in the routed topic file.
 
-Default to self-verification.
-Do not treat the user as the primary tester.
-
-Use the lightest valid path first:
-
-1. Static or structural checks
-2. Narrow behavioral checks
-3. Broader integration checks when justified
-
-If verification is missing, add or identify the smallest reliable check first.
-If a change cannot be verified, say so explicitly and explain why.
-
-Read [validation.md](./validation.md) when the task involves testing strategy, completion criteria, or escalation thresholds.
-
-## Refactor Discipline
-
-Do not refactor before understanding the existing implementation.
-Before structural changes, identify:
-
-- entrypoints
-- data flow
-- invariants
-- coupling points
-- failure modes
-
-Separate refactors from behavior changes whenever practical.
-If both are required, preserve observable behavior first and layer the change second.
-
-Read [refactor.md](./refactor.md) for refactor rules.
-
-## Engineering Defaults
-
-Prefer:
-
-- simple designs over clever ones
-- explicit boundaries over hidden magic
-- reuse over duplicate orchestration
-- reversible steps over large rewrites
-- observable systems over opaque systems
-
-Avoid introducing abstraction before there is a concrete reason.
-Avoid performance work without a clear hotspot, measured pain, or repeated cost.
-
-Read [implementation.md](./implementation.md) for engineering guidance.
-
-## Automation And Documentation
-
-Automate rules that must execute consistently.
-Keep the entrypoint short and move detail to topic files.
-
-Use:
-- hooks for deterministic guardrails
-- scripts for repeatable workflows
-- skills or plugins for reusable multi-step behavior
-- docs for stable guidance and decision rules
-
-Read [automation.md](./automation.md) for automation design rules.
-Read [documentation.md](./documentation.md) for documentation design and maintenance.
-Read [platform-actions.md](./platform-actions.md) when the task may interact with the local machine on the user's behalf, including clipboard writes, app focus, browser launch, notifications, or other host-side side effects.
-
-## Reporting
-
-Final responses should state:
-
-- what was changed
-- how it was verified
-- what risks or unknowns remain
-
-Do not hide missing validation.
-Do not present guesses as confirmed facts.
-
-Read [reporting.md](./reporting.md) for reporting format.
-
-## Preferences
-
-Keep personal preferences in [preferences.md](./preferences.md).
-Load that file only when needed.
+- Validation: self-verify with the lightest valid path; do not use the user as the primary tester.
+- Refactor: understand before restructuring; keep refactor and behavior change separate.
+- Implementation: prefer simple, explicit, observable, reversible; avoid speculative abstraction.
+- Automation: implement over instruct when consistency matters.
+- Tool use: specialized tool over shell; batch independent calls; merge read-only shell; Read before Write.
+- Documentation: layered and sparse; one source of truth per rule.
+- Platform actions: narrow, explicit, reversible; ask before secrets, destructive, or hard-to-undo actions.
+- VCS: never auto-commit / auto-push / skip hooks / force-push to main; user owns the history.
+- Reporting: state what changed, how it was verified, and what remains uncertain.
