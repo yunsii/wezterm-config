@@ -48,6 +48,7 @@ titles.register {
   palette = constants.palette,
   attention = attention,
   host = host,
+  logger = logger,
 }
 
 ui.apply {

@@ -22,6 +22,9 @@ repo_root="$(cd "$script_dir/../.." && pwd)"
 
 # shellcheck disable=SC1091
 . "$repo_root/scripts/runtime/attention-state-lib.sh"
+# shellcheck disable=SC1091
+. "$repo_root/scripts/runtime/runtime-log-lib.sh"
+WEZTERM_RUNTIME_LOG_SOURCE="emit-agent-status.sh"
 
 status="${1:-}"
 if [[ -z "$status" ]]; then
@@ -135,16 +138,36 @@ fi
 
 # Nudge WezTerm. Value carries the timestamp so repeated emits produce
 # distinct user-var-changed events.
+osc_emitted=0
+tick_ms=''
 if [[ -e /dev/tty ]]; then
   tick_ms="$(attention_state_now_ms)"
   encoded="$(printf '%s' "$tick_ms" | base64 | tr -d '\n')"
   seq="$(printf '\033]1337;SetUserVar=attention_tick=%s\007' "$encoded")"
   if [[ -n "${TMUX-}" ]]; then
     escaped="${seq//$'\033'/$'\033\033'}"
-    printf '\033Ptmux;%s\033\\' "$escaped" >/dev/tty 2>/dev/null || true
+    if printf '\033Ptmux;%s\033\\' "$escaped" >/dev/tty 2>/dev/null; then
+      osc_emitted=1
+    fi
   else
-    printf '%s' "$seq" >/dev/tty 2>/dev/null || true
+    if printf '%s' "$seq" >/dev/tty 2>/dev/null; then
+      osc_emitted=1
+    fi
   fi
 fi
+
+# Sender-side trace. Pair with attention category in wezterm.log (the
+# `tick received` entry from attention.lua) to diagnose the OSC pipeline.
+runtime_log_info attention "hook emitted agent status" \
+  "status=$status" \
+  "session_id=$session_id" \
+  "wezterm_pane=${WEZTERM_PANE:-}" \
+  "tmux_socket=$tmux_socket" \
+  "tmux_pane=$tmux_pane" \
+  "git_branch=$git_branch" \
+  "inside_tmux=$([[ -n "${TMUX-}" ]] && echo 1 || echo 0)" \
+  "dev_tty_writable=$([[ -e /dev/tty ]] && echo 1 || echo 0)" \
+  "osc_emitted=$osc_emitted" \
+  "tick_ms=$tick_ms" 2>/dev/null || true
 
 exit 0
