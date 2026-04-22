@@ -9,10 +9,16 @@ Do not preload the whole profile.
 ## Scope And Precedence
 
 This is user-level guidance, not project-level guidance.
-
 Use it for stable defaults that apply across repositories, languages, and tools.
-If project instructions exist, combine them with this file.
-Project-specific constraints override user-level defaults when they conflict.
+
+Precedence (highest wins):
+
+1. Explicit user chat instructions.
+2. Project instructions — the nearest `AGENTS.md` / `CLAUDE.md` / equivalent to the edited file.
+3. This user-level profile.
+4. Agent or platform built-in defaults.
+
+When layers conflict, the higher layer wins. Do not discard a higher-layer rule on the strength of a lower-layer preference.
 
 ## Operating Model
 
@@ -41,7 +47,10 @@ Read additional topic files only when the current file points to them or the tas
 - Host-side side effects (clipboard, app focus, browser, notifications) → [platform-actions.md](./platform-actions.md)
 - Commits, branches, merges, pushes, pull/merge requests → [vcs.md](./vcs.md)
 - Final responses and progress updates → [reporting.md](./reporting.md)
-- Tie-breaking between otherwise valid approaches → [preferences.md](./preferences.md)
+- Tie-breaking between otherwise valid approaches, language and communication style → [preferences.md](./preferences.md)
+
+Each topic file carries YAML frontmatter (`name`, `scope`, `triggers`, `tags`) for indexed discovery.
+Each rule carries a stable identifier of the form `[<topic>-NN]` so feedback, memory entries, and reviewers can reference rules precisely.
 
 ## Default Posture
 
@@ -58,4 +67,4 @@ Full rules live in the routed topic file.
 - VCS: never auto-commit / auto-push / skip hooks / force-push to main; user owns the history.
 - Reporting: state what changed, how it was verified, and what remains uncertain.
 - Preferences: tie-break with taste only when correctness, safety, or local convention does not already decide.
-- Language: reply in Simplified Chinese (简体中文); keep code, identifiers, commit messages, and existing English docs in English. Full rule in [preferences.md](./preferences.md).
+- Language: reply in Simplified Chinese (简体中文); full rule in [preferences.md](./preferences.md).

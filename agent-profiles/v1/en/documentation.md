@@ -1,3 +1,13 @@
+---
+name: documentation
+scope: user
+triggers:
+  - creating agent-facing docs
+  - splitting or revising docs
+  - doc layering decisions
+tags: [documentation, layering, progressive-disclosure]
+---
+
 # Documentation
 
 ## When To Read
@@ -10,63 +20,63 @@ When editing code without touching its docs, or when only fixing typos / small w
 
 ## Default
 
-Documentation should reduce decision cost, not become a second codebase.
-Keep it layered, sparse, and easy to navigate.
+- [documentation-01] Documentation should reduce decision cost, not become a second codebase.
+- [documentation-02] Keep it layered, sparse, and easy to navigate.
 
 ## Layering
 
 Use this structure:
 
-- entrypoint docs for hard rules and routing
-- topic docs for detailed domain guidance
-- local docs for environment- or project-specific constraints
-- reference docs for deep background only when necessary
+- [documentation-03] entrypoint docs for hard rules and routing
+- [documentation-04] topic docs for detailed domain guidance
+- [documentation-05] local docs for environment- or project-specific constraints
+- [documentation-06] reference docs for deep background only when necessary
 
-Do not put everything in the entrypoint.
+[documentation-07] Do not put everything in the entrypoint.
 
 ## Progressive Disclosure
 
-Load the minimum context needed for the current task.
+[documentation-08] Load the minimum context needed for the current task.
 
 Start with:
-- the main entrypoint
-- one matching topic file
+
+- [documentation-09] the main entrypoint
+- [documentation-10] one matching topic file
 
 Load more only when:
-- the current doc points to it
-- the task crosses boundaries
-- proceeding without it would be risky
+
+- [documentation-11] the current doc points to it
+- [documentation-12] the task crosses boundaries
+- [documentation-13] proceeding without it would be risky
 
 ## Write
 
 Good documentation is:
 
-- specific
-- stable
-- actionable
-- close to the decision point
-- easy to skim
+- [documentation-14] specific
+- [documentation-15] stable
+- [documentation-16] actionable
+- [documentation-17] close to the decision point
+- [documentation-18] easy to skim
 
 Each topic file should ideally answer:
 
-- when to read it
-- what rules apply
-- what to prefer
-- what to avoid
-- how to validate
+- [documentation-19] when to read it
+- [documentation-20] what rules apply
+- [documentation-21] what to prefer
+- [documentation-22] what to avoid
+- [documentation-23] how to validate
 
 ## Avoid
 
-Avoid:
-
-- long narrative history
-- vague slogans
-- tool trivia that changes often
-- duplicated rules across many files
-- instructions that should be automation instead
+- [documentation-24] long narrative history
+- [documentation-25] vague slogans
+- [documentation-26] tool trivia that changes often
+- [documentation-27] duplicated rules across many files
+- [documentation-28] instructions that should be automation instead
 
 ## Maintenance
 
-When a file grows too broad, split by decision domain, not by audience.
-Keep one source of truth for each rule.
-Other files should route to it, not restate it.
+- [documentation-29] When a file grows too broad, split by decision domain, not by audience.
+- [documentation-30] Keep one source of truth for each rule.
+- [documentation-31] Other files should route to it, not restate it.

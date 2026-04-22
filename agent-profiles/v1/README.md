@@ -11,9 +11,9 @@ Use this package when a coding agent needs user-level defaults for execution sty
 
 ## Layout
 
-- [en/AGENTS.md](./en/AGENTS.md): authoritative English entrypoint
+- [en/AGENTS.md](./en/AGENTS.md): entrypoint
 
-Topic files under `en/` and `zh/` are mirrored one-to-one:
+Topic files under `en/`:
 
 - [en/validation.md](./en/validation.md)
 - [en/implementation.md](./en/implementation.md)
@@ -26,9 +26,8 @@ Topic files under `en/` and `zh/` are mirrored one-to-one:
 - [en/reporting.md](./en/reporting.md)
 - [en/preferences.md](./en/preferences.md)
 
-`en/` is the source of truth.
-`zh/` contains a reference translation and is not part of the default loading path.
-If wording differs, `en/` takes precedence.
+Each topic file carries YAML frontmatter (`name`, `scope`, `triggers`, `tags`) so agents or tools can index and load on demand.
+Each rule carries a stable identifier of the form `[<topic>-NN]` so feedback, memory entries, and reviewers can reference rules precisely.
 
 ## How To Attach
 
@@ -51,7 +50,6 @@ Avoid copying the same content into multiple files.
 1. Read [en/AGENTS.md](./en/AGENTS.md) first.
 2. Load only the next relevant topic file for the current task.
 3. Do not preload the whole profile.
-4. Ignore `zh/` unless bilingual reading, translation, or comparison is explicitly needed.
 
 ## Link Conventions
 
@@ -70,9 +68,7 @@ Examples:
 
 ## Maintenance
 
-- Keep `en/` and `zh/` file names mirrored.
-- Update English first.
-- Sync Chinese after English changes.
 - Keep the main entrypoint short.
 - Move detailed rules into topic files.
 - Prefer automation over documentation for rules that must execute consistently.
+- Do not renumber existing rule IDs when inserting new rules; append or use suffixes (`-03a`) to keep identifiers stable.
