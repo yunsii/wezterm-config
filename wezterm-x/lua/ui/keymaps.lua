@@ -19,35 +19,7 @@ function M.build(opts)
   local attention = opts.attention
 
   local function attention_jump_args(trailing_args, pane_ref, trace_id)
-    local repo_root = constants.repo_root
-    if not repo_root or repo_root == '' then
-      logger.warn('attention', 'no repo_root to resolve jump script', {
-        trace = trace_id,
-      })
-      return nil
-    end
-    local script_path = repo_root .. '/scripts/runtime/attention-jump.sh'
-    local runtime_mode = constants.runtime_mode or 'hybrid-wsl'
-    if runtime_mode == 'hybrid-wsl' and constants.host_os == 'windows' then
-      local distro = common.wsl_distro_from_domain(pane_ref and pane_ref:get_domain_name())
-        or common.wsl_distro_from_domain(constants.default_domain)
-      if not distro then
-        logger.warn('attention', 'unable to resolve WSL distro for attention jump', {
-          trace = trace_id,
-        })
-        return nil
-      end
-      local args = { 'wsl.exe', '-d', distro, '--', 'bash', script_path }
-      for _, a in ipairs(trailing_args) do
-        table.insert(args, a)
-      end
-      return args
-    end
-    local args = { 'bash', script_path }
-    for _, a in ipairs(trailing_args) do
-      table.insert(args, a)
-    end
-    return args
+    return actions.attention_jump_args(constants, pane_ref, trailing_args, logger, trace_id)
   end
 
   -- Build fast-path args when the entry carries tmux coordinates. The
@@ -72,6 +44,25 @@ function M.build(opts)
       return attention_jump_args(trailing, pane_ref, trace_id)
     end
     return attention_jump_args({ '--session', entry.session_id }, pane_ref, trace_id)
+  end
+
+  -- Delayed auto-forget after a successful jump to a `done` entry. The
+  -- --only-if-ts guard keeps a fresher `done` that reused the same
+  -- session_id within the grace window from being wiped.
+  local attention_forget_delay_seconds = 3
+  local function attention_forget_args(entry, pane_ref, trace_id)
+    if not entry or type(entry.session_id) ~= 'string' or entry.session_id == '' then
+      return nil
+    end
+    local trailing = {
+      '--forget', entry.session_id,
+      '--delay', tostring(attention_forget_delay_seconds),
+    }
+    if entry.ts ~= nil and tostring(entry.ts) ~= '' then
+      table.insert(trailing, '--only-if-ts')
+      table.insert(trailing, tostring(entry.ts))
+    end
+    return attention_jump_args(trailing, pane_ref, trace_id)
   end
 
   return {
@@ -219,9 +210,13 @@ function M.build(opts)
           session_id = entry.session_id,
           wezterm_pane_id = entry.wezterm_pane_id,
         })
-        attention.activate_in_gui(entry.wezterm_pane_id, window, pane)
+        local activated = attention.activate_in_gui(entry.wezterm_pane_id, window, pane)
         local args = attention_direct_args(entry, pane, trace_id)
         if args then wezterm.background_child_process(args) end
+        if activated then
+          local forget_args = attention_forget_args(entry, pane, trace_id)
+          if forget_args then wezterm.background_child_process(forget_args) end
+        end
       end),
     },
     {
@@ -349,8 +344,9 @@ function M.build(opts)
                   break
                 end
               end
+              local activated = false
               if chosen_entry then
-                attention.activate_in_gui(chosen_entry.wezterm_pane_id, inner_window, inner_pane)
+                activated = attention.activate_in_gui(chosen_entry.wezterm_pane_id, inner_window, inner_pane)
               end
 
               local args
@@ -367,6 +363,10 @@ function M.build(opts)
                 session_id = chosen_id,
               })
               wezterm.background_child_process(args)
+              if activated and chosen_entry and chosen_entry.status == attention.STATUS_DONE then
+                local forget_args = attention_forget_args(chosen_entry, inner_pane, trace_id)
+                if forget_args then wezterm.background_child_process(forget_args) end
+              end
             end),
           },
           pane

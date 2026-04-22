@@ -13,6 +13,17 @@
 # Invoked from tooling or recovery flows that still need a state lookup:
 #   bash .../attention-jump.sh --session <session_id>
 #
+# Invoked from Alt+./Alt+/ after a successful jump to a `done` entry, to
+# drop the entry after a short grace window:
+#   bash .../attention-jump.sh --forget <session_id> \
+#     [--delay <seconds>] [--only-if-ts <epoch_ms>]
+# The --only-if-ts guard is what keeps the delayed forget from eating a
+# fresher `done` that the same session_id produced during the grace window.
+#
+# Invoked periodically by attention.lua from WezTerm's update-status tick
+# to clean up entries that have aged past the TTL when no hook has fired:
+#   bash .../attention-jump.sh --prune [--ttl <ms>]
+#
 # Resolution (slow path):
 #   1. Prune stale entries (30 min TTL).
 #   2. Pick target — by explicit session id, or the next entry matching
@@ -67,6 +78,11 @@ want_status=''
 explicit_session=''
 
 clear_all=0
+forget=0
+forget_delay=0
+forget_if_ts=''
+prune_only=0
+prune_ttl=1800000
 
 case "${1:-next-waiting}" in
   next-waiting) want_status='waiting' ;;
@@ -79,12 +95,38 @@ case "${1:-next-waiting}" in
     fi
     ;;
   --clear-all) clear_all=1 ;;
+  --forget)
+    explicit_session="${2:-}"
+    if [[ -z "$explicit_session" ]]; then
+      printf 'usage: %s --forget <session_id> [--delay <seconds>] [--only-if-ts <epoch_ms>]\n' "$0" >&2
+      exit 1
+    fi
+    forget=1
+    shift 2
+    while (( $# )); do
+      case "$1" in
+        --delay)       forget_delay="${2:-0}";    shift 2 ;;
+        --only-if-ts)  forget_if_ts="${2:-}";     shift 2 ;;
+        *) printf 'unknown --forget arg: %s\n' "$1" >&2; exit 1 ;;
+      esac
+    done
+    ;;
+  --prune)
+    prune_only=1
+    shift
+    while (( $# )); do
+      case "$1" in
+        --ttl) prune_ttl="${2:-1800000}"; shift 2 ;;
+        *) printf 'unknown --prune arg: %s\n' "$1" >&2; exit 1 ;;
+      esac
+    done
+    ;;
   -h|--help)
-    sed -n '3,27p' "$0"
+    sed -n '3,38p' "$0"
     exit 0
     ;;
   *)
-    printf 'usage: %s next-waiting|next-done|--session <id>|--clear-all|--direct ...\n' "$0" >&2
+    printf 'usage: %s next-waiting|next-done|--session <id>|--forget <id> [--delay N] [--only-if-ts TS]|--prune [--ttl MS]|--clear-all|--direct ...\n' "$0" >&2
     exit 1
     ;;
 esac
@@ -108,6 +150,33 @@ notify_tmux() {
 if (( clear_all )); then
   attention_state_truncate
   notify_tmux 'agent-attention: cleared all' '' ''
+  exit 0
+fi
+
+if (( prune_only )); then
+  attention_state_prune "$prune_ttl" 2>/dev/null || true
+  exit 0
+fi
+
+if (( forget )); then
+  if [[ "$forget_delay" =~ ^[0-9]+$ ]] && (( forget_delay > 0 )); then
+    sleep "$forget_delay"
+  fi
+  # Guard against wiping a fresher entry that reused this session_id during
+  # the grace window: the caller passes the ts observed at jump time, and we
+  # skip the remove when the current ts no longer matches.
+  if [[ -n "$forget_if_ts" ]]; then
+    state_path="$(attention_state_path)"
+    current_ts=''
+    if [[ -f "$state_path" ]]; then
+      current_ts="$(jq -r --arg sid "$explicit_session" \
+        '.entries[$sid].ts // empty' <"$state_path" 2>/dev/null || true)"
+    fi
+    if [[ "$current_ts" != "$forget_if_ts" ]]; then
+      exit 0
+    fi
+  fi
+  attention_state_remove "$explicit_session" 2>/dev/null || true
   exit 0
 fi
 

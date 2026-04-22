@@ -18,8 +18,44 @@ M.USER_VAR_TICK = 'attention_tick'
 M.STATUS_WAITING = 'waiting'
 M.STATUS_DONE = 'done'
 
+-- Aligned with scripts/runtime/attention-state-lib.sh (attention_state_prune
+-- default). The Lua-side filter hides entries that passed the TTL even
+-- before the periodic shell prune physically removes them from state.json.
+M.TTL_MS = 1800000
+-- Periodic prune pacing. update-status fires every `status_update_interval`
+-- (250ms by default), but the actual shell spawn is self-throttled to at
+-- most one every PRUNE_INTERVAL_MS.
+M.PRUNE_INTERVAL_MS = 60000
+
 local state_path = nil
 local state_cache = { entries = {} }
+local prune_spawner = nil
+local last_prune_ms = 0
+local module_logger = nil
+
+local function now_ms()
+  local ok, formatted = pcall(function()
+    return wezterm.time.now():format '%s%3f'
+  end)
+  if ok and type(formatted) == 'string' and formatted:match '^%d+$' then
+    return tonumber(formatted)
+  end
+  return os.time() * 1000
+end
+
+local function entry_is_live(entry, now)
+  if type(entry) ~= 'table' then
+    return false
+  end
+  local ts = tonumber(entry.ts)
+  if not ts then
+    -- Missing ts: treat as live. The shell-side prune will eventually
+    -- normalize or drop the entry; we do not want a corrupt row to
+    -- silently hide a valid one.
+    return true
+  end
+  return (now - ts) <= M.TTL_MS
+end
 
 local function parse_json(text)
   if type(text) ~= 'string' or text == '' then
@@ -77,8 +113,9 @@ end
 
 function M.collect()
   local waiting, done = {}, {}
+  local now = now_ms()
   for _, entry in pairs(state_cache.entries or {}) do
-    if type(entry) == 'table' then
+    if entry_is_live(entry, now) then
       if entry.status == M.STATUS_WAITING then
         table.insert(waiting, entry)
       elseif entry.status == M.STATUS_DONE then
@@ -91,9 +128,8 @@ end
 
 function M.render_status_segment(palette)
   local waiting, done = M.collect()
-  if #waiting == 0 and #done == 0 then
-    return nil
-  end
+  local idle_bg = palette.tab_bar_background
+  local idle_fg = palette.new_tab_fg
 
   local parts = {}
   if #waiting > 0 then
@@ -101,16 +137,28 @@ function M.render_status_segment(palette)
     table.insert(parts, { Foreground = { Color = palette.tab_attention_waiting_fg } })
     table.insert(parts, { Attribute = { Intensity = 'Bold' } })
     table.insert(parts, { Text = ' ⚠ ' .. #waiting .. ' waiting ' })
+  else
+    table.insert(parts, { Background = { Color = idle_bg } })
+    table.insert(parts, { Foreground = { Color = idle_fg } })
+    table.insert(parts, { Attribute = { Intensity = 'Normal' } })
+    table.insert(parts, { Text = ' ⚠ 0 waiting ' })
   end
+
+  -- Fixed one-cell gap so the segment width stays stable between idle and
+  -- active states; prevents the right side of the tab bar from jittering.
+  table.insert(parts, { Background = { Color = idle_bg } })
+  table.insert(parts, { Text = ' ' })
+
   if #done > 0 then
-    if #waiting > 0 then
-      table.insert(parts, { Background = { Color = palette.tab_bar_background } })
-      table.insert(parts, { Text = ' ' })
-    end
     table.insert(parts, { Background = { Color = palette.tab_attention_done_bg } })
     table.insert(parts, { Foreground = { Color = palette.tab_attention_done_fg } })
     table.insert(parts, { Attribute = { Intensity = 'Normal' } })
     table.insert(parts, { Text = ' ✓ ' .. #done .. ' done ' })
+  else
+    table.insert(parts, { Background = { Color = idle_bg } })
+    table.insert(parts, { Foreground = { Color = idle_fg } })
+    table.insert(parts, { Attribute = { Intensity = 'Normal' } })
+    table.insert(parts, { Text = ' ✓ 0 done ' })
   end
   return wezterm.format(parts)
 end
@@ -122,8 +170,9 @@ function M.tab_badge(tab_info)
   end
   local pane_id_str = tostring(active.pane_id)
   local has_waiting, has_done = false, false
+  local now = now_ms()
   for _, entry in pairs(state_cache.entries or {}) do
-    if type(entry) == 'table' and tostring(entry.wezterm_pane_id or '') == pane_id_str then
+    if entry_is_live(entry, now) and tostring(entry.wezterm_pane_id or '') == pane_id_str then
       if entry.status == M.STATUS_WAITING then
         has_waiting = true
       elseif entry.status == M.STATUS_DONE then
@@ -146,16 +195,6 @@ function M.badge_colors(palette, status)
     return palette.tab_attention_done_bg, palette.tab_attention_done_fg
   end
   return palette.tab_bar_background, palette.tab_accent
-end
-
-local function now_ms()
-  local ok, formatted = pcall(function()
-    return wezterm.time.now():format '%s%3f'
-  end)
-  if ok and type(formatted) == 'string' and formatted:match '^%d+$' then
-    return tonumber(formatted)
-  end
-  return os.time() * 1000
 end
 
 -- Walk the mux looking for the pane with id `wezterm_pane_id`. Returns
@@ -311,8 +350,38 @@ function M.pick_next(kind, current_pane_id)
   return pool[1]
 end
 
+-- Periodic shell-side prune. Called from titles.lua's update-status tick
+-- (every `status_update_interval`, default 250ms). Self-throttles to one
+-- background spawn per PRUNE_INTERVAL_MS so the wsl.exe → bash cold start
+-- only happens at the configured cadence, not every frame. Does nothing
+-- when no `prune_spawner` has been injected via register().
+function M.maybe_prune()
+  if type(prune_spawner) ~= 'function' then
+    return
+  end
+  local now = now_ms()
+  if (now - last_prune_ms) < M.PRUNE_INTERVAL_MS then
+    return
+  end
+  last_prune_ms = now
+  local args = prune_spawner({ '--prune', '--ttl', tostring(M.TTL_MS) })
+  if type(args) == 'table' and #args > 0 then
+    pcall(function() wezterm.background_child_process(args) end)
+    if module_logger then
+      module_logger.info('attention', 'periodic prune scheduled', {
+        ttl_ms = M.TTL_MS,
+        interval_ms = M.PRUNE_INTERVAL_MS,
+      })
+    end
+  end
+end
+
 function M.register(opts)
   local logger = opts and opts.logger
+  module_logger = logger
+  if opts and type(opts.prune_spawner) == 'function' then
+    prune_spawner = opts.prune_spawner
+  end
   if opts and opts.constants and opts.constants.attention and opts.constants.attention.state_file then
     state_path = opts.constants.attention.state_file
   elseif opts and opts.state_file then

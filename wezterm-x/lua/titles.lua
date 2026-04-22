@@ -207,6 +207,9 @@ function M.register(opts)
     if attention and attention.reload_state then
       attention.reload_state()
     end
+    if attention and attention.maybe_prune then
+      attention.maybe_prune()
+    end
     local attention_waiting, attention_done
     if attention then
       attention_waiting, attention_done = attention.collect()

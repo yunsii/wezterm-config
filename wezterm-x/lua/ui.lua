@@ -28,10 +28,22 @@ function M.apply(opts)
   local runtime_dir = current_runtime_dir(wezterm.config_dir)
   local runtime = load_ui_module(runtime_dir, 'runtime')
   local keymaps = load_ui_module(runtime_dir, 'keymaps')
+  local actions = load_ui_module(runtime_dir, 'actions')
   local logger = opts.logger
   local host = opts.host
   if attention and attention.register then
-    attention.register { logger = logger, constants = constants }
+    -- Pass a prune_spawner so attention.maybe_prune can schedule periodic
+    -- state cleanup. Pane is nil here — actions falls back to the
+    -- default_domain for WSL distro resolution, which is the right
+    -- default for a periodic background task not tied to any pane.
+    local prune_spawner = function(trailing_args)
+      return actions.attention_jump_args(constants, nil, trailing_args, logger, 'attention-prune')
+    end
+    attention.register {
+      logger = logger,
+      constants = constants,
+      prune_spawner = prune_spawner,
+    }
   end
   local helper_prewarm_started = false
 

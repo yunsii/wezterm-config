@@ -9,6 +9,44 @@ local common = dofile(join_path(module_dir, 'common.lua'))
 
 local M = {}
 
+-- Build argv for spawning `scripts/runtime/attention-jump.sh` with the
+-- given trailing arguments. Handles the hybrid-wsl case by wrapping the
+-- call in `wsl.exe -d <distro> -- bash <script> ...`. `pane_ref` is only
+-- used to resolve a WSL distro hint; when nil the builder falls back to
+-- `constants.default_domain`. Returns nil (and logs a warn) when the
+-- script path or WSL distro cannot be resolved.
+function M.attention_jump_args(constants, pane_ref, trailing_args, logger, trace_id)
+  local repo_root = constants and constants.repo_root
+  if not repo_root or repo_root == '' then
+    if logger then
+      logger.warn('attention', 'no repo_root to resolve jump script', { trace = trace_id })
+    end
+    return nil
+  end
+  local script_path = repo_root .. '/scripts/runtime/attention-jump.sh'
+  local runtime_mode = (constants and constants.runtime_mode) or 'hybrid-wsl'
+  if runtime_mode == 'hybrid-wsl' and constants.host_os == 'windows' then
+    local distro = common.wsl_distro_from_domain(pane_ref and pane_ref:get_domain_name())
+      or common.wsl_distro_from_domain(constants.default_domain)
+    if not distro then
+      if logger then
+        logger.warn('attention', 'unable to resolve WSL distro for attention jump', { trace = trace_id })
+      end
+      return nil
+    end
+    local args = { 'wsl.exe', '-d', distro, '--', 'bash', script_path }
+    for _, a in ipairs(trailing_args) do
+      table.insert(args, a)
+    end
+    return args
+  end
+  local args = { 'bash', script_path }
+  for _, a in ipairs(trailing_args) do
+    table.insert(args, a)
+  end
+  return args
+end
+
 function M.workspace_keybinding(wezterm, workspace, key, name)
   return {
     key = key,
