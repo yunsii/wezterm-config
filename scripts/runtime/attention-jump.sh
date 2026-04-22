@@ -145,11 +145,11 @@ if [[ -n "$target_wezterm_pane" ]] && command -v wezterm.exe >/dev/null 2>&1; th
   fi
 fi
 
-label="${target_status:-agent}"
 if (( wezterm_activated )); then
-  notify_tmux "agent-attention: jumped (${label}${target_reason:+: $target_reason})" \
-    "$target_tmux_socket" "$target_tmux_window"
-elif [[ -n "$target_tmux_socket" && -n "$target_tmux_window" ]]; then
+  exit 0
+fi
+
+if [[ -n "$target_tmux_socket" && -n "$target_tmux_window" ]]; then
   notify_tmux 'agent-attention: tmux-only jump (WezTerm pane unknown)' \
     "$target_tmux_socket" "$target_tmux_window"
 else
