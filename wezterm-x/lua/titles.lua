@@ -210,6 +210,9 @@ function M.register(opts)
     if attention and attention.maybe_prune then
       attention.maybe_prune()
     end
+    if attention and attention.maybe_ack_focused then
+      attention.maybe_ack_focused(window, pane)
+    end
     local attention_waiting, attention_done
     if attention then
       attention_waiting, attention_done = attention.collect()

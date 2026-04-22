@@ -26,10 +26,16 @@ M.TTL_MS = 1800000
 -- (250ms by default), but the actual shell spawn is self-throttled to at
 -- most one every PRUNE_INTERVAL_MS.
 M.PRUNE_INTERVAL_MS = 60000
+-- Delay (seconds) before focus-based auto-ack removes a `done` entry from
+-- the currently-focused pane. Matches the Alt+./Alt+/ post-jump forget so
+-- both ack paths feel identical.
+M.FOCUS_ACK_DELAY_SECONDS = 3
 
 local state_path = nil
 local state_cache = { entries = {} }
 local prune_spawner = nil
+local forget_spawner = nil
+local focus_ack_scheduled = {}
 local last_prune_ms = 0
 local module_logger = nil
 
@@ -376,11 +382,127 @@ function M.maybe_prune()
   end
 end
 
+-- Read the active tmux pane id for (socket, session), as recorded by
+-- scripts/runtime/tmux-focus-emit.sh from tmux's pane-focus-in /
+-- after-select-pane hooks. Returns nil when the state file does not
+-- exist yet (no focus event has fired in that session since server
+-- start) — callers treat that as "unknown" and fail closed.
+local function read_tmux_active_pane(socket, session)
+  if type(socket) ~= 'string' or socket == ''
+    or type(session) ~= 'string' or session == '' then
+    return nil
+  end
+  if not state_path then
+    return nil
+  end
+  local base_dir = state_path:match('^(.*)/[^/]+$')
+  if not base_dir then
+    return nil
+  end
+  -- Mirror the filename transform in tmux-focus-emit.sh so both sides
+  -- agree on the path without having to parse the full socket string.
+  local safe_socket = (socket:gsub('/', '_'))
+  local safe_session = (session:gsub('^%$', ''))
+  local path = base_dir .. '/tmux-focus/' .. safe_socket .. '__' .. safe_session .. '.txt'
+  local content = read_file(path)
+  if not content or content == '' then
+    return nil
+  end
+  return (content:gsub('%s+$', ''))
+end
+
+-- Auto-ack: when the currently-focused pane matches a live `done` entry,
+-- schedule the same delayed --forget that Alt+./Alt+/ runs after a jump.
+-- The --only-if-ts guard prevents wiping a fresher `done` that reused the
+-- same session_id during the grace window. Dedup by (session_id, ts) so
+-- the tick loop does not re-spawn the subprocess while focus stays put.
+--
+-- When the entry carries tmux coordinates, require tmux-pane-level focus
+-- as well: one WezTerm pane commonly hosts an entire tmux session, so the
+-- WezTerm pane_id alone cannot distinguish "user is looking at the agent
+-- pane" from "user has moved to another tmux pane in the same session".
+-- On tmux-focus mismatch or unknown focus, we skip *and* leave dedup
+-- unset so the next tick re-checks after the user's tmux pane switch
+-- fires pane-focus-in / after-select-pane and the state file catches up.
+function M.maybe_ack_focused(window, pane)
+  if type(forget_spawner) ~= 'function' then
+    return
+  end
+  if not pane or type(pane.pane_id) ~= 'function' then
+    return
+  end
+  local ok_pid, pane_id = pcall(function() return pane:pane_id() end)
+  if not ok_pid or pane_id == nil then
+    return
+  end
+  local pane_id_str = tostring(pane_id)
+  local now = now_ms()
+  local live_sids = {}
+  local tmux_focus_cache = {}
+  local function cached_tmux_focus(socket, session)
+    local key = (socket or '') .. '|' .. (session or '')
+    local cached = tmux_focus_cache[key]
+    if cached == nil then
+      cached = read_tmux_active_pane(socket, session) or false
+      tmux_focus_cache[key] = cached
+    end
+    if cached == false then return nil end
+    return cached
+  end
+  for sid, entry in pairs(state_cache.entries or {}) do
+    if entry_is_live(entry, now) then
+      live_sids[sid] = true
+      if entry.status == M.STATUS_DONE
+        and tostring(entry.wezterm_pane_id or '') == pane_id_str then
+        local tmux_focus_ok = true
+        if type(entry.tmux_socket) == 'string' and entry.tmux_socket ~= ''
+          and type(entry.tmux_pane) == 'string' and entry.tmux_pane ~= '' then
+          local active = cached_tmux_focus(entry.tmux_socket, entry.tmux_session)
+          if active == nil or active ~= entry.tmux_pane then
+            tmux_focus_ok = false
+          end
+        end
+        if tmux_focus_ok then
+          local ts = entry.ts
+          if ts ~= nil and focus_ack_scheduled[sid] ~= ts then
+            focus_ack_scheduled[sid] = ts
+            local args = forget_spawner({
+              '--forget', sid,
+              '--delay', tostring(M.FOCUS_ACK_DELAY_SECONDS),
+              '--only-if-ts', tostring(ts),
+            })
+            if type(args) == 'table' and #args > 0 then
+              pcall(function() wezterm.background_child_process(args) end)
+              if module_logger then
+                module_logger.info('attention', 'focus ack scheduled', {
+                  session_id = sid,
+                  pane_id = pane_id_str,
+                  tmux_pane = entry.tmux_pane,
+                  delay_s = M.FOCUS_ACK_DELAY_SECONDS,
+                  ts = ts,
+                })
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  for sid, _ in pairs(focus_ack_scheduled) do
+    if not live_sids[sid] then
+      focus_ack_scheduled[sid] = nil
+    end
+  end
+end
+
 function M.register(opts)
   local logger = opts and opts.logger
   module_logger = logger
   if opts and type(opts.prune_spawner) == 'function' then
     prune_spawner = opts.prune_spawner
+  end
+  if opts and type(opts.forget_spawner) == 'function' then
+    forget_spawner = opts.forget_spawner
   end
   if opts and opts.constants and opts.constants.attention and opts.constants.attention.state_file then
     state_path = opts.constants.attention.state_file

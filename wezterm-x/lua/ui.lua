@@ -39,10 +39,14 @@ function M.apply(opts)
     local prune_spawner = function(trailing_args)
       return actions.attention_jump_args(constants, nil, trailing_args, logger, 'attention-prune')
     end
+    local forget_spawner = function(trailing_args)
+      return actions.attention_jump_args(constants, nil, trailing_args, logger, 'attention-focus-ack')
+    end
     attention.register {
       logger = logger,
       constants = constants,
       prune_spawner = prune_spawner,
+      forget_spawner = forget_spawner,
     }
   end
   local helper_prewarm_started = false
