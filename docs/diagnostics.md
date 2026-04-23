@@ -11,7 +11,7 @@ Use this doc when you need logs, smoke tests, or troubleshooting paths.
 ## WezTerm Diagnostics
 
 - When `diagnostics.wezterm.enabled = true`, WezTerm writes structured lines to the configured file and also shows them in the Debug Overlay.
-- Current WezTerm-side diagnostics categories include `workspace`, `vscode`, `chrome`, `clipboard`, `command_panel`, and `host_helper`.
+- Current WezTerm-side diagnostics categories include `workspace`, `vscode`, `chrome`, `clipboard`, `command_panel`, `host_helper`, and `hotkey`.
 - Set `diagnostics.wezterm.debug_key_events = true` only for keybinding investigations.
 - WezTerm-side diagnostics rotate with `diagnostics.wezterm.max_bytes` and `diagnostics.wezterm.max_files`.
 
@@ -59,6 +59,7 @@ Aggregate press counts — no event log — for every WezTerm keymap entry and t
 - Ids are the manifest entry ids from [`wezterm-x/commands/manifest.json`](../wezterm-x/commands/manifest.json). Every hotkey should be registered there (enforced by the rule in [`AGENTS.md`](../AGENTS.md)); ad-hoc ids that ever slip through render with label `(unregistered)` in the report, which is the signal to add the missing manifest entry.
 - Run [`scripts/dev/hotkey-usage-report.sh`](../scripts/dev/hotkey-usage-report.sh) for a sorted table (count, keys, id, label, first-seen, last-seen ages). `--json` dumps the raw counter, `--path` prints the resolved file path.
 - Deleting the counter file is safe and resets all counts; the bump script recreates it on the next press.
+- The counter is aggregate-only. For per-press audit (which pane, which foreground program, which WezTerm domain saw the key), look at `category="hotkey" message="bump"` lines in the WezTerm runtime log — same file as the other WezTerm categories, filtered via `diagnostics.wezterm.categories`. Use this to investigate suspicious rows such as "this hotkey rose to N but I never pressed it" — the log will tell you whether the source was a tmux TUI, a Windows IME translation, a keyboard remap, etc. tmux chord bumps do not emit this line (the shell bump path has no pane context); only WezTerm keymap bumps do.
 
 ## Smoke Tests
 

@@ -27,7 +27,7 @@ function M.build(opts)
     if not usage or not usage.bump then return entry end
     local original_action = entry.action
     entry.action = wezterm.action_callback(function(window, pane)
-      usage.bump(hotkey_id)
+      usage.bump(hotkey_id, { window = window, pane = pane })
       window:perform_action(original_action, pane)
     end)
     return entry
