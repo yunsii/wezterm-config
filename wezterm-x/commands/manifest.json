@@ -257,6 +257,39 @@
     "palette": { "display_only": true }
   },
   {
+    "id": "attention.jump-waiting",
+    "label": "Attention: Jump to next waiting task",
+    "description": "Jump to the next agent pane whose status is `waiting`. Repeated presses cycle past the current target; silent when nothing is waiting. Toasts outside tmux.",
+    "scope": "project-navigation",
+    "context": "tmux-backed",
+    "hotkeys": [
+      { "keys": "Alt+,", "layer": "wezterm" }
+    ],
+    "palette": { "display_only": true }
+  },
+  {
+    "id": "attention.jump-done",
+    "label": "Attention: Jump to next done task",
+    "description": "Jump to the next agent pane whose status is `done`; the entry is auto-cleared as the jump lands. Silent when nothing is done.",
+    "scope": "project-navigation",
+    "context": "tmux-backed",
+    "hotkeys": [
+      { "keys": "Alt+.", "layer": "wezterm" }
+    ],
+    "palette": { "display_only": true }
+  },
+  {
+    "id": "attention.overlay",
+    "label": "Attention: Open pending-task overlay",
+    "description": "Open a centered InputSelector listing every pending agent task across workspaces. Fuzzy-filter and `Enter` to jump; pick the trailing `clear all` sentinel to wipe state.json. Works from any pane; final jump still needs tmux.",
+    "scope": "project-navigation",
+    "context": "any",
+    "hotkeys": [
+      { "keys": "Alt+/", "layer": "wezterm" }
+    ],
+    "palette": { "display_only": true }
+  },
+  {
     "id": "session.refresh-current-window",
     "label": "Session: Refresh current window",
     "description": "Respawn only the focused tmux window in place.",
