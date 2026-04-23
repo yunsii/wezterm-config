@@ -131,13 +131,21 @@ attention_state_prune 1800000 2>/dev/null || true
 if [[ "$status" == "cleared" ]]; then
   attention_state_remove "$session_id" 2>/dev/null || true
 elif [[ "$status" == "resolved" ]]; then
-  # PostToolUse. If the pane was `waiting` on a permission prompt, the
-  # tool running to completion is evidence the user allowed it; flip
-  # back to `running` so the counter reflects that Claude is still
-  # mid-turn. When nothing is waiting (auto-allowed tools, or the entry
-  # is already running/done), exit silent so we do not nudge wezterm or
-  # log on every tool call.
-  if ! attention_state_resolve_waiting "$session_id" 2>/dev/null; then
+  # PostToolUse. A completed tool is evidence the user resolved a prior
+  # permission prompt — flip `waiting` → `running`, and when the entry
+  # is missing (focus-ack forgot the waiting row before this hook fired)
+  # upsert a fresh `running` so the counter still reflects that Claude
+  # is mid-turn. `running` / `done` are no-ops so we do not nudge wezterm
+  # or log on every auto-allowed tool call.
+  if ! attention_state_transition_to_running \
+      "$session_id" \
+      "${WEZTERM_PANE:-}" \
+      "$tmux_socket" \
+      "$tmux_session" \
+      "$tmux_window" \
+      "$tmux_pane" \
+      "$git_branch" \
+      2>/dev/null; then
     exit 0
   fi
 else

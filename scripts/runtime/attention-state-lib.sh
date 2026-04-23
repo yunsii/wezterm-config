@@ -161,34 +161,43 @@ attention_state_remove() {
   ) 9>"$lock"
 }
 
-# Conditional transition: flip `waiting` → `running` in place.
+# Conditional transition to `running`.
 # Used by the PostToolUse hook to acknowledge that a permission prompt
 # was resolved (the tool ran and completed, which is evidence the user
-# allowed it). The entry stays so the `running` counter reflects that
-# Claude is still mid-turn; only `Stop` drops it to `done`. Other
-# statuses (running, done, missing) are left alone so a Stop that
-# fired between tool calls still renders as done until focus-ack or
-# another transition clears it.
+# allowed it). Behaviour by current status:
+#   waiting → flip to running in place (ts/reason refreshed, tmux coords
+#             preserved)
+#   missing → upsert a fresh running entry using the caller-supplied
+#             metadata. This covers the focus-ack path: when the user
+#             focused the pane, maybe_ack_focused forgets the waiting
+#             entry within one tick, so by the time PostToolUse fires
+#             there is nothing to flip — but "running" still has to be
+#             reflected on the counter, so we recreate the entry.
+#   running → no-op (already reflected; do not spam OSC on every tool
+#             call)
+#   done    → no-op (Stop has already claimed the slot; preserve it
+#             until focus-ack or another transition clears it)
 #
-# Returns 0 if the entry was transitioned, 1 on no-op. Callers use the
+# Returns 0 if the state file changed, 1 on no-op. Callers use the
 # return code to skip the OSC tick / log emit on no-op so PostToolUse
 # (which fires on every tool call, auto-allowed or not) does not flood
 # wezterm with spurious reload nudges.
-attention_state_resolve_waiting() {
-  local session_id="$1"
+attention_state_transition_to_running() {
+  local session_id="$1" wezterm_pane="$2" tmux_socket="$3" tmux_session="$4"
+  local tmux_window="$5" tmux_pane="$6" git_branch="${7:-}"
   attention_state_init
   local path
   path="$(attention_state_path)"
   # Fast path without the lock: most PostToolUse invocations hit tools
-  # that were auto-allowed, so the entry is already `running` (or absent)
-  # for this session. Racy with a concurrent writer, but in practice
-  # PostToolUse does not race with other hooks on the same session_id.
-  if [[ ! -f "$path" ]]; then
-    return 1
+  # that were auto-allowed, so the entry is already `running` for this
+  # session and the short-circuit here keeps the hot path cheap. Racy
+  # with a concurrent writer, but in practice PostToolUse does not race
+  # with other hooks on the same session_id.
+  local current_status=""
+  if [[ -f "$path" ]]; then
+    current_status="$(jq -r --arg sid "$session_id" '.entries[$sid].status // ""' "$path" 2>/dev/null || printf '')"
   fi
-  local current_status
-  current_status="$(jq -r --arg sid "$session_id" '.entries[$sid].status // ""' "$path" 2>/dev/null || printf '')"
-  if [[ "$current_status" != "waiting" ]]; then
+  if [[ "$current_status" == "running" || "$current_status" == "done" ]]; then
     return 1
   fi
   local lock
@@ -198,17 +207,60 @@ attention_state_resolve_waiting() {
   local ts; ts="$(attention_state_now_ms)"
   (
     flock -x 9
-    local current next
+    local current next locked_status
     current="$(attention_state_read)"
-    # Re-check under the lock so a concurrent transition to done is
-    # respected rather than stomped on by this delayed transition.
-    if [[ "$(jq -r --arg sid "$session_id" '.entries[$sid].status // ""' <<<"$current")" != "waiting" ]]; then
+    # Re-check under the lock so a concurrent transition to done (or a
+    # running upsert from another hook) is respected instead of stomped
+    # on by this delayed transition.
+    locked_status="$(jq -r --arg sid "$session_id" '.entries[$sid].status // ""' <<<"$current")"
+    if [[ "$locked_status" == "running" || "$locked_status" == "done" ]]; then
       exit 0
     fi
-    next="$(jq --arg sid "$session_id" --argjson ts "$ts" \
-      '.entries[$sid].status = "running"
-       | .entries[$sid].reason = ""
-       | .entries[$sid].ts = $ts' <<<"$current")"
+    if [[ "$locked_status" == "waiting" ]]; then
+      next="$(jq --arg sid "$session_id" --argjson ts "$ts" \
+        '.entries[$sid].status = "running"
+         | .entries[$sid].reason = ""
+         | .entries[$sid].ts = $ts' <<<"$current")"
+    else
+      # Missing: upsert a fresh running entry. Mirror attention_state_upsert's
+      # (tmux_socket, tmux_pane) dedup so a prior tenant of the same pane
+      # does not double-count.
+      next="$(
+        jq --arg sid "$session_id" \
+           --arg wp "$wezterm_pane" \
+           --arg tsk "$tmux_socket" \
+           --arg tses "$tmux_session" \
+           --arg tw "$tmux_window" \
+           --arg tp "$tmux_pane" \
+           --arg gb "$git_branch" \
+           --argjson ts "$ts" \
+           '
+             .entries = (
+               .entries
+               | to_entries
+               | map(select(
+                   .key == $sid
+                   or $tsk == "" or $tp == ""
+                   or (.value.tmux_socket // "") != $tsk
+                   or (.value.tmux_pane // "") != $tp
+                 ))
+               | from_entries
+             )
+             | .entries[$sid] = {
+                 session_id: $sid,
+                 wezterm_pane_id: $wp,
+                 tmux_socket: $tsk,
+                 tmux_session: $tses,
+                 tmux_window: $tw,
+                 tmux_pane: $tp,
+                 status: "running",
+                 reason: "",
+                 git_branch: $gb,
+                 ts: $ts
+               }
+         ' <<<"$current"
+      )"
+    fi
     attention_state_write "$next"
     [[ -n "$changed_flag" ]] && printf '1' > "$changed_flag"
   ) 9>"$lock"

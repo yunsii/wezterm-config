@@ -19,7 +19,7 @@
 #   test-agent-attention.sh waiting [reason]
 #   test-agent-attention.sh done    [reason]
 #   test-agent-attention.sh cleared
-#   test-agent-attention.sh resolved        # PostToolUse: waiting → running (else no-op)
+#   test-agent-attention.sh resolved        # PostToolUse: waiting/missing → running; running/done no-op
 #   test-agent-attention.sh clear-all       # truncate state.json + nudge
 #   test-agent-attention.sh show            # print current state.json
 
@@ -152,9 +152,11 @@ verify_cleared() {
   printf '  PASS  cleared\n'
 }
 
-# PostToolUse semantics: when the session is `waiting`, resolved flips
-# it back to `running` in place; when the session is anything else
-# (including running or absent), resolved is a no-op.
+# PostToolUse semantics. `waiting` flips to `running` in place; `missing`
+# upserts a fresh `running` (focus-ack may have forgot the waiting entry
+# before the hook fired, but running still needs to reflect that Claude
+# is mid-turn); `running` and `done` are no-ops so auto-allowed tools do
+# not spam OSC ticks or stomp a Stop that landed between tool calls.
 verify_resolved_transitions_waiting() {
   local entry entry_status
   emit_status waiting 'self-test: resolved-from-waiting'
@@ -173,18 +175,75 @@ verify_resolved_transitions_waiting() {
   printf '  PASS  resolved (waiting → running)\n'
 }
 
-verify_resolved_is_noop_without_waiting() {
-  local entry entry_status
+verify_resolved_creates_running_when_missing() {
+  local entry entry_status entry_reason
   emit_status cleared ''
   emit_status resolved ''
 
   entry="$(state_entry_for_current_pane)"
-  if [[ "$entry" != "null" ]]; then
-    entry_status="$(printf '%s' "$entry" | jq -r '.status')"
-    printf '  FAIL  resolved: created entry %s when none was waiting\n' "$entry_status"
+  if [[ "$entry" == "null" || -z "$entry" ]]; then
+    printf '  FAIL  resolved: no entry after upsert (expected running)\n'
     return 1
   fi
-  printf '  PASS  resolved no-op (nothing to transition)\n'
+  entry_status="$(printf '%s' "$entry" | jq -r '.status')"
+  if [[ "$entry_status" != "running" ]]; then
+    printf '  FAIL  resolved: status is %s (want running)\n' "$entry_status"
+    return 1
+  fi
+  entry_reason="$(printf '%s' "$entry" | jq -r '.reason')"
+  if [[ "$entry_reason" != "" ]]; then
+    printf '  FAIL  resolved: reason is %q (want empty)\n' "$entry_reason"
+    return 1
+  fi
+  printf '  PASS  resolved (missing → running)\n'
+}
+
+verify_resolved_noop_when_running() {
+  local entry entry_status entry_reason marker
+  marker='self-test: resolved-noop-running'
+  emit_status running "$marker"
+  emit_status resolved ''
+
+  entry="$(state_entry_for_current_pane)"
+  if [[ "$entry" == "null" || -z "$entry" ]]; then
+    printf '  FAIL  resolved: running entry was dropped\n'
+    return 1
+  fi
+  entry_status="$(printf '%s' "$entry" | jq -r '.status')"
+  if [[ "$entry_status" != "running" ]]; then
+    printf '  FAIL  resolved: status is %s (want running)\n' "$entry_status"
+    return 1
+  fi
+  entry_reason="$(printf '%s' "$entry" | jq -r '.reason')"
+  if [[ "$entry_reason" != "$marker" ]]; then
+    printf '  FAIL  resolved: reason overwritten (%s → %s)\n' "$marker" "$entry_reason"
+    return 1
+  fi
+  printf '  PASS  resolved no-op (running stays running)\n'
+}
+
+verify_resolved_noop_when_done() {
+  local entry entry_status entry_reason marker
+  marker='self-test: resolved-noop-done'
+  emit_status done "$marker"
+  emit_status resolved ''
+
+  entry="$(state_entry_for_current_pane)"
+  if [[ "$entry" == "null" || -z "$entry" ]]; then
+    printf '  FAIL  resolved: done entry was dropped\n'
+    return 1
+  fi
+  entry_status="$(printf '%s' "$entry" | jq -r '.status')"
+  if [[ "$entry_status" != "done" ]]; then
+    printf '  FAIL  resolved: status is %s (want done)\n' "$entry_status"
+    return 1
+  fi
+  entry_reason="$(printf '%s' "$entry" | jq -r '.reason')"
+  if [[ "$entry_reason" != "$marker" ]]; then
+    printf '  FAIL  resolved: reason overwritten (%s → %s)\n' "$marker" "$entry_reason"
+    return 1
+  fi
+  printf '  PASS  resolved no-op (done stays done)\n'
 }
 
 cmd_self_test() {
@@ -203,14 +262,16 @@ cmd_self_test() {
   verify_upsert "$log_file" waiting 'self-test: waiting' || failures=$((failures + 1))
   verify_upsert "$log_file" done    'self-test: done'    || failures=$((failures + 1))
   verify_resolved_transitions_waiting                    || failures=$((failures + 1))
-  verify_resolved_is_noop_without_waiting                || failures=$((failures + 1))
+  verify_resolved_creates_running_when_missing           || failures=$((failures + 1))
+  verify_resolved_noop_when_running                      || failures=$((failures + 1))
+  verify_resolved_noop_when_done                         || failures=$((failures + 1))
   verify_cleared "$log_file"                             || failures=$((failures + 1))
 
   if (( failures > 0 )); then
-    echo "FAILED (${failures}/6)"
+    echo "FAILED (${failures}/8)"
     exit 1
   fi
-  echo "OK 6/6"
+  echo "OK 8/8"
 }
 
 cmd_cycle_visual() {
