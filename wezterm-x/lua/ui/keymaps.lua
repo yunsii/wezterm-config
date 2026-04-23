@@ -61,17 +61,17 @@ function M.build(opts)
     return attention_jump_args({ '--session', entry.session_id }, pane_ref, trace_id)
   end
 
-  -- Delayed auto-forget after a successful jump to a `done` entry. The
-  -- --only-if-ts guard keeps a fresher `done` that reused the same
-  -- session_id within the grace window from being wiped.
-  local attention_forget_delay_seconds = 3
+  -- Immediate auto-forget after a successful jump to a `done` entry —
+  -- the jump itself is the acknowledgement, so the entry goes away
+  -- without a grace window. The --only-if-ts guard still protects the
+  -- ~50ms race where a fresher `done` (same session_id, new ts) could
+  -- land between Lua scheduling and the subprocess executing.
   local function attention_forget_args(entry, pane_ref, trace_id)
     if not entry or type(entry.session_id) ~= 'string' or entry.session_id == '' then
       return nil
     end
     local trailing = {
       '--forget', entry.session_id,
-      '--delay', tostring(attention_forget_delay_seconds),
     }
     if entry.ts ~= nil and tostring(entry.ts) ~= '' then
       table.insert(trailing, '--only-if-ts')
@@ -294,7 +294,14 @@ function M.build(opts)
 
         local choices = {}
         for _, entry in ipairs(entries) do
-          local marker = entry.status == attention.STATUS_WAITING and '⚠' or '✓'
+          local marker
+          if entry.status == attention.STATUS_WAITING then
+            marker = '⚠'
+          elseif entry.status == attention.STATUS_RUNNING then
+            marker = '⟳'
+          else
+            marker = '✓'
+          end
           local reason = nonempty(entry.reason) and entry.reason or entry.status
 
           local live = entry.live or {}

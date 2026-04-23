@@ -12,7 +12,7 @@
 #         "tmux_session":   "<string>",
 #         "tmux_window":    "<string>",   -- e.g. "@5"
 #         "tmux_pane":      "<string>",   -- e.g. "%12"
-#         "status":         "waiting" | "done",
+#         "status":         "running" | "waiting" | "done",
 #         "reason":         "<short text>",
 #         "ts":             <epoch ms>
 #       }
@@ -161,25 +161,28 @@ attention_state_remove() {
   ) 9>"$lock"
 }
 
-# Conditional remove: drop the entry only if it is currently `waiting`.
+# Conditional transition: flip `waiting` → `running` in place.
 # Used by the PostToolUse hook to acknowledge that a permission prompt
-# was resolved. Leaving `done` entries alone means a Stop that fired
-# between tool calls still gets rendered as done until focus-ack or
+# was resolved (the tool ran and completed, which is evidence the user
+# allowed it). The entry stays so the `running` counter reflects that
+# Claude is still mid-turn; only `Stop` drops it to `done`. Other
+# statuses (running, done, missing) are left alone so a Stop that
+# fired between tool calls still renders as done until focus-ack or
 # another transition clears it.
 #
-# Returns 0 if an entry was actually removed, 1 on no-op. Callers use the
+# Returns 0 if the entry was transitioned, 1 on no-op. Callers use the
 # return code to skip the OSC tick / log emit on no-op so PostToolUse
 # (which fires on every tool call, auto-allowed or not) does not flood
 # wezterm with spurious reload nudges.
-attention_state_clear_if_waiting() {
+attention_state_resolve_waiting() {
   local session_id="$1"
   attention_state_init
   local path
   path="$(attention_state_path)"
   # Fast path without the lock: most PostToolUse invocations hit tools
-  # that were auto-allowed, so no waiting entry exists for this session.
-  # Racy with a concurrent writer, but in practice PostToolUse does not
-  # race with other hooks on the same session_id.
+  # that were auto-allowed, so the entry is already `running` (or absent)
+  # for this session. Racy with a concurrent writer, but in practice
+  # PostToolUse does not race with other hooks on the same session_id.
   if [[ ! -f "$path" ]]; then
     return 1
   fi
@@ -190,26 +193,30 @@ attention_state_clear_if_waiting() {
   fi
   local lock
   lock="$(attention_state_lock_path)"
-  local removed_flag
-  removed_flag="$(mktemp 2>/dev/null || printf '')"
+  local changed_flag
+  changed_flag="$(mktemp 2>/dev/null || printf '')"
+  local ts; ts="$(attention_state_now_ms)"
   (
     flock -x 9
     local current next
     current="$(attention_state_read)"
     # Re-check under the lock so a concurrent transition to done is
-    # respected rather than stomped on by this delayed clear.
+    # respected rather than stomped on by this delayed transition.
     if [[ "$(jq -r --arg sid "$session_id" '.entries[$sid].status // ""' <<<"$current")" != "waiting" ]]; then
       exit 0
     fi
-    next="$(jq --arg sid "$session_id" 'del(.entries[$sid])' <<<"$current")"
+    next="$(jq --arg sid "$session_id" --argjson ts "$ts" \
+      '.entries[$sid].status = "running"
+       | .entries[$sid].reason = ""
+       | .entries[$sid].ts = $ts' <<<"$current")"
     attention_state_write "$next"
-    [[ -n "$removed_flag" ]] && printf '1' > "$removed_flag"
+    [[ -n "$changed_flag" ]] && printf '1' > "$changed_flag"
   ) 9>"$lock"
   local rc=1
-  if [[ -n "$removed_flag" && -s "$removed_flag" ]]; then
+  if [[ -n "$changed_flag" && -s "$changed_flag" ]]; then
     rc=0
   fi
-  [[ -n "$removed_flag" ]] && rm -f "$removed_flag" 2>/dev/null
+  [[ -n "$changed_flag" ]] && rm -f "$changed_flag" 2>/dev/null
   return "$rc"
 }
 

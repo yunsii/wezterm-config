@@ -15,10 +15,11 @@
 # Usage:
 #   test-agent-attention.sh                 # self-test (default)
 #   test-agent-attention.sh cycle-visual    # slow human-in-the-loop demo
+#   test-agent-attention.sh running [reason]
 #   test-agent-attention.sh waiting [reason]
 #   test-agent-attention.sh done    [reason]
 #   test-agent-attention.sh cleared
-#   test-agent-attention.sh resolved        # PostToolUse: clear only if waiting
+#   test-agent-attention.sh resolved        # PostToolUse: waiting → running (else no-op)
 #   test-agent-attention.sh clear-all       # truncate state.json + nudge
 #   test-agent-attention.sh show            # print current state.json
 
@@ -151,6 +152,41 @@ verify_cleared() {
   printf '  PASS  cleared\n'
 }
 
+# PostToolUse semantics: when the session is `waiting`, resolved flips
+# it back to `running` in place; when the session is anything else
+# (including running or absent), resolved is a no-op.
+verify_resolved_transitions_waiting() {
+  local entry entry_status
+  emit_status waiting 'self-test: resolved-from-waiting'
+  emit_status resolved ''
+
+  entry="$(state_entry_for_current_pane)"
+  if [[ "$entry" == "null" || -z "$entry" ]]; then
+    printf '  FAIL  resolved: entry dropped (should transition to running)\n'
+    return 1
+  fi
+  entry_status="$(printf '%s' "$entry" | jq -r '.status')"
+  if [[ "$entry_status" != "running" ]]; then
+    printf '  FAIL  resolved: status is %s (want running)\n' "$entry_status"
+    return 1
+  fi
+  printf '  PASS  resolved (waiting → running)\n'
+}
+
+verify_resolved_is_noop_without_waiting() {
+  local entry entry_status
+  emit_status cleared ''
+  emit_status resolved ''
+
+  entry="$(state_entry_for_current_pane)"
+  if [[ "$entry" != "null" ]]; then
+    entry_status="$(printf '%s' "$entry" | jq -r '.status')"
+    printf '  FAIL  resolved: created entry %s when none was waiting\n' "$entry_status"
+    return 1
+  fi
+  printf '  PASS  resolved no-op (nothing to transition)\n'
+}
+
 cmd_self_test() {
   require_pane_context
   local log_file
@@ -163,25 +199,30 @@ cmd_self_test() {
 
   echo "self-test: state=$(attention_state_path) log=$log_file"
   local failures=0
+  verify_upsert "$log_file" running 'self-test: running' || failures=$((failures + 1))
   verify_upsert "$log_file" waiting 'self-test: waiting' || failures=$((failures + 1))
   verify_upsert "$log_file" done    'self-test: done'    || failures=$((failures + 1))
+  verify_resolved_transitions_waiting                    || failures=$((failures + 1))
+  verify_resolved_is_noop_without_waiting                || failures=$((failures + 1))
   verify_cleared "$log_file"                             || failures=$((failures + 1))
 
   if (( failures > 0 )); then
-    echo "FAILED (${failures}/3)"
+    echo "FAILED (${failures}/6)"
     exit 1
   fi
-  echo "OK 3/3"
+  echo "OK 6/6"
 }
 
 cmd_cycle_visual() {
   require_pane_context
   local pause=3
-  echo "[1/3] waiting  (hold ${pause}s)"; emit_status waiting 'visual: waiting'
+  echo "[1/4] running  (hold ${pause}s)"; emit_status running 'visual: running'
   sleep "$pause"
-  echo "[2/3] done     (hold ${pause}s)"; emit_status done 'visual: done'
+  echo "[2/4] waiting  (hold ${pause}s)"; emit_status waiting 'visual: waiting'
   sleep "$pause"
-  echo "[3/3] cleared"; emit_status cleared ''
+  echo "[3/4] done     (hold ${pause}s)"; emit_status done 'visual: done'
+  sleep "$pause"
+  echo "[4/4] cleared"; emit_status cleared ''
 }
 
 cmd_single() {
@@ -214,11 +255,11 @@ cmd_show() {
 }
 
 case "${1:-self-test}" in
-  self-test|"")                   cmd_self_test ;;
-  cycle-visual)                   cmd_cycle_visual ;;
-  waiting|done|cleared|resolved)  cmd_single "$1" "${2:-}" ;;
-  clear-all)                      cmd_clear_all ;;
-  show)                           cmd_show ;;
+  self-test|"")                           cmd_self_test ;;
+  cycle-visual)                           cmd_cycle_visual ;;
+  running|waiting|done|cleared|resolved)  cmd_single "$1" "${2:-}" ;;
+  clear-all)                              cmd_clear_all ;;
+  show)                                   cmd_show ;;
   -h|--help)
     sed -n '3,19p' "$0"
     ;;

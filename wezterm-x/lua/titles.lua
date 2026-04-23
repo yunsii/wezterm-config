@@ -190,6 +190,60 @@ function M.register(opts)
     return segments
   end)
 
+  -- Compose the right-status bar from IME, chrome-debug, and attention
+  -- segments. Kept pure so it can run from both the `update-status`
+  -- tick (the 250ms cadence) and from `user-var-changed` when the agent
+  -- attention hook pushes an `attention_tick`. The fast path uses the
+  -- already-reloaded state cache, so the bar repaints within a frame of
+  -- the OSC arrival instead of waiting up to 250ms for the next tick.
+  --
+  -- The active pane's id is forwarded to `attention.render_status_segment`
+  -- so entries on the currently-focused (WezTerm pane + tmux pane) are
+  -- filtered out of the counters — focused work is not "pending".
+  local function refresh_right_status(window, pane)
+    local right_segments = {}
+    local ime_segment = render_ime_segment()
+    if ime_segment then
+      table.insert(right_segments, ime_segment)
+    end
+    local chrome_debug_segment = chrome_debug_status and chrome_debug_status.render_status_segment(palette) or nil
+    if chrome_debug_segment then
+      table.insert(right_segments, chrome_debug_segment)
+    end
+    local active_pane_id = nil
+    if pane and type(pane.pane_id) == 'function' then
+      local ok, pid = pcall(function() return pane:pane_id() end)
+      if ok then active_pane_id = pid end
+    end
+    local attention_segment = attention
+      and attention.render_status_segment(palette, { active_pane_id = active_pane_id })
+      or nil
+    if attention_segment then
+      table.insert(right_segments, attention_segment)
+    end
+    window:set_right_status(table.concat(right_segments, ' '))
+  end
+
+  local function log_rendered_status(window)
+    if not (logger and attention) then return end
+    local waiting, done, running = attention.collect()
+    local waiting_count = waiting and #waiting or 0
+    local running_count = running and #running or 0
+    local done_count = done and #done or 0
+    local signature = waiting_count == 0 and running_count == 0 and done_count == 0
+        and 'empty'
+      or string.format('w=%d,r=%d,d=%d', waiting_count, running_count, done_count)
+    if last_rendered_status ~= signature then
+      last_rendered_status = signature
+      logger.info('attention', 'render_status', {
+        waiting = waiting_count,
+        running = running_count,
+        done = done_count,
+        window_id = window:window_id(),
+      })
+    end
+  end
+
   wezterm.on('update-status', function(window, pane)
     local overrides = window:get_config_overrides()
     if overrides and next(overrides) ~= nil then
@@ -200,15 +254,11 @@ function M.register(opts)
     local workspace = window:active_workspace() or 'default'
     window:set_left_status(format_workspace_label(workspace))
 
-    local right_segments = {}
-    local ime_segment = render_ime_segment()
-    if ime_segment then
-      table.insert(right_segments, ime_segment)
-    end
-    local chrome_debug_segment = chrome_debug_status and chrome_debug_status.render_status_segment(palette) or nil
-    if chrome_debug_segment then
-      table.insert(right_segments, chrome_debug_segment)
-    end
+    -- update-status owns the periodic housekeeping: state reload, TTL
+    -- prune scheduling, and focus-based auto-ack. The user-var-changed
+    -- fast path skips these because the hook side already refreshed
+    -- state.json and nothing in the prune / ack pipelines benefits from
+    -- firing more often than once per tick.
     if attention and attention.reload_state then
       attention.reload_state()
     end
@@ -218,30 +268,29 @@ function M.register(opts)
     if attention and attention.maybe_ack_focused then
       attention.maybe_ack_focused(window, pane)
     end
-    local attention_waiting, attention_done
-    if attention then
-      attention_waiting, attention_done = attention.collect()
-    end
-    local attention_segment = attention and attention.render_status_segment(palette) or nil
-    if attention_segment then
-      table.insert(right_segments, attention_segment)
-    end
-    window:set_right_status(table.concat(right_segments, ' '))
 
-    if logger and attention then
-      local waiting_count = attention_waiting and #attention_waiting or 0
-      local done_count = attention_done and #attention_done or 0
-      local signature = waiting_count == 0 and done_count == 0
-          and 'empty'
-        or string.format('w=%d,d=%d', waiting_count, done_count)
-      if last_rendered_status ~= signature then
-        last_rendered_status = signature
-        logger.info('attention', 'render_status', {
-          waiting = waiting_count,
-          done = done_count,
-          window_id = window:window_id(),
-        })
-      end
+    refresh_right_status(window, pane)
+    log_rendered_status(window)
+  end)
+
+  -- Fast path: the attention hook emits OSC 1337 SetUserVar=attention_tick
+  -- after every state transition, and WezTerm delivers it here. Reload
+  -- state and repaint the right-status segment immediately instead of
+  -- waiting up to 250ms for the next update-status tick.
+  wezterm.on('user-var-changed', function(window, pane, name, value)
+    if not attention or name ~= attention.USER_VAR_TICK then
+      return
+    end
+    if attention.reload_state then
+      attention.reload_state()
+    end
+    refresh_right_status(window, pane)
+    log_rendered_status(window)
+    if logger then
+      logger.info('attention', 'tick received', {
+        pane_id = pane and pane.pane_id and pane:pane_id() or nil,
+        value = value,
+      })
     end
   end)
 end

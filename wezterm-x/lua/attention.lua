@@ -6,15 +6,18 @@
 --
 -- This module only renders tab badges and the right-status segment. It
 -- does not emit OSC, does not walk mux panes, and does not own jump.
--- The hook nudges us via OSC 1337 SetUserVar=attention_tick=<ms>, which
--- fires user-var-changed in Lua, at which point we re-read the state
--- file. update-status (driven by titles.lua) is the fallback refresher.
+-- The hook nudges us via OSC 1337 SetUserVar=attention_tick=<ms>;
+-- titles.lua owns the user-var-changed handler so it can re-render
+-- right-status in the same call (sub-frame latency). update-status
+-- (driven by titles.lua at `status_update_interval`) is the fallback
+-- refresher and owns periodic housekeeping: TTL prune and focus-ack.
 
 local wezterm = require 'wezterm'
 
 local M = {}
 
 M.USER_VAR_TICK = 'attention_tick'
+M.STATUS_RUNNING = 'running'
 M.STATUS_WAITING = 'waiting'
 M.STATUS_DONE = 'done'
 
@@ -26,16 +29,28 @@ M.TTL_MS = 1800000
 -- (250ms by default), but the actual shell spawn is self-throttled to at
 -- most one every PRUNE_INTERVAL_MS.
 M.PRUNE_INTERVAL_MS = 60000
--- Delay (seconds) before focus-based auto-ack removes a `done` entry from
--- the currently-focused pane. Matches the Alt+./Alt+/ post-jump forget so
--- both ack paths feel identical.
-M.FOCUS_ACK_DELAY_SECONDS = 3
+-- Focus-based auto-ack removes the entry with no grace window — focusing
+-- the pane *is* the acknowledgement, so the counter should drop as soon
+-- as the user's eyes are there. The `--only-if-ts` guard in the jump
+-- script still protects against wiping a fresher entry (same session_id,
+-- new ts) landed in the ~50ms subprocess window.
+M.FOCUS_ACK_DELAY_SECONDS = 0
 
 local state_path = nil
 local state_cache = { entries = {} }
 local prune_spawner = nil
 local forget_spawner = nil
 local focus_ack_scheduled = {}
+-- Map of session_id → ts for entries we have scheduled for removal and
+-- optimistically hidden from the in-memory cache. reload_state re-applies
+-- the hide until the disk read confirms the entry is gone (or replaced
+-- by a fresh ts, which means a new transition has superseded the hide).
+local hidden_entries = {}
+-- tmux-pane focus lookups, keyed by "<socket>|<session>". Reset on every
+-- reload_state so a single render tick shares the file read across
+-- is_entry_focused + maybe_ack_focused but successive ticks always
+-- re-read the focus file.
+local tmux_focus_cache = {}
 local last_prune_ms = 0
 local module_logger = nil
 
@@ -99,6 +114,10 @@ local function read_file(path)
 end
 
 function M.reload_state()
+  -- Clear the per-tick tmux-focus lookup cache so the next tick re-reads
+  -- the focus files. State reloads happen at most once per tick (either
+  -- on user-var-changed or at update-status cadence).
+  tmux_focus_cache = {}
   if not state_path then
     state_cache = { entries = {} }
     return state_cache
@@ -106,38 +125,100 @@ function M.reload_state()
   local content = read_file(state_path)
   if not content or content == '' then
     state_cache = { entries = {} }
-    return state_cache
-  end
-  local parsed = parse_json(content)
-  if type(parsed) == 'table' and type(parsed.entries) == 'table' then
-    state_cache = parsed
   else
-    state_cache = { entries = {} }
+    local parsed = parse_json(content)
+    if type(parsed) == 'table' and type(parsed.entries) == 'table' then
+      state_cache = parsed
+    else
+      state_cache = { entries = {} }
+    end
+  end
+  -- Re-apply optimistic hides: until the background --forget finishes on
+  -- disk, we keep the entry hidden so the visible counter does not bounce
+  -- between "scheduled for remove" and "still there". When the disk shows
+  -- the entry gone (or replaced by a fresh ts), the hide is cleared.
+  if next(hidden_entries) ~= nil then
+    for sid, ts in pairs(hidden_entries) do
+      local current = state_cache.entries[sid]
+      if current == nil then
+        hidden_entries[sid] = nil
+      elseif tostring(current.ts) == tostring(ts) then
+        state_cache.entries[sid] = nil
+      else
+        hidden_entries[sid] = nil
+      end
+    end
   end
   return state_cache
 end
 
 function M.collect()
-  local waiting, done = {}, {}
+  local waiting, running, done = {}, {}, {}
   local now = now_ms()
   for _, entry in pairs(state_cache.entries or {}) do
     if entry_is_live(entry, now) then
       if entry.status == M.STATUS_WAITING then
         table.insert(waiting, entry)
+      elseif entry.status == M.STATUS_RUNNING then
+        table.insert(running, entry)
       elseif entry.status == M.STATUS_DONE then
         table.insert(done, entry)
       end
     end
   end
-  return waiting, done
+  return waiting, done, running
 end
 
-function M.render_status_segment(palette)
-  local waiting, done = M.collect()
+-- opts.active_pane_id (optional): when provided, entries on the
+-- currently-focused `(wezterm_pane_id, tmux_pane)` are filtered out of
+-- the `waiting` and `done` counters. This is a visual fallback for
+-- maybe_ack_focused, which usually removes them outright in the same
+-- tick. `running` is *not* filtered: the counter is meant to reflect
+-- the total number of parallel turns in flight so the user can tell at
+-- a glance how many tasks they are juggling — hiding the focused one
+-- would make "⟳ N" under-count and defeat that purpose when switching
+-- between parallel agents.
+function M.render_status_segment(palette, opts)
+  local waiting, done, running = M.collect()
+  local active_pane_id = opts and opts.active_pane_id
+  if active_pane_id ~= nil and active_pane_id ~= '' then
+    local function drop_focused(list)
+      local out = {}
+      for _, entry in ipairs(list) do
+        if not M.is_entry_focused(entry, active_pane_id) then
+          table.insert(out, entry)
+        end
+      end
+      return out
+    end
+    waiting = drop_focused(waiting)
+    done = drop_focused(done)
+  end
   local idle_bg = palette.tab_bar_background
   local idle_fg = palette.new_tab_fg
 
   local parts = {}
+
+  -- Running first: rendered as soft always-on status so the user can see
+  -- at a glance which panes are mid-turn. The segment dims to `idle_bg`
+  -- when zero so the bar width stays stable.
+  if #running > 0 then
+    table.insert(parts, { Background = { Color = palette.tab_attention_running_bg } })
+    table.insert(parts, { Foreground = { Color = palette.tab_attention_running_fg } })
+    table.insert(parts, { Attribute = { Intensity = 'Normal' } })
+    table.insert(parts, { Text = ' ⟳ ' .. #running .. ' running ' })
+  else
+    table.insert(parts, { Background = { Color = idle_bg } })
+    table.insert(parts, { Foreground = { Color = idle_fg } })
+    table.insert(parts, { Attribute = { Intensity = 'Normal' } })
+    table.insert(parts, { Text = ' ⟳ 0 running ' })
+  end
+
+  -- Fixed one-cell gap so the segment width stays stable between idle and
+  -- active states; prevents the right side of the tab bar from jittering.
+  table.insert(parts, { Background = { Color = idle_bg } })
+  table.insert(parts, { Text = ' ' })
+
   if #waiting > 0 then
     table.insert(parts, { Background = { Color = palette.tab_attention_waiting_bg } })
     table.insert(parts, { Foreground = { Color = palette.tab_attention_waiting_fg } })
@@ -150,8 +231,6 @@ function M.render_status_segment(palette)
     table.insert(parts, { Text = ' ⚠ 0 waiting ' })
   end
 
-  -- Fixed one-cell gap so the segment width stays stable between idle and
-  -- active states; prevents the right side of the tab bar from jittering.
   table.insert(parts, { Background = { Color = idle_bg } })
   table.insert(parts, { Text = ' ' })
 
@@ -175,19 +254,34 @@ function M.tab_badge(tab_info)
     return nil
   end
   local pane_id_str = tostring(active.pane_id)
-  local has_waiting, has_done = false, false
+  local has_waiting, has_running, has_done = false, false, false
   local now = now_ms()
+  -- When the tab is the active one in its window and the tmux-pane
+  -- focus matches the entry, suppress `waiting` / `done` badges — the
+  -- user is looking at that exact pane, so those would be noise.
+  -- `running` is still shown even under focus so a parallel-task view
+  -- across tabs stays truthful (consistent with the right-status
+  -- counter rule).
+  local tab_is_active = tab_info.is_active == true
   for _, entry in pairs(state_cache.entries or {}) do
     if entry_is_live(entry, now) and tostring(entry.wezterm_pane_id or '') == pane_id_str then
+      local suppress_for_focus = tab_is_active and M.is_entry_focused(entry, pane_id_str)
       if entry.status == M.STATUS_WAITING then
-        has_waiting = true
+        if not suppress_for_focus then has_waiting = true end
+      elseif entry.status == M.STATUS_RUNNING then
+        has_running = true
       elseif entry.status == M.STATUS_DONE then
-        has_done = true
+        if not suppress_for_focus then has_done = true end
       end
     end
   end
+  -- Priority: waiting (needs action) > running (live) > done (informational).
+  -- Shapes progress from filled to hollow so the badge remains scannable
+  -- without leaning only on color: ● waiting, ◐ running, ○ done.
   if has_waiting then
     return { status = M.STATUS_WAITING, marker = '●' }
+  elseif has_running then
+    return { status = M.STATUS_RUNNING, marker = '◐' }
   elseif has_done then
     return { status = M.STATUS_DONE, marker = '○' }
   end
@@ -197,6 +291,8 @@ end
 function M.badge_colors(palette, status)
   if status == M.STATUS_WAITING then
     return palette.tab_attention_waiting_bg, palette.tab_attention_waiting_fg
+  elseif status == M.STATUS_RUNNING then
+    return palette.tab_attention_running_bg, palette.tab_attention_running_fg
   elseif status == M.STATUS_DONE then
     return palette.tab_attention_done_bg, palette.tab_attention_done_fg
   end
@@ -257,7 +353,7 @@ end
 -- adds `age_ms` plus a resolved `.live` table with workspace / tab_index /
 -- tab_title when the WezTerm pane id still resolves.
 function M.list()
-  local waiting, done = M.collect()
+  local waiting, done, running = M.collect()
   local now = now_ms()
   local function enrich(arr)
     for _, entry in ipairs(arr) do
@@ -269,9 +365,13 @@ function M.list()
     end)
   end
   enrich(waiting)
+  enrich(running)
   enrich(done)
   local result = {}
   for _, e in ipairs(waiting) do
+    table.insert(result, e)
+  end
+  for _, e in ipairs(running) do
     table.insert(result, e)
   end
   for _, e in ipairs(done) do
@@ -411,11 +511,63 @@ local function read_tmux_active_pane(socket, session)
   return (content:gsub('%s+$', ''))
 end
 
--- Auto-ack: when the currently-focused pane matches a live `done` entry,
--- schedule the same delayed --forget that Alt+./Alt+/ runs after a jump.
--- The --only-if-ts guard prevents wiping a fresher `done` that reused the
--- same session_id during the grace window. Dedup by (session_id, ts) so
--- the tick loop does not re-spawn the subprocess while focus stays put.
+-- Cached tmux-focus lookup. Keyed by "<socket>|<session>". Populated on
+-- demand and cleared by reload_state so one render tick shares reads
+-- across is_entry_focused + maybe_ack_focused but successive ticks
+-- always see fresh focus state.
+local function cached_tmux_focus(socket, session)
+  local key = (socket or '') .. '|' .. (session or '')
+  local cached = tmux_focus_cache[key]
+  if cached == nil then
+    cached = read_tmux_active_pane(socket, session)
+    if cached == nil then cached = false end
+    tmux_focus_cache[key] = cached
+  end
+  if cached == false then return nil end
+  return cached
+end
+
+-- True when the entry belongs to the currently-focused (WezTerm pane +
+-- tmux pane). When the entry carries tmux coordinates we require the
+-- tmux-focus file to name the entry's pane; missing or mismatched focus
+-- files fail closed (treated as "not focused") so entries are shown
+-- when in doubt rather than hidden. Callers use this both in the render
+-- path (skip the entry from right-status / tab badge — rule: focused
+-- pane does not enter stats) and in the auto-ack path (schedule
+-- --forget for waiting/done).
+function M.is_entry_focused(entry, wezterm_pane_id)
+  if not entry or wezterm_pane_id == nil or wezterm_pane_id == '' then
+    return false
+  end
+  if tostring(entry.wezterm_pane_id or '') ~= tostring(wezterm_pane_id) then
+    return false
+  end
+  if type(entry.tmux_socket) == 'string' and entry.tmux_socket ~= ''
+    and type(entry.tmux_pane) == 'string' and entry.tmux_pane ~= '' then
+    local active = cached_tmux_focus(entry.tmux_socket, entry.tmux_session)
+    if active == nil then
+      return false
+    end
+    return active == entry.tmux_pane
+  end
+  return true
+end
+
+-- Auto-ack: when the currently-focused pane matches a live `waiting` or
+-- `done` entry, spawn --forget immediately (no grace window) and hide
+-- the entry from the in-memory cache in the same tick so the counter
+-- drops without waiting for the subprocess to land the write on disk.
+-- Both states are user-action signals — sitting on the pane *is* the
+-- acknowledgement, so the badge and counter clear without a second
+-- gesture. `running` is excluded: it is a live indicator of current
+-- work, not an action item, and it will transition to waiting or done
+-- on its own as the agent progresses.
+--
+-- The --only-if-ts guard in the jump script still protects against the
+-- ~50ms race where a fresh entry (same session_id, new ts) could land
+-- between Lua scheduling the forget and the subprocess executing.
+-- Dedup by (session_id, ts) so the tick loop does not re-spawn the
+-- subprocess while focus stays put.
 --
 -- When the entry carries tmux coordinates, require tmux-pane-level focus
 -- as well: one WezTerm pane commonly hosts an entire tmux session, so the
@@ -438,50 +590,38 @@ function M.maybe_ack_focused(window, pane)
   local pane_id_str = tostring(pane_id)
   local now = now_ms()
   local live_sids = {}
-  local tmux_focus_cache = {}
-  local function cached_tmux_focus(socket, session)
-    local key = (socket or '') .. '|' .. (session or '')
-    local cached = tmux_focus_cache[key]
-    if cached == nil then
-      cached = read_tmux_active_pane(socket, session) or false
-      tmux_focus_cache[key] = cached
-    end
-    if cached == false then return nil end
-    return cached
-  end
+  -- Collect sids to hide after the iteration so we do not mutate
+  -- state_cache.entries mid-`pairs`.
+  local to_hide = {}
   for sid, entry in pairs(state_cache.entries or {}) do
     if entry_is_live(entry, now) then
       live_sids[sid] = true
-      if entry.status == M.STATUS_DONE
-        and tostring(entry.wezterm_pane_id or '') == pane_id_str then
-        local tmux_focus_ok = true
-        if type(entry.tmux_socket) == 'string' and entry.tmux_socket ~= ''
-          and type(entry.tmux_pane) == 'string' and entry.tmux_pane ~= '' then
-          local active = cached_tmux_focus(entry.tmux_socket, entry.tmux_session)
-          if active == nil or active ~= entry.tmux_pane then
-            tmux_focus_ok = false
+      if (entry.status == M.STATUS_DONE or entry.status == M.STATUS_WAITING)
+        and M.is_entry_focused(entry, pane_id_str) then
+        local ts = entry.ts
+        if ts ~= nil and focus_ack_scheduled[sid] ~= ts then
+          focus_ack_scheduled[sid] = ts
+          to_hide[sid] = ts
+          local forget_args = {
+            '--forget', sid,
+            '--only-if-ts', tostring(ts),
+          }
+          if M.FOCUS_ACK_DELAY_SECONDS > 0 then
+            table.insert(forget_args, '--delay')
+            table.insert(forget_args, tostring(M.FOCUS_ACK_DELAY_SECONDS))
           end
-        end
-        if tmux_focus_ok then
-          local ts = entry.ts
-          if ts ~= nil and focus_ack_scheduled[sid] ~= ts then
-            focus_ack_scheduled[sid] = ts
-            local args = forget_spawner({
-              '--forget', sid,
-              '--delay', tostring(M.FOCUS_ACK_DELAY_SECONDS),
-              '--only-if-ts', tostring(ts),
-            })
-            if type(args) == 'table' and #args > 0 then
-              pcall(function() wezterm.background_child_process(args) end)
-              if module_logger then
-                module_logger.info('attention', 'focus ack scheduled', {
-                  session_id = sid,
-                  pane_id = pane_id_str,
-                  tmux_pane = entry.tmux_pane,
-                  delay_s = M.FOCUS_ACK_DELAY_SECONDS,
-                  ts = ts,
-                })
-              end
+          local args = forget_spawner(forget_args)
+          if type(args) == 'table' and #args > 0 then
+            pcall(function() wezterm.background_child_process(args) end)
+            if module_logger then
+              module_logger.info('attention', 'focus ack scheduled', {
+                session_id = sid,
+                pane_id = pane_id_str,
+                status = entry.status,
+                tmux_pane = entry.tmux_pane,
+                delay_s = M.FOCUS_ACK_DELAY_SECONDS,
+                ts = ts,
+              })
             end
           end
         end
@@ -493,11 +633,17 @@ function M.maybe_ack_focused(window, pane)
       focus_ack_scheduled[sid] = nil
     end
   end
+  -- Apply optimistic hides after the iteration: drop from the live
+  -- cache and record the ts so reload_state keeps them hidden until
+  -- the subprocess lands the write on disk.
+  for sid, ts in pairs(to_hide) do
+    hidden_entries[sid] = ts
+    state_cache.entries[sid] = nil
+  end
 end
 
 function M.register(opts)
-  local logger = opts and opts.logger
-  module_logger = logger
+  module_logger = opts and opts.logger
   if opts and type(opts.prune_spawner) == 'function' then
     prune_spawner = opts.prune_spawner
   end
@@ -512,18 +658,11 @@ function M.register(opts)
 
   M.reload_state()
 
-  wezterm.on('user-var-changed', function(window, pane, name, value)
-    if name ~= M.USER_VAR_TICK then
-      return
-    end
-    M.reload_state()
-    if logger then
-      logger.info('attention', 'tick received', {
-        pane_id = pane and pane.pane_id and pane:pane_id() or nil,
-        value = value,
-      })
-    end
-  end)
+  -- The user-var-changed handler lives in titles.lua so it can re-render
+  -- the right-status segment in the same call that reloads state. This
+  -- cuts the OSC-to-repaint latency from "up to 250ms" (next
+  -- update-status tick) to one frame. Other modules that need to react
+  -- to attention ticks should call M.reload_state() and read the cache.
 end
 
 return M

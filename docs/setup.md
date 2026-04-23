@@ -49,13 +49,24 @@ Pin each app, then drag the icons so WezTerm sits in slot 1, the browser in slot
 
 ## Claude Agent Attention Hooks
 
-The agent-attention feature (see [`tmux-ui.md`](./tmux-ui.md#agent-attention) and [`keybindings.md`](./keybindings.md#agent-attention)) expects Claude Code to emit OSC 1337 user vars from four hook events (`Notification`, `Stop`, `UserPromptSubmit`, `PostToolUse`). The hook script ships in this repo at `scripts/claude-hooks/emit-agent-status.sh` and is keyboard-first: when it runs it only decorates the pane, so installing it globally is safe and a no-op in non-WezTerm terminals.
+The agent-attention feature (see [`tmux-ui.md`](./tmux-ui.md#agent-attention) and [`keybindings.md`](./keybindings.md#agent-attention)) expects Claude Code to emit OSC 1337 user vars from four hook events (`UserPromptSubmit`, `Notification`, `Stop`, `PostToolUse`). The hook script ships in this repo at `scripts/claude-hooks/emit-agent-status.sh` and is keyboard-first: when it runs it only decorates the pane, so installing it globally is safe and a no-op in non-WezTerm terminals.
 
-Install at the user level by adding these entries to `~/.claude/settings.json` (merge into any existing `hooks` block; do not replace):
+> **Upgrading from an earlier version of this doc** — the hook argument for `UserPromptSubmit` changed from `cleared` to `running`. If your existing `~/.claude/settings.json` still points at `... emit-agent-status.sh cleared`, swap it for `running`. Claude Code re-reads `settings.json` on every hook firing, so the change takes effect on the next event (send a fresh prompt to exercise `UserPromptSubmit`) — no Claude restart needed. Use the verification command at the bottom of this section to confirm the new command is firing.
+
+### Install / update
+
+Merge the block below into the `hooks` section of `~/.claude/settings.json` (do not replace the file). Four hook events, each with one shell invocation:
 
 ```json
 {
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "/home/yuns/github/wezterm-config/scripts/claude-hooks/emit-agent-status.sh running" }
+        ]
+      }
+    ],
     "Notification": [
       {
         "hooks": [
@@ -70,13 +81,6 @@ Install at the user level by adding these entries to `~/.claude/settings.json` (
         ]
       }
     ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          { "type": "command", "command": "/home/yuns/github/wezterm-config/scripts/claude-hooks/emit-agent-status.sh cleared" }
-        ]
-      }
-    ],
     "PostToolUse": [
       {
         "hooks": [
@@ -88,7 +92,29 @@ Install at the user level by adding these entries to `~/.claude/settings.json` (
 }
 ```
 
-Substitute the absolute path for your clone if different. `jq` is optional — with it, the hook reads `.session_id` from the piped hook payload and extracts `.message` / `.stop_reason` as the state entry's `reason`; without it, the hook still writes the entry but keys it to `pane:<WEZTERM_PANE>` and uses canned per-status labels. There is no Windows dependency; the hook script writes only the `attention_tick` OSC to `/dev/tty` in the enclosing WezTerm pane. The `PostToolUse` entry is what closes the `⚠ waiting` counter the moment the user allows a permission prompt (the tool runs and completes, so `resolved` conditionally drops the entry); without it, `waiting` would linger from the prompt all the way until `Stop` fires at the end of the turn.
+Substitute the absolute path for your clone if different. `jq` is optional — with it, the hook reads `.session_id` from the piped hook payload and extracts `.message` / `.stop_reason` / `.prompt` as the state entry's `reason`; without it, the hook still writes the entry but keys it to `pane:<WEZTERM_PANE>` and uses canned per-status labels. There is no Windows dependency; the hook script writes only the `attention_tick` OSC to `/dev/tty` in the enclosing WezTerm pane.
+
+### What each hook does
+
+- `UserPromptSubmit → running` lights the `⟳ N running` counter the moment a turn begins so the user can see at a glance which panes are mid-turn.
+- `Notification → waiting` raises the `⚠ N waiting` counter only for `permission_prompt` / `elicitation_dialog` notifications (other notification types, notably `idle_prompt`, are re-routed to `done` so they do not re-raise a stale waiting). Sticky: a second `waiting` on a session whose current status is already `waiting` is a no-op, so repeated prompts inside one turn do not oscillate the counter.
+- `Stop → done` flips the entry to `done` when the turn ends, so the `✓ N done` counter surfaces work that finished while you were elsewhere.
+- `PostToolUse → resolved` flips `waiting` back to `running` the moment a permission prompt is allowed (the tool runs and completes, so the `⚠` counter drains immediately into `⟳`); no-op for any other current status, so auto-allowed tools do not churn the state.
+
+Without `UserPromptSubmit → running` the `⟳ running` counter will never light up, and without `PostToolUse → resolved` the `⚠ waiting` counter will linger from the permission prompt all the way until `Stop` fires at the end of the turn.
+
+### After editing settings.json
+
+Claude Code re-reads `settings.json` on each hook firing, so an edit takes effect immediately — no Claude restart is required. Exercise the new hook by sending a prompt in each Claude pane, then verify from a WSL shell:
+
+```bash
+tail -200 ~/.local/state/wezterm-runtime.log \
+  | grep -a 'status="running"' \
+  | sed -n 's/.*session_id="\([^"]*\)".*/\1/p' \
+  | sort -u
+```
+
+You should see one UUID per active pane. If the list only shows `pane:<N>` entries (the script's fallback key when no Claude payload is piped in) or is empty, the `running` hook is not wired — double-check `~/.claude/settings.json` points at `... emit-agent-status.sh running` (not `cleared`) and that the hook script is executable.
 
 ### Codex integration
 

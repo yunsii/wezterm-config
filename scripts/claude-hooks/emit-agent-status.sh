@@ -4,14 +4,15 @@
 # attention.lua re-reads the file and refreshes badges / status counters.
 #
 # Usage:
+#   emit-agent-status.sh running   # UserPromptSubmit hook (agent turn begins)
 #   emit-agent-status.sh waiting   # Notification hook
 #   emit-agent-status.sh done      # Stop hook
-#   emit-agent-status.sh cleared   # UserPromptSubmit hook (drops the entry)
-#   emit-agent-status.sh resolved  # PostToolUse hook (drops only if waiting)
+#   emit-agent-status.sh resolved  # PostToolUse hook (waiting → running, else no-op)
+#   emit-agent-status.sh cleared   # explicit remove (drops the entry)
 #
 # Optional stdin: the hook JSON payload. When jq is available and stdin
-# carries JSON, the script extracts .session_id for keying and .message /
-# .stop_reason for the human-readable reason.
+# carries JSON, the script extracts .session_id for keying and
+# .message / .stop_reason / .prompt for the human-readable reason.
 #
 # Fails open: any step that fails is silently skipped so hook execution
 # never breaks the agent flow.
@@ -33,6 +34,7 @@ if [[ -z "$status" ]]; then
 fi
 
 case "$status" in
+  running)  default_reason="running…" ;;
   waiting)  default_reason="input required" ;;
   done)     default_reason="task done" ;;
   cleared)  default_reason="" ;;
@@ -47,7 +49,11 @@ if [[ ! -t 0 ]] && command -v jq >/dev/null 2>&1; then
   stdin_payload="$(cat || true)"
   if [[ -n "$stdin_payload" ]]; then
     session_id="$(printf '%s' "$stdin_payload" | jq -r '.session_id // empty' 2>/dev/null || true)"
-    extracted="$(printf '%s' "$stdin_payload" | jq -r '.message // .stop_reason // empty' 2>/dev/null || true)"
+    # .prompt carries the user's new prompt on UserPromptSubmit. Take the
+    # first line and cap it so the Alt+/ overlay label stays readable.
+    extracted="$(printf '%s' "$stdin_payload" \
+      | jq -r '.message // .stop_reason // (.prompt | if . == null then empty else (split("\n")[0] | .[0:80]) end) // empty' \
+      2>/dev/null || true)"
     if [[ -n "$extracted" ]]; then
       reason="$extracted"
     fi
@@ -125,10 +131,13 @@ attention_state_prune 1800000 2>/dev/null || true
 if [[ "$status" == "cleared" ]]; then
   attention_state_remove "$session_id" 2>/dev/null || true
 elif [[ "$status" == "resolved" ]]; then
-  # No-op when there was no waiting to clear (auto-allowed tools hit this
-  # on every PostToolUse). Exit silent so we do not nudge wezterm or log
-  # on every tool call.
-  if ! attention_state_clear_if_waiting "$session_id" 2>/dev/null; then
+  # PostToolUse. If the pane was `waiting` on a permission prompt, the
+  # tool running to completion is evidence the user allowed it; flip
+  # back to `running` so the counter reflects that Claude is still
+  # mid-turn. When nothing is waiting (auto-allowed tools, or the entry
+  # is already running/done), exit silent so we do not nudge wezterm or
+  # log on every tool call.
+  if ! attention_state_resolve_waiting "$session_id" 2>/dev/null; then
     exit 0
   fi
 else
