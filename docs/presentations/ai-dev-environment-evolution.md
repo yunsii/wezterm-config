@@ -355,7 +355,7 @@ Windows 侧从"每次调用都起一次 PowerShell"升级为**长期存活的 C#
 ### 原则二 —— 无头浏览器验证流程
 
 - `Alt+b` 默认把 Chrome debug profile 启成 **headless**（[`6a6cd30`](https://github.com/yunsii/wezterm-config/commit/6a6cd30) `feat(chrome-debug): headless Alt+b + visible Alt+Shift+b`）；**显示窗口必须显式用 `Alt+Shift+b`**。默认态就是不占屏幕。
-- 启动路径走 v5 子阶段 A 搭好的 Windows native helper IPC，带一套加固旗标：`--remote-allow-origins=http://localhost:<port>`（修 Chrome 111+ DevTools 白屏）、`--disable-extensions`、`--no-first-run`、`--no-default-browser-check`、`--headless=new`。可见态和 headless 如果端口冲突，helper 会先终结旧进程树释放 Chrome 的 singleton lock，再切新模式 —— 模式切换本身也不抢焦点。
+- 启动路径走 v5 子阶段 A 搭好的 Windows native helper IPC，带一套加固旗标：`--remote-allow-origins=http://localhost:<port>`（修 Chrome 111+ DevTools 白屏）、`--disable-extensions`、`--no-first-run`、`--no-default-browser-check`、`--headless=new`、`--window-size=1920,1080`（headless 默认是 800×600，MCP 截图和视口相关抓取会走样）。可见态和 headless 如果端口冲突，helper 会先终结旧进程树释放 Chrome 的 singleton lock，再切新模式 —— 模式切换本身也不抢焦点。
 - **这对 Agent 协作是一等大事**：Agent 通过 MCP 的 `--browser-url=http://localhost:<port>` 直接连上这个实例，自主跑 DOM 调试 / 截图 / 端到端验证，**既不抢我的焦点、也不在任务栏闪、更不会把窗口推到前台**。
 - **状态栏看得见**：右侧有一段固定宽度的 badge（`CDP·H·9222` headless / `CDP·V·9222` visible / `CDP·-·<port>` idle），三种状态占同样字符数，bar 宽度不抖。
 - **对比老路径**：以前的验证闭环是"我手工启 Chrome → 切到它 → Agent 等我贴截图"；现在是"Agent 通过 browser-url 自己接管 → 我完全不用切焦点"。v5 里那句"真实验证闭环"里的"真实"——很大程度是靠这条 headless 流兑现的。

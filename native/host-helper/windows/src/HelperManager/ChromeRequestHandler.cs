@@ -167,6 +167,7 @@ internal sealed class ChromeRequestHandler
         if (headless)
         {
             launchArgs.Add("--headless=new");
+            launchArgs.Add("--window-size=1920,1080");
         }
         WindowActivator.LaunchDetachedProcess(chromePath, launchArgs);
         logger.Info("chrome", "launched debug chrome", new Dictionary<string, string?>
