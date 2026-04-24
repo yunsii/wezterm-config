@@ -44,9 +44,12 @@ local workspace = workspace_manager.new {
   constants = constants,
 }
 
+local vscode_integration = (constants.integrations and constants.integrations.vscode) or {}
 chrome_debug_status.configure {
   state_file = constants.chrome_debug_browser and constants.chrome_debug_browser.state_file,
   fallback_port = constants.chrome_debug_browser and constants.chrome_debug_browser.remote_debugging_port,
+  helper_state_file = vscode_integration.helper_state_path,
+  helper_heartbeat_timeout_ms = (vscode_integration.helper_heartbeat_timeout_seconds or 5) * 1000,
 }
 
 titles.register {
