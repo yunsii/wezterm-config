@@ -7,6 +7,7 @@ triggers:
   - manual verification threshold
   - rollout confidence
   - failure handling
+  - plan-time validation
 tags: [quality, testing, escalation, evidence]
 ---
 
@@ -50,6 +51,16 @@ Use the lightest useful path first:
 - [validation-10] Do not ask the user to manually verify something if the agent can verify it directly, script it, or narrow the uncertainty further.
 - [validation-11] Prefer adding the smallest durable check over asking for manual confirmation.
 
+## When To Plan
+
+- [validation-31] Prefer a short explicit plan before execution when the task scope is large or open-ended, several reasonable approaches exist, or a decision is hard to reverse. Surfacing disagreement early is cheaper than redoing work.
+- [validation-32] Skip planning for narrowly-scoped edits, single-file bug fixes, or mechanical operations where the next action is obvious and low-risk. A plan for a one-line fix is overhead.
+
+## At Plan Time
+
+- [validation-29] Treat the validation loop as a first-class element of any plan. Name how the change will be verified before execution starts, not after.
+- [validation-30] Do not propose human verification as the primary check. If a plan has to rely on it, state explicitly why self-validation is blocked and propose a concrete alternative (scripted check, narrower surface, added instrumentation, stubbed integration). A vague "needs user eyes" is not an acceptable justification.
+
 ## Escalate Only When
 
 Human intervention is acceptable only when:
@@ -78,6 +89,13 @@ When validation fails:
 - [validation-23] report pre-existing failures separately from new regressions
 
 [validation-24] Treat pre-existing breakage and new regressions as different outcomes.
+
+## Bug Diagnosis
+
+- [validation-33] Reproduce first. Without a reliable repro, proposed fixes are guesses; a weak or flaky repro is a signal to keep narrowing, not to patch blindly.
+- [validation-34] Minimize the failing surface before proposing a fix — strip unrelated branches, data, configuration, and environment variation until the smallest failing case remains.
+- [validation-35] Find the root cause; do not stop at the first symptom that goes away. A workaround can ship, but it must be labeled as a workaround, not presented as a fix.
+- [validation-36] Do not guess-and-retry. Each attempted fix must carry an explicit hypothesis about what actually changed and why the fix addresses it.
 
 ## Confidence Language
 

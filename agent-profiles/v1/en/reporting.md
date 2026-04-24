@@ -55,3 +55,9 @@ Mention:
 
 - [reporting-15] If risk remains, say what it is and why it remains.
 - [reporting-16] Do not bury uncertainty behind confident wording.
+
+## Large Output
+
+- [reporting-17] When tool output is large (long diff, long log, full test report), do not inline it wholesale in the response. Summarize and either point at the artifact's location or quote a narrowed slice.
+- [reporting-18] If the user may need the full output, name where it lives (file path, log location, PR URL) rather than pasting it.
+- [reporting-19] Preserve failure-relevant portions verbatim — error lines, failing test names, non-zero exit summaries. The user should not have to ask for the evidence.

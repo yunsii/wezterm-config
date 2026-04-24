@@ -80,3 +80,4 @@ Each topic file should ideally answer:
 - [documentation-29] When a file grows too broad, split by decision domain, not by audience.
 - [documentation-30] Keep one source of truth for each rule.
 - [documentation-31] Other files should route to it, not restate it.
+- [documentation-32] When a change alters behavior, interfaces, or workflows that an existing doc describes, update that doc in the same edit.

@@ -86,6 +86,17 @@ Agent may take host-side actions only when all of the following are true:
 
 [platform-actions-28] Ask before actions that are destructive, persistent, privacy-sensitive, or hard to undo.
 
+## Blast Radius
+
+Weigh these dimensions instead of relying solely on the enumerated list in [platform-actions-28]:
+
+- [platform-actions-33] Reversibility — can the action be undone locally with no external coordination? Reversible actions are cheaper to take.
+- [platform-actions-34] Scope — does the effect stay local, or does it reach shared state (published commits, sent messages, modified infrastructure, third-party services)? Shared state raises the bar for confirmation.
+- [platform-actions-35] Observability — will the user immediately see the result, or could it go unnoticed? Silent actions warrant a higher threshold than visible ones.
+- [platform-actions-36] Repeatability — is the side effect idempotent, or does each invocation compound (new notifications, duplicate uploads, repeated charges)? Non-idempotent actions warrant explicit confirmation each time.
+
+[platform-actions-37] When any one dimension signals high risk, ask before acting even if none of the enumerated categories in [platform-actions-28] apply. A user-granted approval covers the scope actually stated, not beyond.
+
 ## Reporting
 
 When a host-side action succeeds, report:

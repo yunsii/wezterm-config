@@ -11,6 +11,9 @@ Do not preload the whole profile.
 This is user-level guidance, not project-level guidance.
 Use it for stable defaults that apply across repositories, languages, and tools.
 
+A rule belongs at the user level only if it would still be correct in a different project, stack, or host.
+If switching projects would make it wrong, it belongs in that project's `AGENTS.md` / `CLAUDE.md` instead.
+
 Precedence (highest wins):
 
 1. Explicit user chat instructions.
@@ -27,7 +30,7 @@ Default loop:
 1. Understand the existing system before changing it.
 2. Find the narrowest owning area.
 3. Make the smallest change that closes the task.
-4. Verify automatically.
+4. Verify automatically. Plans must declare how the change will be verified before execution starts; see [validation-29] and [validation-30].
 5. Report what changed, how it was verified, and what remains uncertain.
 
 Continue unless blocked.
@@ -46,6 +49,7 @@ Read additional topic files only when the current file points to them or the tas
 - Creating, splitting, or maintaining agent-facing docs → [documentation.md](./documentation.md)
 - Host-side side effects (app focus, browser, notifications, reveal in shell, wrapper boundary) → [platform-actions.md](./platform-actions.md)
 - Writing to the system clipboard → [clipboard.md](./clipboard.md)
+- Handling credentials, tokens, or any data expected to stay local → [secrets.md](./secrets.md)
 - Commits, branches, merges, pushes, pull/merge requests → [vcs.md](./vcs.md)
 - Final responses and progress updates → [reporting.md](./reporting.md)
 - Tie-breaking between otherwise valid approaches, language and communication style → [preferences.md](./preferences.md)
@@ -58,13 +62,14 @@ Each rule carries a stable identifier of the form `[<topic>-NN]` so feedback, me
 One-line summaries so the entrypoint stays scannable.
 Full rules live in the routed topic file.
 
-- Validation: self-verify with the lightest valid path; do not use the user as the primary tester.
+- Validation: self-verify with the lightest valid path; do not use the user as the primary tester; when a plan cannot self-validate, say why and propose an alternative.
 - Refactor: understand before restructuring; keep refactor and behavior change separate.
 - Implementation: prefer simple, explicit, observable, reversible; avoid speculative abstraction.
 - Automation: implement over instruct when consistency matters.
 - Tool use: specialized tool over shell; batch independent calls; merge read-only shell; Read before Write.
-- Documentation: layered and sparse; one source of truth per rule.
+- Documentation: layered and sparse; one source of truth per rule; update alongside the behavior it describes.
 - Platform actions: narrow, explicit, reversible; ask before secrets, destructive, or hard-to-undo actions.
+- Secrets: never echo into logs, commits, PR bodies, or subagent briefs; flag leaks immediately and prefer rotation over silent cleanup.
 - VCS: never auto-commit / auto-push / skip hooks / force-push to main; user owns the history.
 - Reporting: state what changed, how it was verified, and what remains uncertain.
 - Preferences: tie-break with taste only when correctness, safety, or local convention does not already decide.

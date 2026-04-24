@@ -102,3 +102,11 @@ If a task is large, split it into steps where each step:
 - [implementation-37] preserves behavior or clearly changes one thing
 - [implementation-38] is independently reviewable
 - [implementation-39] is independently verifiable
+
+## Error Handling
+
+- [implementation-40] Surface failures; do not swallow them. A silent `catch` that returns a default value hides regressions until much later.
+- [implementation-41] Fail loud at the failure boundary. Raise a clear error and let the caller decide whether to recover.
+- [implementation-42] Match the error surface to the layer: internal invariants raise exceptions, user-facing boundaries return structured errors, external system calls return status codes or typed results.
+- [implementation-43] Recover only when there is a concrete recovery plan. A bare `except: pass` / `catch (e) {}` is never a recovery plan.
+- [implementation-44] Preserve the original cause when re-raising or wrapping. The stack trace and error chain are evidence, not noise.
