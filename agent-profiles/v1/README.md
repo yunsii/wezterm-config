@@ -35,9 +35,14 @@ Each rule carries a stable identifier of the form `[<topic>-NN]` so feedback, me
 Default entrypoint:
 - [en/AGENTS.md](./en/AGENTS.md)
 
-Recommended user-level integrations:
+Recommended user-level integrations (entrypoint plus one symlink per topic):
 - `~/.codex/AGENTS.md -> /absolute/path/to/repo/agent-profiles/v1/en/AGENTS.md`
+- `~/.codex/<topic>.md -> /absolute/path/to/repo/agent-profiles/v1/en/<topic>.md` (one per topic file)
 - `~/.claude/CLAUDE.md -> /absolute/path/to/repo/agent-profiles/v1/en/AGENTS.md`
+- `~/.claude/<topic>.md -> /absolute/path/to/repo/agent-profiles/v1/en/<topic>.md` (one per topic file)
+
+The topic mirrors are required because `AGENTS.md` routes to topic files via relative links (`./validation.md`, …) that must resolve alongside the entrypoint in the target directory.
+This repository provides `scripts/dev/link-agent-profile.sh` to create or refresh these links idempotently for any target directory (`~/.claude/`, `~/.codex/`) that exists on the host.
 
 Optional repository compatibility mappings:
 - `AGENTS.md -> agent-profiles/v1/en/AGENTS.md`
