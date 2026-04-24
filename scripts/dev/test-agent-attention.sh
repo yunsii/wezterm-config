@@ -19,7 +19,7 @@
 #   test-agent-attention.sh waiting [reason]
 #   test-agent-attention.sh done    [reason]
 #   test-agent-attention.sh cleared
-#   test-agent-attention.sh resolved        # PostToolUse: waiting/missing → running; running/done no-op
+#   test-agent-attention.sh resolved        # PostToolUse: waiting/done/missing → running; running no-op
 #   test-agent-attention.sh clear-all       # truncate state.json + nudge
 #   test-agent-attention.sh show            # print current state.json
 
@@ -205,11 +205,12 @@ verify_pane_evict() {
   printf '  PASS  pane-evict\n'
 }
 
-# PostToolUse semantics. `waiting` flips to `running` in place; `missing`
-# upserts a fresh `running` (focus-ack may have forgot the waiting entry
-# before the hook fired, but running still needs to reflect that Claude
-# is mid-turn); `running` and `done` are no-ops so auto-allowed tools do
-# not spam OSC ticks or stomp a Stop that landed between tool calls.
+# PostToolUse semantics. `waiting` and `done` flip to `running` in place
+# (done flip covers the Monitor wake-up case where an async event resumes
+# the agent after Stop); `missing` upserts a fresh `running` (focus-ack
+# may have forgot the waiting entry before the hook fired, but running
+# still needs to reflect that Claude is mid-turn); `running` is a no-op
+# so auto-allowed tools do not spam OSC ticks.
 verify_resolved_transitions_waiting() {
   local entry entry_status
   emit_status waiting 'self-test: resolved-from-waiting'
@@ -275,28 +276,59 @@ verify_resolved_noop_when_running() {
   printf '  PASS  resolved no-op (running stays running)\n'
 }
 
-verify_resolved_noop_when_done() {
+verify_resolved_recovers_done() {
   local entry entry_status entry_reason marker
-  marker='self-test: resolved-noop-done'
+  marker='self-test: resolved-recovers-done'
   emit_status done "$marker"
   emit_status resolved ''
 
   entry="$(state_entry_for_current_pane)"
   if [[ "$entry" == "null" || -z "$entry" ]]; then
-    printf '  FAIL  resolved: done entry was dropped\n'
+    printf '  FAIL  resolved: done entry was dropped (expected flip to running)\n'
     return 1
   fi
   entry_status="$(printf '%s' "$entry" | jq -r '.status')"
-  if [[ "$entry_status" != "done" ]]; then
-    printf '  FAIL  resolved: status is %s (want done)\n' "$entry_status"
+  if [[ "$entry_status" != "running" ]]; then
+    printf '  FAIL  resolved: status is %s (want running — Monitor wake-up)\n' "$entry_status"
+    return 1
+  fi
+  entry_reason="$(printf '%s' "$entry" | jq -r '.reason')"
+  if [[ "$entry_reason" != "" ]]; then
+    printf '  FAIL  resolved: reason is %q (want empty)\n' "$entry_reason"
+    return 1
+  fi
+  printf '  PASS  resolved (done → running on Monitor wake-up)\n'
+}
+
+# Notification with notification_type=idle_prompt must not flip the
+# current running/waiting/done state — idle_prompt is not a turn-end
+# signal (Stop owns that) and Monitor can hold the agent idle mid-turn.
+verify_idle_prompt_preserves_running() {
+  local entry entry_status entry_reason marker
+  marker='self-test: idle-prompt-preserves-running'
+  emit_status running "$marker"
+
+  local sid payload
+  sid="pane:${WEZTERM_PANE:-unknown}"
+  payload="$(printf '{"hook_event_name":"Notification","session_id":"%s","notification_type":"idle_prompt"}' "$sid")"
+  printf '%s' "$payload" | "$hook" waiting
+
+  entry="$(state_entry_for_current_pane)"
+  if [[ "$entry" == "null" || -z "$entry" ]]; then
+    printf '  FAIL  idle_prompt: entry dropped (expected running preserved)\n'
+    return 1
+  fi
+  entry_status="$(printf '%s' "$entry" | jq -r '.status')"
+  if [[ "$entry_status" != "running" ]]; then
+    printf '  FAIL  idle_prompt: status is %s (want running)\n' "$entry_status"
     return 1
   fi
   entry_reason="$(printf '%s' "$entry" | jq -r '.reason')"
   if [[ "$entry_reason" != "$marker" ]]; then
-    printf '  FAIL  resolved: reason overwritten (%s → %s)\n' "$marker" "$entry_reason"
+    printf '  FAIL  idle_prompt: reason overwritten (%s → %s)\n' "$marker" "$entry_reason"
     return 1
   fi
-  printf '  PASS  resolved no-op (done stays done)\n'
+  printf '  PASS  idle_prompt (running stays running)\n'
 }
 
 cmd_self_test() {
@@ -317,15 +349,16 @@ cmd_self_test() {
   verify_resolved_transitions_waiting                    || failures=$((failures + 1))
   verify_resolved_creates_running_when_missing           || failures=$((failures + 1))
   verify_resolved_noop_when_running                      || failures=$((failures + 1))
-  verify_resolved_noop_when_done                         || failures=$((failures + 1))
+  verify_resolved_recovers_done                          || failures=$((failures + 1))
+  verify_idle_prompt_preserves_running                   || failures=$((failures + 1))
   verify_cleared "$log_file"                             || failures=$((failures + 1))
   verify_pane_evict "$log_file"                          || failures=$((failures + 1))
 
   if (( failures > 0 )); then
-    echo "FAILED (${failures}/9)"
+    echo "FAILED (${failures}/10)"
     exit 1
   fi
-  echo "OK 9/9"
+  echo "OK 10/10"
 }
 
 cmd_cycle_visual() {

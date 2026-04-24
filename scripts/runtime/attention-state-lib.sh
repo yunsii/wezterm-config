@@ -167,6 +167,12 @@ attention_state_remove() {
 # allowed it). Behaviour by current status:
 #   waiting → flip to running in place (ts/reason refreshed, tmux coords
 #             preserved)
+#   done    → flip to running in place (an async event — typically a
+#             Monitor subscription delivering a streamed event after the
+#             prior turn's Stop — woke the agent and a tool call landed,
+#             which means Claude is mid-turn again. Stop has no way to
+#             re-fire running on wake-up; this branch is how the counter
+#             reflects reality.)
 #   missing → upsert a fresh running entry using the caller-supplied
 #             metadata. This covers the focus-ack path: when the user
 #             focused the pane, maybe_ack_focused forgets the waiting
@@ -175,8 +181,6 @@ attention_state_remove() {
 #             reflected on the counter, so we recreate the entry.
 #   running → no-op (already reflected; do not spam OSC on every tool
 #             call)
-#   done    → no-op (Stop has already claimed the slot; preserve it
-#             until focus-ack or another transition clears it)
 #
 # Returns 0 if the state file changed, 1 on no-op. Callers use the
 # return code to skip the OSC tick / log emit on no-op so PostToolUse
@@ -192,12 +196,14 @@ attention_state_transition_to_running() {
   # that were auto-allowed, so the entry is already `running` for this
   # session and the short-circuit here keeps the hot path cheap. Racy
   # with a concurrent writer, but in practice PostToolUse does not race
-  # with other hooks on the same session_id.
+  # with other hooks on the same session_id. `done` is deliberately not
+  # short-circuited: a Monitor event can wake the agent after Stop wrote
+  # done, so we need to take the lock and flip back to running.
   local current_status=""
   if [[ -f "$path" ]]; then
     current_status="$(jq -r --arg sid "$session_id" '.entries[$sid].status // ""' "$path" 2>/dev/null || printf '')"
   fi
-  if [[ "$current_status" == "running" || "$current_status" == "done" ]]; then
+  if [[ "$current_status" == "running" ]]; then
     return 1
   fi
   local lock
@@ -209,14 +215,14 @@ attention_state_transition_to_running() {
     flock -x 9
     local current next locked_status
     current="$(attention_state_read)"
-    # Re-check under the lock so a concurrent transition to done (or a
-    # running upsert from another hook) is respected instead of stomped
-    # on by this delayed transition.
+    # Re-check under the lock so a concurrent running upsert from another
+    # hook is respected instead of stomped on by this delayed transition.
+    # `done` is eligible for transition here — see docstring's `done` branch.
     locked_status="$(jq -r --arg sid "$session_id" '.entries[$sid].status // ""' <<<"$current")"
-    if [[ "$locked_status" == "running" || "$locked_status" == "done" ]]; then
+    if [[ "$locked_status" == "running" ]]; then
       exit 0
     fi
-    if [[ "$locked_status" == "waiting" ]]; then
+    if [[ "$locked_status" == "waiting" || "$locked_status" == "done" ]]; then
       next="$(jq --arg sid "$session_id" --argjson ts "$ts" \
         '.entries[$sid].status = "running"
          | .entries[$sid].reason = ""

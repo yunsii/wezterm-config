@@ -66,18 +66,18 @@ if [[ ! -t 0 ]] && command -v jq >/dev/null 2>&1; then
 fi
 
 # Notification hook disambiguation: only permission_prompt / elicitation_dialog
-# actually require user action. idle_prompt fires after Claude has been idle
-# for a while and would otherwise overwrite the done that Stop just wrote,
-# making Alt+, chase empty chats. auth_success is one-shot UI confirmation,
-# not a per-session state transition.
+# actually require user action. idle_prompt fires whenever Claude has been
+# idle for a while — which is not the same as "turn finished" (Stop owns that
+# signal) and not the same as "user must act" (waiting). In particular, a
+# persistent Monitor subscription can hold the agent idle mid-turn, so
+# writing done here would silently flip a still-running entry to done and
+# PostToolUse could not recover it (see attention_state_transition_to_running).
+# Exit without touching state, leaving the existing running / waiting / done
+# unchanged. auth_success is one-shot UI confirmation, not a transition.
 if [[ "$status" == "waiting" && -n "$notification_type" ]]; then
   case "$notification_type" in
     permission_prompt|elicitation_dialog) ;;
-    idle_prompt)
-      status="done"
-      reason="task done"
-      ;;
-    auth_success)
+    idle_prompt|auth_success)
       exit 0
       ;;
   esac
