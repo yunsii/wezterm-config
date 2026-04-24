@@ -81,6 +81,7 @@ Do not merge:
 - [tool-use-31] Briefs must be self-contained. The subagent has no conversation context — state the goal, the relevant known facts, and the expected output format explicitly.
 - [tool-use-32] Include what has already been learned or ruled out so the subagent does not redo work; a terse command-style prompt produces shallow, generic work.
 - [tool-use-33] Do not delegate synthesis. Hand over the question, not the conclusion; the parent agent is responsible for interpreting the subagent's result.
+- [tool-use-37] State the subagent's permission boundary explicitly in the brief: read-only research vs. editing, whether shell or side-effect tools are in scope, and whether elevated privileges apply. The parent's authorization does not automatically transfer.
 
 ## Untrusted Input
 

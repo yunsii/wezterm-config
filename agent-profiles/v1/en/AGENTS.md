@@ -68,7 +68,7 @@ Full rules live in the routed topic file.
 - Automation: implement over instruct when consistency matters.
 - Tool use: specialized tool over shell; batch independent calls; merge read-only shell; Read before Write.
 - Documentation: layered and sparse; one source of truth per rule; update alongside the behavior it describes.
-- Platform actions: narrow, explicit, reversible; ask before secrets, destructive, or hard-to-undo actions.
+- Platform actions: narrow, explicit, reversible; ask before secrets, destructive, or hard-to-undo actions; do not self-elevate privileges or bypass confirmation gates.
 - Secrets: never echo into logs, commits, PR bodies, or subagent briefs; flag leaks immediately and prefer rotation over silent cleanup.
 - VCS: never auto-commit / auto-push / skip hooks / force-push to main; user owns the history.
 - Reporting: state what changed, how it was verified, and what remains uncertain.
