@@ -4,11 +4,14 @@
 # attention.lua re-reads the file and refreshes badges / status counters.
 #
 # Usage:
-#   emit-agent-status.sh running   # UserPromptSubmit hook (agent turn begins)
-#   emit-agent-status.sh waiting   # Notification hook
-#   emit-agent-status.sh done      # Stop hook
-#   emit-agent-status.sh resolved  # PostToolUse hook (waiting → running, else no-op)
-#   emit-agent-status.sh cleared   # explicit remove (drops the entry)
+#   emit-agent-status.sh running     # UserPromptSubmit hook (agent turn begins)
+#   emit-agent-status.sh waiting     # Notification hook
+#   emit-agent-status.sh done        # Stop hook
+#   emit-agent-status.sh resolved    # PostToolUse hook (waiting → running, else no-op)
+#   emit-agent-status.sh cleared     # explicit remove (drops the entry)
+#   emit-agent-status.sh pane-evict  # SessionStart source=clear hook — drop every
+#                                    # entry on the current (tmux_socket, tmux_pane)
+#                                    # except the new session_id in the payload.
 #
 # Optional stdin: the hook JSON payload. When jq is available and stdin
 # carries JSON, the script extracts .session_id for keying and
@@ -34,12 +37,13 @@ if [[ -z "$status" ]]; then
 fi
 
 case "$status" in
-  running)  default_reason="running…" ;;
-  waiting)  default_reason="input required" ;;
-  done)     default_reason="task done" ;;
-  cleared)  default_reason="" ;;
-  resolved) default_reason="" ;;
-  *)        exit 0 ;;
+  running)    default_reason="running…" ;;
+  waiting)    default_reason="input required" ;;
+  done)       default_reason="task done" ;;
+  cleared)    default_reason="" ;;
+  resolved)   default_reason="" ;;
+  pane-evict) default_reason="" ;;
+  *)          exit 0 ;;
 esac
 
 session_id=""
@@ -130,6 +134,14 @@ attention_state_prune 1800000 2>/dev/null || true
 
 if [[ "$status" == "cleared" ]]; then
   attention_state_remove "$session_id" 2>/dev/null || true
+elif [[ "$status" == "pane-evict" ]]; then
+  # SessionStart source=clear: the new session_id in stdin is for the
+  # fresh post-/clear session; any entries still parked on this tmux
+  # pane belong to the discarded pre-/clear session and will never get
+  # their own Stop. Evict them all, but preserve the new session_id
+  # defensively in case a race re-creates it before we hold the lock.
+  attention_state_evict_pane "$tmux_socket" "$tmux_pane" "$session_id" \
+    2>/dev/null || true
 elif [[ "$status" == "resolved" ]]; then
   # PostToolUse. A completed tool is evidence the user resolved a prior
   # permission prompt — flip `waiting` → `running`, and when the entry

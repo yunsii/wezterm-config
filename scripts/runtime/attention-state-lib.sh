@@ -272,6 +272,44 @@ attention_state_transition_to_running() {
   return "$rc"
 }
 
+# Remove every entry on a given (tmux_socket, tmux_pane), optionally
+# preserving one session_id. Used by the SessionStart `source=clear` hook
+# to clean up stale entries when the user runs `/clear` and the prior
+# turn's Stop hook never fired (e.g. the turn was still in flight). The
+# new session's session_id is unknown to the old entries, so the standard
+# same-pane eviction in attention_state_upsert does not trigger until the
+# next UserPromptSubmit — which can be many minutes away. A no-op when
+# tmux coords are empty, since we cannot identify the pane.
+attention_state_evict_pane() {
+  local tmux_socket="$1" tmux_pane="$2" except_session_id="${3:-}"
+  if [[ -z "$tmux_socket" || -z "$tmux_pane" ]]; then
+    return 0
+  fi
+  attention_state_init
+  local lock
+  lock="$(attention_state_lock_path)"
+  (
+    flock -x 9
+    local current next
+    current="$(attention_state_read)"
+    next="$(jq --arg tsk "$tmux_socket" \
+               --arg tp "$tmux_pane" \
+               --arg ex "$except_session_id" '
+      .entries = (
+        .entries
+        | to_entries
+        | map(select(
+            .key == $ex
+            or (.value.tmux_socket // "") != $tsk
+            or (.value.tmux_pane // "") != $tp
+          ))
+        | from_entries
+      )
+    ' <<<"$current")"
+    attention_state_write "$next"
+  ) 9>"$lock"
+}
+
 attention_state_truncate() {
   attention_state_init
   local lock

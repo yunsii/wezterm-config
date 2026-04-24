@@ -152,6 +152,59 @@ verify_cleared() {
   printf '  PASS  cleared\n'
 }
 
+# SessionStart source=clear path. Seed a stuck entry on the current tmux
+# pane under a fabricated session_id (simulating the pre-/clear session
+# that never fired Stop), then invoke pane-evict with a different
+# session_id in stdin (simulating the fresh post-/clear session). The
+# stuck entry should be gone and the new session_id must NOT be upserted
+# — pane-evict only evicts, the new running is written later by the next
+# UserPromptSubmit.
+verify_pane_evict() {
+  local log_file="$1"
+  local baseline stuck_id new_id sock pane meta stuck_entry new_entry
+  baseline="$(baseline_line_count "$log_file")"
+
+  meta="$(tmux display-message -p -t "${TMUX_PANE:-}" -F '#{socket_path}|#{pane_id}' 2>/dev/null || true)"
+  IFS='|' read -r sock pane <<<"$meta"
+  if [[ -z "$sock" || -z "$pane" ]]; then
+    printf '  SKIP  pane-evict: no tmux coords available\n'
+    return 0
+  fi
+
+  stuck_id="self-test-stuck-$$-$(date +%s%N)"
+  new_id="self-test-new-$$-$(date +%s%N)"
+
+  attention_state_upsert "$stuck_id" "${WEZTERM_PANE:-}" "$sock" \
+    "$(tmux display-message -p -t "${TMUX_PANE:-}" -F '#{session_name}' 2>/dev/null || printf '')" \
+    "$(tmux display-message -p -t "${TMUX_PANE:-}" -F '#{window_id}' 2>/dev/null || printf '')" \
+    "$pane" running 'self-test: pane-evict seed' ''
+
+  printf '{"hook_event_name":"SessionStart","source":"clear","session_id":"%s"}' "$new_id" \
+    | "$hook" pane-evict
+
+  stuck_entry="$(attention_state_read | jq --arg sid "$stuck_id" '.entries[$sid] // null')"
+  if [[ "$stuck_entry" != "null" ]]; then
+    printf '  FAIL  pane-evict: stuck entry still present (%s)\n' "$stuck_entry"
+    attention_state_remove "$stuck_id" || true
+    attention_state_remove "$new_id" || true
+    return 1
+  fi
+
+  new_entry="$(attention_state_read | jq --arg sid "$new_id" '.entries[$sid] // null')"
+  if [[ "$new_entry" != "null" ]]; then
+    printf '  FAIL  pane-evict: new session_id was unexpectedly upserted (%s)\n' "$new_entry"
+    attention_state_remove "$new_id" || true
+    return 1
+  fi
+
+  if ! wait_for_log_line "$log_file" "$baseline"; then
+    printf '  FAIL  pane-evict: no tick log within 6s\n'
+    return 1
+  fi
+
+  printf '  PASS  pane-evict\n'
+}
+
 # PostToolUse semantics. `waiting` flips to `running` in place; `missing`
 # upserts a fresh `running` (focus-ack may have forgot the waiting entry
 # before the hook fired, but running still needs to reflect that Claude
@@ -266,12 +319,13 @@ cmd_self_test() {
   verify_resolved_noop_when_running                      || failures=$((failures + 1))
   verify_resolved_noop_when_done                         || failures=$((failures + 1))
   verify_cleared "$log_file"                             || failures=$((failures + 1))
+  verify_pane_evict "$log_file"                          || failures=$((failures + 1))
 
   if (( failures > 0 )); then
-    echo "FAILED (${failures}/8)"
+    echo "FAILED (${failures}/9)"
     exit 1
   fi
-  echo "OK 8/8"
+  echo "OK 9/9"
 }
 
 cmd_cycle_visual() {
