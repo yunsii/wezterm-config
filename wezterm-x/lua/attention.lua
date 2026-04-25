@@ -191,7 +191,11 @@ function M.render_status_segment(palette, opts)
       end
       return out
     end
-    waiting = drop_focused(waiting)
+    -- Only `done` collapses under focus. `waiting` is an action item: a
+    -- glance at the pane is not the same as answering the prompt, and
+    -- the user explicitly does not want the counter to lie about
+    -- pending input. waiting clears via the actual response path
+    -- (PreToolUse resolved / Stop / Alt+/), not via focus.
     done = drop_focused(done)
   end
   local idle_bg = palette.tab_bar_background
@@ -257,17 +261,18 @@ function M.tab_badge(tab_info)
   local has_waiting, has_running, has_done = false, false, false
   local now = now_ms()
   -- When the tab is the active one in its window and the tmux-pane
-  -- focus matches the entry, suppress `waiting` / `done` badges — the
-  -- user is looking at that exact pane, so those would be noise.
-  -- `running` is still shown even under focus so a parallel-task view
-  -- across tabs stays truthful (consistent with the right-status
-  -- counter rule).
+  -- focus matches the entry, suppress only the `done` badge — the user
+  -- is looking at that exact pane, so the green "result waiting" mark
+  -- would be noise. `waiting` stays visible even under focus because it
+  -- is an action item (glancing at the prompt is not the same as
+  -- answering it) and `running` stays visible so the parallel-task view
+  -- across tabs is truthful.
   local tab_is_active = tab_info.is_active == true
   for _, entry in pairs(state_cache.entries or {}) do
     if entry_is_live(entry, now) and tostring(entry.wezterm_pane_id or '') == pane_id_str then
       local suppress_for_focus = tab_is_active and M.is_entry_focused(entry, pane_id_str)
       if entry.status == M.STATUS_WAITING then
-        if not suppress_for_focus then has_waiting = true end
+        has_waiting = true
       elseif entry.status == M.STATUS_RUNNING then
         has_running = true
       elseif entry.status == M.STATUS_DONE then
@@ -538,10 +543,10 @@ end
 -- tmux pane). When the entry carries tmux coordinates we require the
 -- tmux-focus file to name the entry's pane; missing or mismatched focus
 -- files fail closed (treated as "not focused") so entries are shown
--- when in doubt rather than hidden. Callers use this both in the render
--- path (skip the entry from right-status / tab badge — rule: focused
--- pane does not enter stats) and in the auto-ack path (schedule
--- --forget for waiting/done).
+-- when in doubt rather than hidden. Callers use this in the render
+-- path (drop the focused pane's `done` entries from right-status /
+-- tab badge — `waiting` is *not* dropped because it is an action item)
+-- and in the auto-ack path (schedule --forget for `done` only).
 function M.is_entry_focused(entry, wezterm_pane_id)
   if not entry or wezterm_pane_id == nil or wezterm_pane_id == '' then
     return false
@@ -560,15 +565,19 @@ function M.is_entry_focused(entry, wezterm_pane_id)
   return true
 end
 
--- Auto-ack: when the currently-focused pane matches a live `waiting` or
--- `done` entry, spawn --forget immediately (no grace window) and hide
--- the entry from the in-memory cache in the same tick so the counter
+-- Auto-ack: when the currently-focused pane matches a live `done`
+-- entry, spawn --forget immediately (no grace window) and hide the
+-- entry from the in-memory cache in the same tick so the counter
 -- drops without waiting for the subprocess to land the write on disk.
--- Both states are user-action signals — sitting on the pane *is* the
+-- `done` is a knowledge signal — sitting on the pane *is* the
 -- acknowledgement, so the badge and counter clear without a second
--- gesture. `running` is excluded: it is a live indicator of current
--- work, not an action item, and it will transition to waiting or done
--- on its own as the agent progresses.
+-- gesture. `waiting` is intentionally excluded: it is an action item,
+-- and a glance at the pane is not the same as answering the prompt;
+-- focus-acking it would silently swallow pending input. `waiting`
+-- clears via the actual response path (PreToolUse resolved / Stop /
+-- Alt+/). `running` is excluded for the original reason: it is a live
+-- indicator of current work, not an action item, and it transitions
+-- to waiting or done on its own as the agent progresses.
 --
 -- The --only-if-ts guard in the jump script still protects against the
 -- ~50ms race where a fresh entry (same session_id, new ts) could land
@@ -603,7 +612,7 @@ function M.maybe_ack_focused(window, pane)
   for sid, entry in pairs(state_cache.entries or {}) do
     if entry_is_live(entry, now) then
       live_sids[sid] = true
-      if (entry.status == M.STATUS_DONE or entry.status == M.STATUS_WAITING)
+      if entry.status == M.STATUS_DONE
         and M.is_entry_focused(entry, pane_id_str) then
         local ts = entry.ts
         if ts ~= nil and focus_ack_scheduled[sid] ~= ts then
