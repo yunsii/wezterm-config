@@ -15,13 +15,17 @@ prefetched_repo_label="${6:-}"
 prefetched_file="${7:-}"
 prefetched_frame_file="${8:-}"
 
-# First-paint fast path: cat the frame menu.sh pre-rendered before doing any
-# work. Subsequent re-renders (driven by Up/Down) repaint via the shared
-# renderer over the same screen with absolute positioning, so this priming
-# write and the live frame are byte-identical and there is no visible swap.
+# First-paint fast path: emit the frame menu.sh pre-rendered before doing
+# any work. Use bash's `$(<file)` slurp instead of `cat` to skip the
+# fork+exec of /bin/cat (5–30ms on WSL2 cold cache) — at this point bash
+# is the only thing standing between the popup pty being live and the
+# user seeing content, so every saved syscall counts. Subsequent re-
+# renders (driven by Up/Down) repaint via the shared renderer over the
+# same screen with absolute positioning, so this priming write and the
+# live frame are byte-identical and there is no visible swap.
 printf '\033[?25l'
 if [[ -n "$prefetched_frame_file" && -r "$prefetched_frame_file" ]]; then
-  cat "$prefetched_frame_file"
+  printf '%s' "$(<"$prefetched_frame_file")"
 fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -152,7 +156,15 @@ read_key() {
 
   IFS= read -rsn1 key || return 1
   if [[ "$key" == $'\033' ]]; then
-    if IFS= read -rsn2 -t 0.01 extra; then
+    # Disambiguate bare Esc from a multi-byte escape sequence without
+    # paying a fixed timeout: `read -t 0` returns success only if more
+    # bytes are already buffered. Sequences we care about (`\033[A/B`,
+    # `\033OA/B`, the forwarded `\033g`) arrive in one PTY write so the
+    # follow-up is buffered the moment we get the leading byte. Bare Esc
+    # has nothing behind it, so we return immediately — no 10ms wait
+    # before the popup tears down on close.
+    if read -t 0 2>/dev/null; then
+      IFS= read -rsn2 -t 0.001 extra || true
       key+="$extra"
     fi
   fi
@@ -222,7 +234,12 @@ while true; do
       runtime_log_info worktree "worktree popup picker completed" "session_name=$session_name" "repo_label=$repo_label" "duration_ms=$(runtime_log_duration_ms "$start_ms")"
       exit 0
       ;;
-    $'\033' | $'\003')
+    $'\033' | $'\003' | $'\033g')
+      # `\033g` is the forwarded Alt+g sequence WezTerm sends when the user
+      # presses Alt+g a second time while the popup is up. Treating it as an
+      # exit key makes Alt+g a true toggle: the popup is the only thing
+      # listening to the keyboard while it is up, so the same chord that
+      # opened it also closes it (mirrors the Alt+/ attention picker).
       exit 0
       ;;
     $'\033[B' | $'\033OB')
