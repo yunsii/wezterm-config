@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-WT_LIB_DIR="$REPO_ROOT/skills/worktree-task/scripts/lib"
+WT_LIB_DIR="$REPO_ROOT/scripts/runtime/worktree/lib"
 WINDOWS_SHELL_LIB="$REPO_ROOT/scripts/runtime/windows-shell-lib.sh"
 
 # shellcheck disable=SC1091

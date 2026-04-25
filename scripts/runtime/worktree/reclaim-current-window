@@ -1,0 +1,222 @@
+#!/usr/bin/env bash
+# reclaim-current-window — invoked from inside a task worktree's tmux
+# pane, this script validates that the current cwd's worktree is safe to
+# reclaim, switches tmux focus away from the doomed window, then runs
+# `worktree-task reclaim` in a detached subshell that also closes the
+# original tmux window once removal succeeds. Works in concert with the
+# `Ctrl+k g r` chord.
+#
+# Refusal rules (any one fails → script aborts before touching git):
+#   - cwd is not inside any git repo
+#   - cwd's worktree IS the main worktree (refuse: never reclaim primary)
+#   - worktree slug starts with `dev-` (long-lived workstation, opt-out)
+#   - worktree has uncommitted/untracked changes (use force flow manually)
+#   - branch hasn't merged into origin's default branch (incomplete delivery)
+#
+# UX:
+#   - 1-char y/N confirmation via tmux command-prompt
+#   - Reclaim runs detached; logs go to runtime log so failures are
+#     diagnosable even though stdio detaches
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WEZTERM_CONFIG_REPO_DEFAULT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+WORKTREE_TASK_CLI="$SCRIPT_DIR/worktree-task"
+RUNTIME_LIB_DIR="$WEZTERM_CONFIG_REPO_DEFAULT/scripts/runtime"
+
+# shellcheck disable=SC1091
+source "$RUNTIME_LIB_DIR/runtime-log-lib.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/helpers.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/git.sh"
+
+export WEZTERM_RUNTIME_LOG_SOURCE="worktree-task.reclaim-current"
+
+# Informational refusal — checks failed, but it's an expected outcome
+# (dev-* / dirty / unmerged / not-in-repo). Stay visible long enough to
+# read, then exit 0 so the tmux chord doesn't trip its own
+# "command returned 1" reporting.
+refuse() {
+  printf 'reclaim-current-window: %s\n' "$1" >&2
+  wt_tmux_progress "[worktree-task] reclaim refused: $1"
+  wt_tmux_progress_clear_after 4
+  exit 0
+}
+
+# Hard error — internal invariant broken (helpers missing, tmux failure
+# we can't recover from). Surface with non-zero so callers / tests can
+# distinguish.
+die() {
+  printf 'reclaim-current-window: %s\n' "$1" >&2
+  wt_tmux_progress "[worktree-task] reclaim error: $1"
+  wt_tmux_progress_clear_after 5
+  exit 1
+}
+
+inform() {
+  printf 'reclaim-current-window: %s\n' "$1" >&2
+  wt_tmux_progress "[worktree-task] $1"
+}
+
+# Inputs:
+#   $1 — pane_current_path (cwd of the invoking pane). Required when
+#        called from a tmux chord because `run-shell -b` runs in the
+#        server's working directory, NOT the active pane's cwd, so
+#        `pwd` here is wrong. CLI callers can omit and we fall back to
+#        $PWD.
+#   $2 — pane_id (e.g. %5). Used so the detached subshell can kill the
+#        right window without relying on $TMUX_PANE (also not set under
+#        run-shell -b). Falls back to the current client's active pane.
+PANE_CURRENT_PATH_ARG="${1:-}"
+PANE_ID_ARG="${2:-}"
+
+if [[ -n "$PANE_CURRENT_PATH_ARG" ]]; then
+  cwd="$PANE_CURRENT_PATH_ARG"
+else
+  cwd="$(pwd -P)"
+fi
+
+SOURCE_PANE_ID="$PANE_ID_ARG"
+if [[ -z "$SOURCE_PANE_ID" ]]; then
+  SOURCE_PANE_ID="${TMUX_PANE:-}"
+fi
+if [[ -z "$SOURCE_PANE_ID" && -n "${TMUX:-}" ]]; then
+  SOURCE_PANE_ID="$(tmux display-message -p '#{pane_id}' 2>/dev/null || true)"
+fi
+
+SOURCE_WINDOW_ID=""
+if [[ -n "$SOURCE_PANE_ID" ]]; then
+  SOURCE_WINDOW_ID="$(tmux display-message -p -t "$SOURCE_PANE_ID" '#{window_id}' 2>/dev/null || true)"
+fi
+
+# ---------- worktree resolution ----------
+wt_git_in_repo "$cwd" || refuse "not inside a git repository: $cwd"
+
+worktree_root="$(wt_git_repo_root "$cwd")"
+[[ -n "$worktree_root" ]] || refuse "could not resolve worktree root for $cwd"
+common_dir="$(wt_git_common_dir "$cwd")"
+[[ -n "$common_dir" ]] || refuse "could not resolve git common dir for $cwd"
+main_root="$(wt_git_main_root "$common_dir")"
+[[ -n "$main_root" ]] || refuse "could not resolve main worktree root for $cwd"
+
+if [[ "$worktree_root" == "$main_root" ]]; then
+  refuse "current cwd is the main worktree; reclaim only applies to linked task worktrees"
+fi
+
+slug="$(basename "$worktree_root")"
+
+# ---------- lifecycle whitelist ----------
+case "$slug" in
+  dev-*)
+    refuse "$slug is a long-lived dev worktree (use 'git worktree remove' if intentional)"
+    ;;
+esac
+
+# ---------- cleanliness check ----------
+if [[ -n "$(git -C "$worktree_root" status --porcelain --untracked-files=all 2>/dev/null)" ]]; then
+  refuse "$slug has uncommitted/untracked changes; commit or discard before reclaim"
+fi
+
+# ---------- merge check (origin default branch) ----------
+branch_name="$(git -C "$worktree_root" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+if [[ -z "$branch_name" ]]; then
+  refuse "$slug is in detached-HEAD state; not safe to auto-reclaim"
+fi
+
+wt_tmux_progress "[worktree-task] checking $slug merge status…"
+if ! git -C "$main_root" fetch origin --quiet 2>/dev/null; then
+  inform "warning: 'git fetch origin' failed; merge check uses local refs only"
+fi
+
+upstream_default="$(git -C "$main_root" rev-parse --verify origin/HEAD 2>/dev/null || true)"
+if [[ -n "$upstream_default" ]]; then
+  if ! git -C "$main_root" merge-base --is-ancestor "$branch_name" "$upstream_default" 2>/dev/null; then
+    refuse "$branch_name not yet merged into $(git -C "$main_root" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/HEAD); push & merge first"
+  fi
+else
+  # Fallback to primary HEAD if origin/HEAD isn't set.
+  if ! git -C "$main_root" merge-base --is-ancestor "$branch_name" HEAD 2>/dev/null; then
+    refuse "$branch_name not merged into the primary worktree's HEAD; merge first"
+  fi
+fi
+
+# ---------- confirmation ----------
+if [[ -n "${TMUX:-}" && -z "${WT_RECLAIM_NO_CONFIRM:-}" ]]; then
+  confirm_status_file="$(mktemp -t wt-reclaim-confirm.XXXXXX)"
+  # tmux command-prompt -1 reads exactly one keystroke; we capture y/Y
+  # by writing it to the status file.
+  tmux command-prompt -1 -p "reclaim $slug? (y/N):" \
+    "run-shell 'printf %s %1 > $(printf '%q' "$confirm_status_file")'"
+  # command-prompt is async; busy-wait briefly for the file to populate.
+  for _ in $(seq 1 200); do
+    [[ -s "$confirm_status_file" ]] && break
+    sleep 0.05
+  done
+  reply="$(cat "$confirm_status_file" 2>/dev/null || true)"
+  rm -f "$confirm_status_file"
+  case "$reply" in
+    y|Y) ;;
+    *) inform "reclaim cancelled"; exit 0 ;;
+  esac
+fi
+
+# ---------- pick a survivor window in this session ----------
+# Prefer a window already rooted at the main worktree; fall back to the
+# session's last-active window.
+target_window=""
+if [[ -n "${TMUX:-}" ]]; then
+  session_name="$(tmux display-message -p '#{session_name}' 2>/dev/null || true)"
+  if [[ -n "$session_name" ]]; then
+    while IFS=$'\t' read -r wid wpath; do
+      [[ "$wid" == "$SOURCE_WINDOW_ID" ]] && continue
+      if [[ "$wpath" == "$main_root" || "$wpath" == "$main_root"/* ]]; then
+        target_window="$wid"
+        break
+      fi
+    done < <(tmux list-windows -t "$session_name" -F '#{window_id}	#{pane_current_path}' 2>/dev/null)
+  fi
+  if [[ -n "$target_window" ]]; then
+    tmux select-window -t "$target_window" 2>/dev/null || true
+  else
+    tmux last-window 2>/dev/null || true
+  fi
+fi
+
+# ---------- detached reclaim ----------
+# Fork to /tmp so the running process keeps a valid cwd after `git worktree
+# remove` rips the worktree out from under us. Output gets logged so
+# failures aren't silent.
+log_root="${WEZTERM_RUNTIME_STATE_DIR:-$HOME/.local/state/wezterm-runtime}/state/worktree-task"
+mkdir -p "$log_root" 2>/dev/null || true
+log_file="$log_root/reclaim-${slug}-$(date -u +%Y%m%dT%H%M%SZ).log"
+
+runtime_log_info worktree "dispatching detached reclaim" \
+  "slug=$slug" \
+  "main_root=$main_root" \
+  "log_file=$log_file" \
+  "source_window=${SOURCE_WINDOW_ID:-<none>}"
+
+wt_tmux_progress "[worktree-task] reclaiming $slug…"
+
+(
+  cd /tmp
+  exec >>"$log_file" 2>&1
+  printf '[%s] reclaim start slug=%s main_root=%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$slug" "$main_root"
+  if "$WORKTREE_TASK_CLI" reclaim --cwd "$main_root" --task-slug "$slug"; then
+    printf '[%s] reclaim ok\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    wt_tmux_progress "[worktree-task] reclaimed $slug"
+    wt_tmux_progress_clear_after 1.5
+    if [[ -n "${TMUX:-}" && -n "$SOURCE_WINDOW_ID" ]]; then
+      tmux kill-window -t "$SOURCE_WINDOW_ID" 2>/dev/null || true
+    fi
+  else
+    rc=$?
+    printf '[%s] reclaim failed rc=%d (window kept open for inspection)\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$rc"
+    wt_tmux_progress "[worktree-task] reclaim $slug failed (rc=$rc); see $log_file"
+    wt_tmux_progress_clear_after 5
+  fi
+) </dev/null >/dev/null 2>&1 &
+disown 2>/dev/null || true

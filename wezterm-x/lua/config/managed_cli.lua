@@ -1,5 +1,20 @@
 local M = {}
 
+-- Longer suffixes must precede shorter ones so `FOO_COMMAND_LIGHT` matches
+-- `COMMAND_LIGHT` instead of being mis-parsed as profile name `FOO_COMMAND`
+-- with suffix `LIGHT`. Lua patterns have no alternation, so match each.
+local PROFILE_FIELD_SUFFIXES = { 'COMMAND_LIGHT', 'COMMAND_DARK', 'PROMPT_FLAG', 'COMMAND' }
+
+local function match_profile_key(key)
+  for _, suffix in ipairs(PROFILE_FIELD_SUFFIXES) do
+    local raw_name = key:match('^WT_PROVIDER_AGENT_PROFILE_([A-Z0-9_]+)_' .. suffix .. '$')
+    if raw_name then
+      return raw_name, suffix
+    end
+  end
+  return nil, nil
+end
+
 function M.normalize_agent_profile_name(name)
   if not name or name == '' then
     return nil
@@ -79,7 +94,7 @@ function M.parse_managed_cli_env(env)
   parsed.active_profile = M.normalize_agent_profile_name(env.WT_PROVIDER_AGENT_PROFILE)
 
   for key, value in pairs(env) do
-    local raw_name, field = key:match('^WT_PROVIDER_AGENT_PROFILE_([A-Z0-9_]+)_(COMMAND|COMMAND_LIGHT|COMMAND_DARK|PROMPT_FLAG)$')
+    local raw_name, field = match_profile_key(key)
     if raw_name and field then
       local profile_name = M.normalize_agent_profile_name(raw_name)
       if profile_name then

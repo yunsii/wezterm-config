@@ -23,16 +23,45 @@ WezTerm workspaces are the top-level session unit. For the full WezTerm-vs-tmux 
 - Inside that tmux session, each git worktree gets its own tmux window.
 - Worktree switching inside that tmux session follows the live git state of the current pane or window layout, so manually created linked worktrees are discoverable without prewritten tmux metadata.
 - The `worktree-task` skill creates linked task worktrees under the repository parent's `.worktrees/<repo>/` directory and opens them as additional tmux windows inside that same repo-family session.
-- The `worktree-task` skill also ships an `open-task-window` script (`skills/worktree-task/scripts/open-task-window`) as a quick-create entry; `scripts/runtime/open-task-window.sh <name>` is a thin runtime wrapper that execs into it, and `Ctrl+k` `g` binds it to a tmux chord (see [`keybindings.md`](./keybindings.md#panes)). The script forwards <name> to `worktree-task launch` as the task title — same slug/branch conventions as the skill, plus a leading `task/` is stripped so `fix-auth` and `task/fix-auth` resolve to the same worktree. The configured agent starts in the new tmux window but receives no prompt (launched with `--no-prompt`), so it comes up idle.
+- The `worktree-task` runtime also ships an `open-task-window` script (`scripts/runtime/worktree/open-task-window`) as a quick-create entry, bound to the `Ctrl+k` `g` sub-chord (`g d` for dev-, `g t` for task-, `g h` for hotfix-, `g r` to reclaim the current pane's worktree; see [`keybindings.md`](./keybindings.md#panes)). The script forwards <name> to `worktree-task launch` as the task title and prepends the lifecycle prefix; a leading `task/` is stripped so `fix-auth` and `task/fix-auth` resolve to the same worktree. The configured agent starts in the new tmux window but receives no prompt (launched with `--no-prompt`), so it comes up idle.
 - The left pane runs the configured primary command.
 - The right pane stays as a shell in the same directory.
 - `work` and `config` default to the managed launcher profile from `managed_cli.default_profile`.
 - The tracked baseline resolves that profile from `MANAGED_AGENT_PROFILE` in `wezterm-x/local/shared.env` when present; otherwise it falls back through the shared `worktree-task` config and then the built-in Lua default.
 - The managed agent startup uses the profile default, and switches to the light variant when `managed_cli.ui_variant = "light"`.
+- Profile commands are forked into bare and `-resume` variants. Bare `claude` / `codex` start fresh on every pane open and are used for the main worktree (no stale cross-task context) and for `hotfix-*` worktrees (urgent context shouldn't be polluted). The `claude-resume` / `codex-resume` profiles auto-continue the cwd's most recent conversation (`claude --continue`, `sh -c 'codex resume --last || exec codex'`) and are used for `dev-*` long-lived worktrees and `task-*` short-lived worktrees where cross-session continuity is the asset. `open-task-window --type` picks the right profile per lifecycle automatically; main-worktree panes inherit the user's `MANAGED_AGENT_PROFILE` (default `claude`).
+- Profile command strings are sourced from `config/worktree-task.env` (repo-level) and `~/.config/worktree-task/config.env` (user-level). The Lua baseline in `wezterm-x/lua/constants.lua` only carries bare fallbacks used when no env file populates them, so both WezTerm workspace panes and worktree-task quick-create windows read the same single source of truth; edit the env file to change every surface at once.
 - Managed agent commands run inside the resolved login shell so workspace startup sees the same shell environment as your normal terminal sessions.
 - Raw `command = { ... }` overrides still bypass the managed launcher profile entirely.
 - Existing tmux worktree sessions are reused as-is. Changing the launcher affects newly created or recreated sessions.
 - `workspace.open()` opens only its first configured entry window immediately. Wider navigation is expected to happen inside tmux.
+
+## Task Worktree Lifecycle Model
+
+The worktree-task runtime supports a two-tier model where directory naming encodes lifecycle, decoupled from git branch naming. Use this for projects with team collaboration and PR review cycles; **personal projects that work directly on master usually don't need it**.
+
+### Directory prefixes (lifecycle)
+
+| Prefix | Lifetime | Created by | Reclaimed by | Agent profile |
+|---|---|---|---|---|
+| `main/` (the primary worktree) | permanent | initial clone | never | bare `claude` / `codex` |
+| `dev-*` | weeks–months | `Ctrl+k g d` | manual `git worktree remove` only — `worktree-task reclaim` refuses | `claude-resume` / `codex-resume` |
+| `task-*` | hours–days | `Ctrl+k g t` | `Ctrl+k g r` after merge | `claude-resume` / `codex-resume` |
+| `hotfix-*` | hours | `Ctrl+k g h` | `Ctrl+k g r` after merge | bare `claude` / `codex` |
+
+Long-lived `dev-*` worktrees act like persistent parallel "workstations" — accumulated agent context, dev-server state, dependency caches survive across days. Reclaim is intentionally refused on them by both the CLI and the hotkey to prevent loss of that state.
+
+### Branch naming is independent
+
+Worktree directory prefix encodes lifecycle (your local UX), git branch name still follows the team's branch policy (their merge surface). The `WT_POLICY_BRANCH_PREFIX=task/` default places branches under `task/<slug>` regardless of directory prefix; override with `--branch` per launch when team policy differs.
+
+### Base ref strategy
+
+The default `WT_POLICY_BASE_REF_STRATEGY=origin-default-branch` performs `git fetch origin` then branches off `origin/HEAD`. This insulates new worktrees from the primary worktree's current checkout AND from local divergence with origin. **First-time setup**: run `git remote set-head origin -a` once per repo to populate `origin/HEAD`. Repos without a remote fall back to `WT_POLICY_BASE_REF_STRATEGY=primary-head` (set explicitly in their env file or pass `--base-ref HEAD` per launch).
+
+### Reclaim safety
+
+`worktree-task reclaim` (and the `Ctrl+k g r` wrapper) enforce: refuse on the primary worktree, refuse on `dev-*` slugs, refuse on uncommitted/untracked changes (use `--force` to override), and only delete the task branch when it's already merged into the primary worktree's HEAD. After removal: `git worktree prune` cleans any phantom admin entries git may still hold. The Claude Code transcript at `~/.claude/projects/<escaped-cwd>/` is intentionally left in place — when a later worktree happens to reuse the same slug (legitimate inside the lifecycle prefix model), `claude --continue` resumes the prior conversation; use `/clear` inside the resumed session if the carried-over context isn't wanted.
 
 ## File Ownership
 

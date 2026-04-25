@@ -17,7 +17,7 @@ source "$SCRIPT_DIR/lib/manifest.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/core.sh"
 
-WT_SKILL_SCRIPTS_DIR="$SCRIPT_DIR"
+WT_SCRIPTS_DIR="$SCRIPT_DIR"
 
 command="${1:-}"
 shift || true

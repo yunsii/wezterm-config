@@ -169,6 +169,9 @@ local base_constants = {
   managed_cli = {
     default_profile = 'claude',
     ui_variant = 'light',
+    -- Profile commands below are bare fallbacks used only when no worktree-task
+    -- env file populates them; the tracked source of truth for day-to-day
+    -- auto-resume behavior lives in `config/worktree-task.env`.
     profiles = {
       claude = {
         command = { 'claude' },

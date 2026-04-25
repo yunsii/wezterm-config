@@ -8,7 +8,7 @@ usage:
 commands:
   configure Configure or update WEZTERM_CONFIG_REPO for worktree-task
   launch    Create a linked task worktree and optionally open it in tmux
-  reclaim   Remove a linked task worktree created by this skill
+  reclaim   Remove a linked task worktree created by worktree-task
 
 environment:
   WEZTERM_CONFIG_REPO  Required wezterm-config repo root; if it is missing, configure it first with worktree-task configure --repo /absolute/path
@@ -161,7 +161,7 @@ wt_core_provider_prompt_path() {
 }
 
 wt_core_provider_command() {
-  wt_provider_resolve_command "$WT_SKILL_SCRIPTS_DIR" "${1:?missing provider name}"
+  wt_provider_resolve_command "$WT_SCRIPTS_DIR" "${1:?missing provider name}"
 }
 
 wt_core_export_provider_env() {
@@ -514,6 +514,17 @@ wt_core_launch() {
       primary-head)
         base_ref="$(git -C "$WT_MAIN_WORKTREE_ROOT" rev-parse --verify HEAD)"
         ;;
+      origin-default-branch)
+        # Always branch off the upstream default branch's tip — insulates
+        # new worktrees from the primary worktree's current checkout AND
+        # from local divergence with origin.
+        wt_tmux_progress "[worktree-task] fetching origin…"
+        if ! git -C "$WT_MAIN_WORKTREE_ROOT" fetch origin --quiet 2>/dev/null; then
+          wt_die "fetch origin failed (network down or 'origin' remote missing)"
+        fi
+        base_ref="$(git -C "$WT_MAIN_WORKTREE_ROOT" rev-parse --verify origin/HEAD 2>/dev/null)" \
+          || wt_die "origin/HEAD is not set; run 'git -C $WT_MAIN_WORKTREE_ROOT remote set-head origin -a' once, then retry"
+        ;;
       *)
         wt_die "unsupported base ref strategy: $WT_POLICY_BASE_REF_STRATEGY"
         ;;
@@ -570,6 +581,7 @@ wt_core_launch() {
     runtime_log_info task "reusing existing worktree path" "worktree_path=$WT_WORKTREE_PATH" "branch_name=$WT_BRANCH_NAME"
   else
     worktree_created=1
+    wt_tmux_progress "[worktree-task] creating worktree $WT_TASK_SLUG…"
     if wt_git_branch_exists "$WT_MAIN_WORKTREE_ROOT" "$WT_BRANCH_NAME"; then
       git -C "$WT_MAIN_WORKTREE_ROOT" worktree add "$WT_WORKTREE_PATH" "$WT_BRANCH_NAME"
     else
@@ -591,9 +603,11 @@ wt_core_launch() {
     provider_prompt_created=1
   fi
 
+  wt_tmux_progress "[worktree-task] $WT_TASK_SLUG ready, starting agent…"
   if wt_core_run_launch_provider; then
     :
   else
+    wt_tmux_progress ''
     wt_core_rollback_launch_failure "$worktree_created" "$branch_created" "$provider_prompt_created"
     wt_die "provider launch failed: $WT_SELECTED_PROVIDER"
   fi
@@ -620,6 +634,9 @@ wt_core_launch() {
     "$WT_SELECTED_PROVIDER" \
     "$WT_PROVIDER_RESULT_SESSION_NAME" \
     "$WT_PROVIDER_RESULT_WINDOW_ID"
+
+  wt_tmux_progress "[worktree-task] $WT_TASK_SLUG launched"
+  wt_tmux_progress_clear_after 1.5
 
   runtime_log_info task "launch completed" \
     "worktree_path=$WT_WORKTREE_PATH" \
@@ -736,7 +753,7 @@ wt_core_reclaim() {
     "$WT_POLICY_WORKTREE_DIR_ABS"/*)
       ;;
     *)
-      wt_die "target worktree is not under the skill-managed task directory: $WT_WORKTREE_PATH"
+      wt_die "target worktree is not under the managed task directory: $WT_WORKTREE_PATH"
       ;;
   esac
 
@@ -748,6 +765,17 @@ wt_core_reclaim() {
   fi
 
   WT_TASK_SLUG="$(basename "$WT_WORKTREE_PATH")"
+
+  # Refuse to reclaim long-lived workstation worktrees by lifecycle prefix.
+  # `dev-*` is reserved for multi-week parallel development; reclaiming
+  # them by accident would lose accumulated agent context and dev-server
+  # state. Use `git worktree remove` directly if you really mean it.
+  case "$WT_TASK_SLUG" in
+    dev-*)
+      wt_die "refusing to reclaim long-lived worktree: $WT_TASK_SLUG (use 'git worktree remove' if intentional)"
+      ;;
+  esac
+
   WT_PROMPT_FILE="$(wt_core_provider_prompt_path "$WT_TASK_SLUG")"
   WT_MANIFEST_FILE="$(wt_manifest_path "$WT_POLICY_METADATA_DIR_ABS" "$WT_TASK_SLUG")"
   WT_BRANCH_NAME="$(git -C "$WT_WORKTREE_PATH" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
@@ -808,6 +836,10 @@ wt_core_reclaim() {
     git -C "$WT_MAIN_WORKTREE_ROOT" worktree remove "$WT_WORKTREE_PATH"
   fi
   runtime_log_info task "removed linked worktree" "worktree_path=$WT_WORKTREE_PATH" "provider_cleanup_status=$WT_PROVIDER_CLEANUP_STATUS"
+
+  # Defense-in-depth: drop any phantom admin entry git may still hold
+  # (e.g., when an earlier `rm -rf` raced ahead of `worktree remove`).
+  git -C "$WT_MAIN_WORKTREE_ROOT" worktree prune 2>/dev/null || true
 
   if [[ -f "$WT_PROMPT_FILE" ]]; then
     rm -f "$WT_PROMPT_FILE"

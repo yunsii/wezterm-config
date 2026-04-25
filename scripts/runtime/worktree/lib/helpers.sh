@@ -1,5 +1,34 @@
 #!/usr/bin/env bash
 
+# Best-effort persistent progress indicator in the user's tmux client,
+# rendered through `@tmux_status_override_line_2` (same channel
+# `tmux-chord-hint.sh` uses). Empty arg clears the override; non-empty
+# arg replaces it. Stays visible across milestones — no flashing — and
+# lets the bottom status line track multi-second operations end to end.
+# No-op when not attached to tmux.
+wt_tmux_progress() {
+  [[ -n "${TMUX:-}" ]] || return 0
+  local session
+  session="$(tmux display-message -p '#{session_name}' 2>/dev/null || true)"
+  [[ -n "$session" ]] || return 0
+  if [[ -z "${1:-}" ]]; then
+    tmux set-option -qu -t "$session" '@tmux_status_override_line_2' 2>/dev/null || true
+  else
+    tmux set-option -q -t "$session" '@tmux_status_override_line_2' "$1" 2>/dev/null || true
+  fi
+  tmux refresh-client -S 2>/dev/null || true
+}
+
+# Schedule a deferred clear so the final milestone lingers a beat after
+# the operation completes (user reads the success state, then it goes
+# back to normal). Runs detached; no return.
+wt_tmux_progress_clear_after() {
+  [[ -n "${TMUX:-}" ]] || return 0
+  local delay="${1:-1.5}"
+  ( sleep "$delay" && wt_tmux_progress '' ) >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+}
+
 wt_die() {
   if declare -F runtime_log_error >/dev/null 2>&1; then
     runtime_log_error task "worktree-task failed" "message=$*"

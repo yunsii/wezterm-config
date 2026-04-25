@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# open-task-window — quick-create a task workspace: hand a short <name> to
+# `worktree-task launch` as the task title so slug and branch follow the
+# same `wt_slugify` / `task/<slug>` convention `worktree-task` uses on its
+# own, then start the configured agent in the new tmux window without
+# feeding it any prompt. Collisions are bumped to `<slug>-2`, `<slug>-3`, …
+# by `worktree-task` — opening an already-existing task worktree belongs
+# to `Alt+g` / `Alt+Shift+g`, not here. Full lifecycle (prompt, reclaim,
+# custom provider) still belongs to `worktree-task launch`/`reclaim`.
+#
+# `--type dev|task|hotfix` opts into the lifecycle-aware path: it prefixes
+# the slug (so `--type dev` + `billing` → worktree dir `dev-billing/`) and
+# picks the agent profile to match (dev/task → `<base>-resume` for cwd
+# auto-resume; hotfix → bare `<base>` for a fresh agent so urgent context
+# isn't polluted by yesterday's task). `<base>` defaults to whatever
+# MANAGED_AGENT_PROFILE selects (claude / codex / …).
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WEZTERM_CONFIG_REPO_DEFAULT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+WORKTREE_TASK_CLI="$SCRIPT_DIR/worktree-task"
+RUNTIME_LIB_DIR="$WEZTERM_CONFIG_REPO_DEFAULT/scripts/runtime"
+
+# shellcheck disable=SC1091
+source "$RUNTIME_LIB_DIR/runtime-log-lib.sh"
+
+export WEZTERM_RUNTIME_LOG_SOURCE="worktree-task.open-window"
+
+usage() {
+  cat <<'EOF'
+usage: open-task-window [--type dev|task|hotfix] <name>
+
+Quick-create a task workspace for <name>. `worktree-task` treats <name> as
+a task title, slugifies it (lowercase + `-` separators), and creates
+branch `task/<slug>` with a linked worktree under `.worktrees/<repo>/<slug>/`.
+A leading `task/` in <name> is stripped so `fix-auth` and `task/fix-auth`
+produce the same result. Existing worktrees with the same slug bump to
+`<slug>-2`, `<slug>-3`, etc. — use `Alt+g` / `Alt+Shift+g` to reopen an
+already-existing task worktree instead.
+
+  --type dev      long-lived parallel dev workstation; agent uses
+                  `<base>-resume` profile to keep multi-day context
+  --type task     short-lived focused task (PR-scoped); resume profile
+  --type hotfix   urgent fix; bare profile so context is fresh
+
+Without --type, behavior is the legacy bare-name path (kept for
+backward compat and direct CLI invocation).
+EOF
+}
+
+die() {
+  printf 'open-task-window: %s\n' "$1" >&2
+  exit 1
+}
+
+type_kind=""
+raw=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --type)
+      [[ $# -ge 2 ]] || die "--type requires a value (dev, task, or hotfix)"
+      type_kind="$2"
+      shift 2
+      ;;
+    --type=*)
+      type_kind="${1#--type=}"
+      shift
+      ;;
+    --)
+      shift
+      [[ $# -eq 1 && -n "${1:-}" ]] || { usage >&2; exit 1; }
+      raw="$1"
+      shift
+      ;;
+    -*)
+      die "unknown flag: $1"
+      ;;
+    *)
+      [[ -z "$raw" ]] || die "expected exactly one positional <name>, got more"
+      raw="$1"
+      shift
+      ;;
+  esac
+done
+
+[[ -n "$raw" ]] || { usage >&2; exit 1; }
+
+case "$type_kind" in
+  ""|dev|task|hotfix) ;;
+  *) die "invalid --type: $type_kind (expected dev, task, or hotfix)" ;;
+esac
+
+# Strip one optional `task/` prefix so typing the canonical branch form
+# produces the same output as the short name. Everything past the prefix
+# goes to `worktree-task` as a title, which handles slugification itself.
+case "$raw" in
+  task/)  die "task name is empty after stripping 'task/' prefix" ;;
+  task/*) name="${raw#task/}" ;;
+  *)      name="$raw" ;;
+esac
+
+# Apply lifecycle prefix. If user already typed `dev-billing` after picking
+# --type dev, don't double up. If they typed a different prefix (e.g.
+# `task-foo` under --type dev), keep their input verbatim — that's a sign
+# they're being explicit and we shouldn't second-guess.
+if [[ -n "$type_kind" ]]; then
+  case "$name" in
+    "${type_kind}-"*) title="$name" ;;
+    *)                title="${type_kind}-${name}" ;;
+  esac
+else
+  title="$name"
+fi
+
+# Profile selection per lifecycle. Resolve the "base" profile from the
+# user's preference (MANAGED_AGENT_PROFILE in shared.env), strip any
+# trailing `-resume` so we re-derive cleanly, then add it back per type.
+base_profile="${MANAGED_AGENT_PROFILE:-claude}"
+base_profile="${base_profile%-resume}"
+case "$type_kind" in
+  dev|task)
+    selected_profile="${base_profile}-resume"
+    ;;
+  hotfix)
+    selected_profile="$base_profile"
+    ;;
+  "")
+    # Legacy path keeps the user's existing profile choice unchanged.
+    selected_profile="${MANAGED_AGENT_PROFILE:-}"
+    ;;
+esac
+
+[[ -x "$WORKTREE_TASK_CLI" ]] || die "worktree-task CLI not found or not executable: $WORKTREE_TASK_CLI"
+
+launch_env=(env)
+if [[ -z "${WEZTERM_CONFIG_REPO:-}" ]]; then
+  launch_env+=("WEZTERM_CONFIG_REPO=$WEZTERM_CONFIG_REPO_DEFAULT")
+fi
+if [[ -n "$selected_profile" ]]; then
+  launch_env+=("MANAGED_AGENT_PROFILE=$selected_profile")
+fi
+# `env` with no extra args is a noop wrapper; the shape stays consistent
+# whether we set anything or not.
+
+runtime_log_info worktree "dispatching to worktree-task launch" \
+  "raw=$raw" "type=${type_kind:-<none>}" "title=$title" "profile=${selected_profile:-<inherit>}"
+
+# Immediate feedback so the user sees the chord registered before any
+# slow git/fetch work starts. Each downstream stage will replace this
+# message in the same status-line slot. No-op outside tmux.
+if [[ -n "${TMUX:-}" ]]; then
+  tmux_session="$(tmux display-message -p '#{session_name}' 2>/dev/null || true)"
+  if [[ -n "$tmux_session" ]]; then
+    tmux set-option -q -t "$tmux_session" '@tmux_status_override_line_2' \
+      "[worktree-task] preparing $title…" 2>/dev/null || true
+    tmux refresh-client -S 2>/dev/null || true
+  fi
+fi
+
+exec "${launch_env[@]}" "$WORKTREE_TASK_CLI" launch \
+  --title "$title" \
+  --provider tmux-agent \
+  --provider-mode auto \
+  --no-prompt

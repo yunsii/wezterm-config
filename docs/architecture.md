@@ -81,9 +81,9 @@ Invariants:
 - `scripts/runtime/attention-jump.sh`: WSL-side orchestrator for attention jumps — runs `tmux select-window`/`select-pane`, recovers a missing `wezterm_pane_id` from tmux session env when needed, and falls back to `wezterm.exe cli activate-pane` for contexts where Lua isn't driving the GUI side (explicit CLI invocation, `--clear-all`). Also owns the `--forget` and `--prune` entrypoints that implement the delayed auto-clear (used by both `Alt+.`/`Alt+/` jumps and the focus-based auto-ack) and the periodic TTL sweep
 - `scripts/runtime/tmux-focus-emit.sh`: wired from tmux `pane-focus-in` / `after-select-pane` hooks to record the currently-active tmux pane per `(socket, session)` into a per-session file, so `attention.maybe_ack_focused` can require tmux-pane-level focus (not just WezTerm pane focus) before auto-acking a `done` entry
 - `wezterm-x/local/`: gitignored machine-local overrides copied by the sync skill when present
-- `config/worktree-task.env`: tracked repo profile for the self-contained `worktree-task` skill
+- `config/worktree-task.env`: tracked repo profile for the `worktree-task` runtime
 - `skills/wezterm-runtime-sync/`: runtime sync workflow, prompt rendering, and prompt regression scripts
-- `skills/worktree-task/`: linked worktree task skill with unified CLI, core libraries, and built-in providers
+- `scripts/runtime/worktree/`: linked worktree task runtime — `worktree-task` CLI, `open-task-window` (Ctrl+k g d/t/h create entry), `reclaim-current-window` (Ctrl+k g r reclaim entry), core libraries under `lib/`, built-in providers under `providers/`
 - `scripts/runtime/open-project-session.sh`: tmux bootstrap for managed project tabs
 - `scripts/runtime/primary-pane-wrapper.sh`: traps INT/HUP/TERM around the managed agent and execs the login shell on exit so the primary pane survives agent death
 - `scripts/runtime/run-managed-command.sh`: managed startup command launcher
@@ -100,7 +100,7 @@ Invariants:
 ## Startup Invariants
 
 - Managed project tabs bootstrap through `scripts/runtime/open-project-session.sh`.
-- Linked task worktree windows bootstrap through the built-in tmux provider under `skills/worktree-task/scripts/providers/tmux-agent.sh`.
+- Linked task worktree windows bootstrap through the built-in tmux provider under `scripts/runtime/worktree/providers/tmux-agent.sh`.
 - The built-in task-worktree tmux provider must derive repo-family session reuse and task-window ownership from live git context instead of stored tmux metadata.
 - `open-project-session.sh` launches managed commands inside an interactive login shell so the environment matches the right-side shell pane.
 - The managed command runs under `primary-pane-wrapper.sh`, which traps INT/HUP/TERM and execs the user's login shell after the agent returns. Logs each transition under `category=primary_pane` so pane deaths can be diagnosed post-mortem.
@@ -155,9 +155,9 @@ flowchart LR
 
 ## Worktree Task
 
-- Use the `worktree-task` skill when you want a fresh agent CLI implementation session in a linked worktree instead of continuing in the current worktree.
-- The skill creates linked worktrees under the repository parent's `.worktrees/<repo>/` directory.
-- `WEZTERM_CONFIG_REPO` is required. Use `skills/worktree-task/scripts/worktree-task configure --repo /absolute/path` as the stable recovery path whenever it is missing.
+- Use the `worktree-task` runtime when you want a fresh agent CLI implementation session in a linked worktree instead of continuing in the current worktree.
+- It creates linked worktrees under the repository parent's `.worktrees/<repo>/` directory.
+- `WEZTERM_CONFIG_REPO` is required. Use `scripts/runtime/worktree/worktree-task configure --repo /absolute/path` as the stable recovery path whenever it is missing.
 - This repository's tracked worktree-task profile lives at `config/worktree-task.env`.
 - Machine-local agent selection belongs in `wezterm-x/local/shared.env` as `MANAGED_AGENT_PROFILE=claude|codex|...`.
 - Managed workspace launchers and the built-in `tmux-agent` provider execute the actual agent CLI inside the resolved login shell so PATH and shell startup files come from one stable source.

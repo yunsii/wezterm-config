@@ -226,23 +226,83 @@
     "palette": { "display_only": true }
   },
   {
-    "id": "worktree.quick-create",
-    "label": "Worktree: Quick-create task workspace",
-    "description": "Open a `branch:` prompt; the entered name is forwarded to `worktree-task launch --provider tmux-agent --no-prompt` so slug and branch follow the skill's `task/<slug>` convention and the configured agent starts idle in the new tmux window. Collisions bump to `<slug>-2`, `<slug>-3`.",
+    "id": "worktree.quick-create-dev",
+    "label": "Worktree: Quick-create dev-* (long-lived)",
+    "description": "Open a `dev-:` prompt; entered name becomes worktree `dev-<slug>` for long-lived parallel development. Agent uses the `<base>-resume` profile so cwd context is preserved across days.",
     "scope": "project-navigation",
     "context": "tmux-backed",
     "hotkeys": [
-      { "keys": "Ctrl+k g", "layer": "tmux-chord" }
+      { "keys": "Ctrl+k g d", "layer": "tmux-chord" }
     ],
     "palette": {
-      "accelerator": "g",
+      "accelerator": "d",
       "command": [
         "bash",
         "-lc",
-        "tmux command-prompt -p 'branch:' \"run-shell -b 'bash {repo_root}/scripts/runtime/open-task-window.sh \\\"%1\\\" >/dev/null 2>&1'\""
+        "tmux command-prompt -p 'dev-:' \"run-shell -b 'bash {repo_root}/scripts/runtime/worktree/open-task-window --type dev \\\"%1\\\" >/dev/null 2>&1'\""
       ],
-      "success_message": "Opened branch prompt.",
-      "failure_message": "Failed to open branch prompt."
+      "success_message": "Opened dev-: prompt.",
+      "failure_message": "Failed to open dev prompt."
+    }
+  },
+  {
+    "id": "worktree.quick-create-task",
+    "label": "Worktree: Quick-create task-* (short-lived)",
+    "description": "Open a `task-:` prompt; entered name becomes worktree `task-<slug>` for PR-scoped focused work. Agent uses the `<base>-resume` profile.",
+    "scope": "project-navigation",
+    "context": "tmux-backed",
+    "hotkeys": [
+      { "keys": "Ctrl+k g t", "layer": "tmux-chord" }
+    ],
+    "palette": {
+      "accelerator": "t",
+      "command": [
+        "bash",
+        "-lc",
+        "tmux command-prompt -p 'task-:' \"run-shell -b 'bash {repo_root}/scripts/runtime/worktree/open-task-window --type task \\\"%1\\\" >/dev/null 2>&1'\""
+      ],
+      "success_message": "Opened task-: prompt.",
+      "failure_message": "Failed to open task prompt."
+    }
+  },
+  {
+    "id": "worktree.quick-create-hotfix",
+    "label": "Worktree: Quick-create hotfix-* (urgent)",
+    "description": "Open a `hotfix-:` prompt; entered name becomes worktree `hotfix-<slug>` for urgent fixes. Agent uses the bare `<base>` profile so context is fresh — no stale resume state.",
+    "scope": "project-navigation",
+    "context": "tmux-backed",
+    "hotkeys": [
+      { "keys": "Ctrl+k g h", "layer": "tmux-chord" }
+    ],
+    "palette": {
+      "accelerator": "h",
+      "command": [
+        "bash",
+        "-lc",
+        "tmux command-prompt -p 'hotfix-:' \"run-shell -b 'bash {repo_root}/scripts/runtime/worktree/open-task-window --type hotfix \\\"%1\\\" >/dev/null 2>&1'\""
+      ],
+      "success_message": "Opened hotfix-: prompt.",
+      "failure_message": "Failed to open hotfix prompt."
+    }
+  },
+  {
+    "id": "worktree.reclaim-current",
+    "label": "Worktree: Reclaim current task-/hotfix- worktree",
+    "description": "Reclaim the current pane's worktree after merge. Refuses on main, dev-*, dirty/untracked changes, or unmerged branch. Switches focus to the main worktree window, runs reclaim detached, then closes the original window.",
+    "scope": "project-navigation",
+    "context": "tmux-backed",
+    "hotkeys": [
+      { "keys": "Ctrl+k g r", "layer": "tmux-chord" }
+    ],
+    "palette": {
+      "accelerator": "r",
+      "command": [
+        "bash",
+        "-lc",
+        "{repo_root}/scripts/runtime/worktree/reclaim-current-window"
+      ],
+      "success_message": "Reclaim dispatched.",
+      "failure_message": "Reclaim refused (see message)."
     }
   },
   {
