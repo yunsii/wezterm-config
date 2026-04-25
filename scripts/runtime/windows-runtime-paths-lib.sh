@@ -5,6 +5,39 @@ windows_runtime_trim_cr() {
 }
 
 windows_runtime_detect_paths() {
+  # Fast path 1: in-process memoization. Multiple call sites in one
+  # bash invocation (e.g. attention_state_path called by both _init and
+  # _read) skip the second cmd.exe round-trip.
+  if [[ -n "${WINDOWS_RUNTIME_STATE_WSL:-}" && -n "${WINDOWS_LOCALAPPDATA_WSL:-}" && -n "${WINDOWS_USERPROFILE_WSL:-}" ]]; then
+    return 0
+  fi
+
+  # Fast path 2: persistent disk cache. Each cmd.exe spawn from WSL
+  # costs ~100-200ms (Windows process creation across WSL2 interop);
+  # the menu.sh hot path triggers detection ~3 times → up to 600ms of
+  # pure cmd.exe overhead per Alt+/. The values cached here
+  # (LOCALAPPDATA, USERPROFILE) are stable per-machine — they only
+  # change on user account rename or env edit, so a 24h TTL is
+  # generous. Bypass with WEZTERM_NO_PATH_CACHE=1 (used by the bench
+  # harness when measuring cold-start cost honestly).
+  local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/wezterm-runtime"
+  local cache_file="$cache_dir/windows-paths.env"
+  local cache_ttl_seconds="${WEZTERM_WINDOWS_PATHS_CACHE_TTL:-86400}"
+  if [[ -z "${WEZTERM_NO_PATH_CACHE:-}" && -f "$cache_file" ]]; then
+    local cache_age
+    cache_age=$(( $(date +%s) - $(stat -c %Y "$cache_file" 2>/dev/null || echo 0) ))
+    if (( cache_age >= 0 && cache_age < cache_ttl_seconds )); then
+      # shellcheck disable=SC1090
+      . "$cache_file" 2>/dev/null || true
+      if [[ -n "${WINDOWS_RUNTIME_STATE_WSL:-}" && -n "${WINDOWS_LOCALAPPDATA_WSL:-}" && -n "${WINDOWS_USERPROFILE_WSL:-}" ]]; then
+        return 0
+      fi
+    fi
+  fi
+
+  # Slow path: actual cmd.exe + wslpath detection. Runs at most once
+  # per cache TTL window, or whenever the cache is missing / corrupt /
+  # explicitly bypassed.
   local localappdata_win="" userprofile_win=""
 
   command -v cmd.exe >/dev/null 2>&1 || return 1
@@ -35,6 +68,34 @@ windows_runtime_detect_paths() {
   WINDOWS_HELPER_IPC_ENDPOINT='\\.\pipe\wezterm-host-helper-v1'
 
   WINDOWS_CLIPBOARD_OUTPUT_WIN="${WINDOWS_RUNTIME_STATE_WIN}\\state\\clipboard\\exports"
+
+  # Persist for the next bash invocation. Atomic write so a concurrent
+  # reader never sees a half-written file. Failure is non-fatal — the
+  # next caller just re-runs cmd.exe.
+  if [[ -z "${WEZTERM_NO_PATH_CACHE:-}" ]]; then
+    mkdir -p "$cache_dir" 2>/dev/null || return 0
+    local tmp="$cache_file.tmp.$$"
+    {
+      printf 'WINDOWS_LOCALAPPDATA_WIN=%q\n' "$WINDOWS_LOCALAPPDATA_WIN"
+      printf 'WINDOWS_USERPROFILE_WIN=%q\n' "$WINDOWS_USERPROFILE_WIN"
+      printf 'WINDOWS_LOCALAPPDATA_WSL=%q\n' "$WINDOWS_LOCALAPPDATA_WSL"
+      printf 'WINDOWS_USERPROFILE_WSL=%q\n' "$WINDOWS_USERPROFILE_WSL"
+      printf 'WINDOWS_RUNTIME_STATE_WIN=%q\n' "$WINDOWS_RUNTIME_STATE_WIN"
+      printf 'WINDOWS_RUNTIME_STATE_WSL=%q\n' "$WINDOWS_RUNTIME_STATE_WSL"
+      printf 'WINDOWS_RUNTIME_HOME_WIN=%q\n' "$WINDOWS_RUNTIME_HOME_WIN"
+      printf 'WINDOWS_RUNTIME_HOME_WSL=%q\n' "$WINDOWS_RUNTIME_HOME_WSL"
+      printf 'WINDOWS_HELPER_STATE_WIN=%q\n' "$WINDOWS_HELPER_STATE_WIN"
+      printf 'WINDOWS_HELPER_STATE_WSL=%q\n' "$WINDOWS_HELPER_STATE_WSL"
+      printf 'WINDOWS_HELPER_WINDOW_CACHE_WSL=%q\n' "$WINDOWS_HELPER_WINDOW_CACHE_WSL"
+      printf 'WINDOWS_HELPER_CLIENT_WSL=%q\n' "$WINDOWS_HELPER_CLIENT_WSL"
+      printf 'WINDOWS_HELPER_LOG_WSL=%q\n' "$WINDOWS_HELPER_LOG_WSL"
+      printf 'WINDOWS_HELPER_ENSURE_SCRIPT_WIN=%q\n' "$WINDOWS_HELPER_ENSURE_SCRIPT_WIN"
+      printf 'WINDOWS_HELPER_ENSURE_SCRIPT_WSL=%q\n' "$WINDOWS_HELPER_ENSURE_SCRIPT_WSL"
+      printf 'WINDOWS_HELPER_IPC_ENDPOINT=%q\n' "$WINDOWS_HELPER_IPC_ENDPOINT"
+      printf 'WINDOWS_CLIPBOARD_OUTPUT_WIN=%q\n' "$WINDOWS_CLIPBOARD_OUTPUT_WIN"
+    } > "$tmp" 2>/dev/null && mv -f "$tmp" "$cache_file" 2>/dev/null
+    rm -f "$tmp" 2>/dev/null
+  fi
 }
 
 windows_runtime_state_value() {

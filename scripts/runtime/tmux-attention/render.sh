@@ -29,6 +29,15 @@ attention_picker_emit_frame() {
   local visible_rows="$2"
   local selected_index="$3"
   local item_count="$4"
+  # Optional diagnostic timing args (all in ms; 0 disables that segment):
+  #   $5 = total elapsed   (T_render - T_keypress)
+  #   $6 = bucket L        (T_menu_start - T_keypress)
+  #   $7 = bucket M        (T_menu_done  - T_menu_start)
+  #   $8 = bucket P        (T_render     - T_menu_done)
+  local elapsed_ms="${5:-0}"
+  local lua_ms="${6:-0}"
+  local menu_ms="${7:-0}"
+  local picker_ms="${8:-0}"
 
   local start_index end_index row top_index status body age frame
   local reset=$'\033[0m'
@@ -91,9 +100,26 @@ attention_picker_emit_frame() {
     row=$((row + 1))
   done
 
-  # Footer: blank divider row, then dim hint line.
+  # Footer: blank divider row, then dim hint + powered-by badge + (when
+  # supplied) end-to-end key→paint latency. The powered-by badge makes
+  # which code path is live legible at a glance during the parallel-
+  # implementation phase (Go binary vs this bash fallback); same orange
+  # family as `⚠ WAIT` (palette 208) signals "fallback active, perf not
+  # at full speed". The latency badge is the diagnostic readout the user
+  # is actively comparing across runs — drop both once the Go picker is
+  # confirmed and this script is removed.
   row=$((row + 1))
-  frame+=$'\033['"${row};1H"$'\033[2m'"Enter jump | Up/Down move | Esc / Alt+/ close"$reset"$clear_eol"
+  frame+=$'\033['"${row};1H"$'\033[2m'"Enter jump | Up/Down move | Esc / Alt+/ close  ·  powered by "$'\033[22;1;38;5;208m'"bash"$reset
+  if [[ "$elapsed_ms" =~ ^[0-9]+$ ]] && (( elapsed_ms > 0 )); then
+    frame+=$'\033[2m'"  ·  ${elapsed_ms}ms"
+    if (( lua_ms > 0 || menu_ms > 0 || picker_ms > 0 )); then
+      frame+=" = ${lua_ms}+${menu_ms}+${picker_ms} (lua+menu+picker)"
+    else
+      frame+=" key→paint"
+    fi
+    frame+="$reset"
+  fi
+  frame+="$clear_eol"
 
   # Wipe anything still drawn below the footer (e.g. stale content from a
   # taller previous frame inside the same popup session).

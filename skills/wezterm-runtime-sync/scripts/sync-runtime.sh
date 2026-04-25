@@ -519,6 +519,19 @@ run_runtime_native_flow() {
     sync_trace "step=render-tmux-bindings status=completed"
   fi
 
+  # Build the static Go picker binary used by tmux-attention-menu.sh
+  # (and friends). Same gitignored-artifact pattern as the chord bindings:
+  # rebuild every sync so source changes pick up; skip silently when `go`
+  # is missing so machines without the toolchain still complete the sync
+  # (the bash fallback in tmux-attention-menu.sh handles the absence).
+  if [[ -x "$REPO_ROOT/scripts/runtime/picker/build.sh" ]]; then
+    if "$REPO_ROOT/scripts/runtime/picker/build.sh"; then
+      sync_trace "step=build-picker status=completed"
+    else
+      sync_trace "step=build-picker status=failed"
+    fi
+  fi
+
   cp -R "$RUNTIME_SOURCE_DIR"/. "$TEMP_RUNTIME_DIR"/
   if [[ -d "$NATIVE_SOURCE_DIR" ]]; then
     cp -R "$NATIVE_SOURCE_DIR"/. "$TEMP_NATIVE_DIR"/

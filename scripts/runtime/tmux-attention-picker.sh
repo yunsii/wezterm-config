@@ -24,6 +24,12 @@ set -u
 
 prefetch_file="${1:-}"
 prefetch_frame_file="${2:-}"
+keypress_ts="${3:-0}"
+menu_start_ts="${4:-0}"
+menu_done_ts="${5:-0}"
+[[ "$keypress_ts" =~ ^[0-9]+$ ]] || keypress_ts=0
+[[ "$menu_start_ts" =~ ^[0-9]+$ ]] || menu_start_ts=0
+[[ "$menu_done_ts" =~ ^[0-9]+$ ]] || menu_done_ts=0
 
 # First-paint fast path: emit the frame menu.sh pre-rendered before doing
 # any work. Use bash's `$(<file)` slurp instead of `cat` to skip the
@@ -93,13 +99,49 @@ terminal_size() {
 }
 
 render_picker() {
-  local rows cols visible_rows
+  local paint_kind="${1:-first}"
+  local rows cols visible_rows elapsed_ms lua_ms menu_ms picker_ms now
   IFS=' ' read -r rows cols <<< "$(terminal_size)"
   visible_rows=$((rows - 4))
   if (( visible_rows < 1 )); then
     visible_rows=1
   fi
-  attention_picker_emit_frame "$cols" "$visible_rows" "$selected_index" "$total"
+  elapsed_ms=0
+  lua_ms=0
+  menu_ms=0
+  picker_ms=0
+  now="$(date +%s%3N)"
+  if (( keypress_ts > 0 )); then
+    elapsed_ms=$((now - keypress_ts))
+    (( elapsed_ms < 0 )) && elapsed_ms=0
+  fi
+  if (( menu_start_ts > 0 && keypress_ts > 0 )); then
+    lua_ms=$((menu_start_ts - keypress_ts))
+    (( lua_ms < 0 )) && lua_ms=0
+  fi
+  if (( menu_done_ts > 0 && menu_start_ts > 0 )); then
+    menu_ms=$((menu_done_ts - menu_start_ts))
+    (( menu_ms < 0 )) && menu_ms=0
+  fi
+  if (( menu_done_ts > 0 )); then
+    picker_ms=$((now - menu_done_ts))
+    (( picker_ms < 0 )) && picker_ms=0
+  fi
+  attention_picker_emit_frame "$cols" "$visible_rows" "$selected_index" "$total" "$elapsed_ms" "$lua_ms" "$menu_ms" "$picker_ms"
+  # Perf event — own category so users can opt-in via
+  # WEZTERM_RUNTIME_LOG_CATEGORIES=attention.perf without pulling in the
+  # noisier `attention` lifecycle/render logs. Bench harness reads
+  # `paint_kind="first"` rows for cold-path stats.
+  runtime_log_info attention.perf "popup paint timing" \
+    "trace=$trace_id" \
+    "paint_kind=$paint_kind" \
+    "picker_kind=bash" \
+    "total_ms=$elapsed_ms" \
+    "lua_ms=$lua_ms" \
+    "menu_ms=$menu_ms" \
+    "picker_ms=$picker_ms" \
+    "item_count=$total" \
+    "selected_index=$selected_index"
 }
 
 read_key() {
@@ -146,12 +188,13 @@ dispatch_selection() {
   tmux run-shell -b "$cmd" 2>/dev/null || true
 }
 
-# menu.sh already painted the first frame; skip the redundant initial
-# render. Subsequent iterations only repaint on Up/Down — see the input
-# loop below.
-if [[ -z "$prefetch_frame_file" || ! -r "$prefetch_frame_file" ]]; then
-  render_picker
-fi
+# menu.sh already painted the first frame so the user sees content
+# instantly, but it could not embed the latency badge (popup hadn't
+# spawned yet — any number would have been a fictional half-measurement).
+# Force one render here so the diagnostic key→paint readout updates with
+# the real end-to-end time once libs have loaded. Subsequent iterations
+# only repaint on Up/Down — see the input loop below.
+render_picker first
 
 while true; do
   needs_render=0
@@ -181,6 +224,6 @@ while true; do
   esac
 
   if (( needs_render )); then
-    render_picker
+    render_picker repaint
   fi
 done

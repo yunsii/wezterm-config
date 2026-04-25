@@ -25,20 +25,32 @@
 
 set -u
 
+# Source paths-lib once at lib-load time. The previous shape sourced it
+# inside attention_state_path on every call (parsed ~150 lines of bash
+# 3+ times per menu.sh invocation). Sourcing here lifts that work to the
+# single source point in the parent script.
+__ATTENTION_STATE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+. "$__ATTENTION_STATE_LIB_DIR/windows-runtime-paths-lib.sh"
+
+# Cached state path. Resolved on first call and reused — saves a wslpath /
+# windows_runtime_detect_paths re-evaluation per call. Callers invalidate
+# by unsetting this var (the bench harness does not, since the path is
+# stable per-machine).
+__ATTENTION_STATE_PATH_CACHED=""
+
 attention_state_path() {
-  if command -v wezterm-runtime-detect-paths >/dev/null 2>&1; then
-    : # placeholder
-  fi
-  local lib_dir
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  # shellcheck disable=SC1091
-  . "$lib_dir/windows-runtime-paths-lib.sh"
-  if windows_runtime_detect_paths 2>/dev/null; then
-    printf '%s/state/agent-attention/attention.json' "$WINDOWS_RUNTIME_STATE_WSL"
+  if [[ -n "$__ATTENTION_STATE_PATH_CACHED" ]]; then
+    printf '%s' "$__ATTENTION_STATE_PATH_CACHED"
     return 0
   fi
-  local state_root="${XDG_STATE_HOME:-$HOME/.local/state}/wezterm-runtime"
-  printf '%s/state/agent-attention/attention.json' "$state_root"
+  if windows_runtime_detect_paths 2>/dev/null; then
+    __ATTENTION_STATE_PATH_CACHED="$WINDOWS_RUNTIME_STATE_WSL/state/agent-attention/attention.json"
+  else
+    local state_root="${XDG_STATE_HOME:-$HOME/.local/state}/wezterm-runtime"
+    __ATTENTION_STATE_PATH_CACHED="$state_root/state/agent-attention/attention.json"
+  fi
+  printf '%s' "$__ATTENTION_STATE_PATH_CACHED"
 }
 
 attention_state_lock_path() {

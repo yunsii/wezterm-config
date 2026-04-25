@@ -1,0 +1,7 @@
+module github.com/yunsii/wezterm-config/scripts/runtime/picker
+
+go 1.21
+
+require golang.org/x/term v0.27.0
+
+require golang.org/x/sys v0.28.0 // indirect
