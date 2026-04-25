@@ -36,6 +36,10 @@ func main() {
 	switch os.Args[1] {
 	case "attention":
 		os.Exit(runAttention(os.Args[2:]))
+	case "command":
+		os.Exit(runCommand(os.Args[2:]))
+	case "worktree":
+		os.Exit(runWorktree(os.Args[2:]))
 	default:
 		fmt.Fprintf(os.Stderr, "picker: unknown subcommand %q\n", os.Args[1])
 		os.Exit(2)
@@ -284,9 +288,10 @@ func renderAttentionFrame(rows []attentionRow, selected int, keypressTS, menuSta
 	// `attention.perf` category + `popup paint timing` message so both
 	// code paths feed the same dashboard.
 	if keypressTS > 0 {
-		logPerfEvent("popup paint timing", map[string]string{
+		emitPerfEvent("attention.perf", "popup paint timing", map[string]string{
 			"paint_kind":     paintKind,
 			"picker_kind":    "go",
+			"panel":          "attention",
 			"total_ms":       strconv.FormatInt(elapsed, 10),
 			"lua_ms":         strconv.FormatInt(lua, 10),
 			"menu_ms":        strconv.FormatInt(menu, 10),
@@ -304,9 +309,7 @@ func renderAttentionFrame(rows []attentionRow, selected int, keypressTS, menuSta
 // same destination file. Only the level filter is fixed at "info" — the
 // picker has no debug/warn/error perf events to emit.
 
-func logPerfEvent(message string, fields map[string]string) {
-	const category = "attention.perf"
-
+func emitPerfEvent(category, message string, fields map[string]string) {
 	if os.Getenv("WEZTERM_RUNTIME_LOG_ENABLED") == "0" {
 		return
 	}
