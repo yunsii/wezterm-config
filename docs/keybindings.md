@@ -87,3 +87,32 @@ The status badge tells you whether the workflow is healthy: `CDP·H·<port>` hea
 - `Alt+p`: rotate through all currently known workspaces
 - `Alt+Shift+x`: open a centered WezTerm confirmation overlay to close the current non-default workspace
 - `Alt+Shift+q`: quit WezTerm and close all windows; WezTerm will handle any built-in confirmation
+
+## Custom Keybindings
+
+Per-machine overrides live in `wezterm-x/local/keybindings.lua`. Copy the template at `wezterm-x/local.example/keybindings.lua`, uncomment the bindings you want to change, and reload WezTerm. Overrides are addressed **by command id**, not by the old key, so the file survives future default-key reshuffles.
+
+Value shapes (VS Code `keybindings.json` style, Lua-flavored):
+
+- `[id] = 'Ctrl+Shift+v'` — replace the single default key for a one-hotkey id (`vscode.open-current-dir`, `workspace.switch-work`, etc.).
+- `[id] = false` — disable the id; every variant is skipped at keymap build time.
+- `[id] = { { key = 'Cmd+1', args = 1 }, ... }` — per-variant remap for parametrized ids. `args` must match one of the id's `args_schema` values in `commands/manifest.json` (e.g. `tab.select-by-index` accepts integers `1..9`). Variants not listed keep their defaults.
+
+Key string rules:
+
+- Modifiers joined by `+`: `Ctrl`, `Shift`, `Alt` (aliases: `Opt`, `Option`, `Meta`), `Cmd` (aliases: `Super`, `Win`).
+- The last `+`-separated token is the main key; case is preserved (`Ctrl+Shift+v` vs `Ctrl+Shift+V`).
+- Chord keys (space-separated segments like `Ctrl+k v`) are **not yet supported** in this file. To change a `Ctrl+k` chord leaf (`pane.split-vertical`, `worktree.quick-create-*`, etc.) edit `tmux.conf` directly.
+
+Discoverability:
+
+- `wezterm-x/commands/manifest.json` lists every id, its default keys, and — for parametrized commands — the `args_schema`.
+- `scripts/dev/hotkey-usage-report.sh` cross-references the manifest with the live keymap, useful when you need to audit what the override actually produced.
+
+Scope and limits of this release:
+
+- **Only WezTerm-layer bindings are customizable.** Overrides that target a `tmux-chord` id are accepted syntactically but ignored with a warning; a future pass will regenerate the tmux `command-chord` / `worktree-chord` tables from the same file.
+- Overriding `command-palette.chord-prefix` (`Ctrl+k`) currently remaps the WezTerm side only. The tmux side still captures the old `Ctrl+k`, so both keys will work until chord rendering lands.
+- You cannot bind a new key to a command that has no default binding (e.g. `session.refresh-*` entries that exist only in the palette). The override surface is limited to remapping / disabling bindings that keymaps.lua already owns.
+
+Invalid entries (unknown id, bad key string, args out of range, missing args for multi-hotkey ids) are dropped with a `warn` line under logger category `keybindings` at startup — check the diagnostics log (`wezterm-x/local/runtime-logging.sh` routes it) to confirm the override landed.

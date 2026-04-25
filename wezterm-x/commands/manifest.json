@@ -132,16 +132,17 @@
     "description": "`Alt+N` activates the WezTerm tab at position N (1-9) in the current workspace.",
     "scope": "window-and-pane-navigation",
     "context": "any",
+    "args_schema": { "kind": "integer", "range": [1, 9] },
     "hotkeys": [
-      { "keys": "Alt+1", "layer": "wezterm" },
-      { "keys": "Alt+2", "layer": "wezterm" },
-      { "keys": "Alt+3", "layer": "wezterm" },
-      { "keys": "Alt+4", "layer": "wezterm" },
-      { "keys": "Alt+5", "layer": "wezterm" },
-      { "keys": "Alt+6", "layer": "wezterm" },
-      { "keys": "Alt+7", "layer": "wezterm" },
-      { "keys": "Alt+8", "layer": "wezterm" },
-      { "keys": "Alt+9", "layer": "wezterm" }
+      { "keys": "Alt+1", "layer": "wezterm", "args": 1 },
+      { "keys": "Alt+2", "layer": "wezterm", "args": 2 },
+      { "keys": "Alt+3", "layer": "wezterm", "args": 3 },
+      { "keys": "Alt+4", "layer": "wezterm", "args": 4 },
+      { "keys": "Alt+5", "layer": "wezterm", "args": 5 },
+      { "keys": "Alt+6", "layer": "wezterm", "args": 6 },
+      { "keys": "Alt+7", "layer": "wezterm", "args": 7 },
+      { "keys": "Alt+8", "layer": "wezterm", "args": 8 },
+      { "keys": "Alt+9", "layer": "wezterm", "args": 9 }
     ],
     "hotkey_display": "Alt+1..9",
     "palette": { "display_only": true }
@@ -313,6 +314,17 @@
     "context": "hybrid-wsl",
     "hotkeys": [
       { "keys": "Alt+b", "layer": "wezterm" }
+    ],
+    "palette": { "display_only": true }
+  },
+  {
+    "id": "chrome.open-debug-profile-visible",
+    "label": "Chrome: Open debug profile (visible)",
+    "description": "Open or reset the Chrome debug browser profile in visible (headful) mode for manual verification; shares the debug `user_data_dir` and port with the headless instance.",
+    "scope": "project-navigation",
+    "context": "hybrid-wsl",
+    "hotkeys": [
+      { "keys": "Alt+Shift+B", "layer": "wezterm" }
     ],
     "palette": { "display_only": true }
   },

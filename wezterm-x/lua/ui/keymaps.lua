@@ -7,6 +7,7 @@ end
 local module_dir = join_path(rawget(_G, 'WEZTERM_RUNTIME_DIR') or '.', 'lua', 'ui')
 local common = dofile(join_path(module_dir, 'common.lua'))
 local actions = dofile(join_path(module_dir, 'actions.lua'))
+local overrides_lib = dofile(join_path(module_dir, 'keybinding_overrides.lua'))
 
 local M = {}
 
@@ -18,6 +19,7 @@ function M.build(opts)
   local host = opts.host
   local attention = opts.attention
   local usage = opts.usage
+  local raw_overrides = opts.raw_overrides or {}
 
   -- Wrap a keymap entry so pressing the key first fires a fire-and-forget
   -- bump to the aggregate counter, then performs the original action. The
@@ -623,57 +625,87 @@ function M.build(opts)
   }
 
   -- Paired with `entries` above in 1:1 order. When you add / remove /
-  -- reorder an entry, update this list. Unknown ids still render in the
-  -- report (as `(unregistered)`), but they won't cross-reference to
-  -- manifest.json labels.
-  local entry_ids = {
-    'vscode.open-current-dir',          -- Alt+v
-    'worktree.picker',                  -- Alt+g
-    'worktree.cycle-next',              -- Alt+Shift+G
-    'chrome.open-debug-profile',        -- Alt+b
-    'pane.rotate-next',                 -- Alt+o
-    'tab.next',                         -- Alt+n
-    'tab.previous',                     -- Alt+Shift+N
-    'attention.jump-waiting',           -- Alt+,
-    'attention.jump-done',              -- Alt+.
-    'attention.overlay',                -- Alt+/
-    'tab.select-by-index',              -- Alt+1
-    'tab.select-by-index',              -- Alt+2
-    'tab.select-by-index',              -- Alt+3
-    'tab.select-by-index',              -- Alt+4
-    'tab.select-by-index',              -- Alt+5
-    'tab.select-by-index',              -- Alt+6
-    'tab.select-by-index',              -- Alt+7
-    'tab.select-by-index',              -- Alt+8
-    'tab.select-by-index',              -- Alt+9
-    'link.open-in-viewport',            -- Alt+l
-    'command-palette.open',             -- Ctrl+Shift+P
-    'command-palette.chord-prefix',     -- Ctrl+k
-    'command-palette.open-native',      -- Ctrl+Shift+;
-    'command-palette.open-native',      -- Ctrl+Shift+:
-    'workspace.switch-work',            -- Alt+w
-    'workspace.switch-default',         -- Alt+d
-    'workspace.cycle-next',             -- Alt+p
-    'workspace.switch-config',          -- Alt+c
-    'workspace.close-current',          -- Alt+Shift+X
-    'app.quit',                         -- Alt+Shift+Q
-    'clipboard.copy-or-sigint',         -- Ctrl+c
-    'clipboard.copy-selection-strict',  -- Ctrl+Shift+C
-    'clipboard.paste-smart',            -- Ctrl+v
-    'clipboard.paste-plain',            -- Ctrl+Shift+V
+  -- reorder an entry, update this list. `args` is set for parametrized
+  -- ids (see manifest.json `args_schema`) so user overrides can target
+  -- individual variants. Unknown ids still render in the usage report
+  -- as `(unregistered)` but lose manifest cross-references.
+  local entry_meta = {
+    { id = 'vscode.open-current-dir' },           -- Alt+v
+    { id = 'worktree.picker' },                   -- Alt+g
+    { id = 'worktree.cycle-next' },               -- Alt+Shift+G
+    { id = 'chrome.open-debug-profile' },         -- Alt+b
+    { id = 'chrome.open-debug-profile-visible' }, -- Alt+Shift+B
+    { id = 'pane.rotate-next' },                  -- Alt+o
+    { id = 'tab.next' },                          -- Alt+n
+    { id = 'tab.previous' },                      -- Alt+Shift+N
+    { id = 'attention.jump-waiting' },            -- Alt+,
+    { id = 'attention.jump-done' },               -- Alt+.
+    { id = 'attention.overlay' },                 -- Alt+/
+    { id = 'tab.select-by-index', args = 1 },     -- Alt+1
+    { id = 'tab.select-by-index', args = 2 },     -- Alt+2
+    { id = 'tab.select-by-index', args = 3 },     -- Alt+3
+    { id = 'tab.select-by-index', args = 4 },     -- Alt+4
+    { id = 'tab.select-by-index', args = 5 },     -- Alt+5
+    { id = 'tab.select-by-index', args = 6 },     -- Alt+6
+    { id = 'tab.select-by-index', args = 7 },     -- Alt+7
+    { id = 'tab.select-by-index', args = 8 },     -- Alt+8
+    { id = 'tab.select-by-index', args = 9 },     -- Alt+9
+    { id = 'link.open-in-viewport' },             -- Alt+l
+    { id = 'command-palette.open' },              -- Ctrl+Shift+P
+    { id = 'command-palette.chord-prefix' },      -- Ctrl+k
+    { id = 'command-palette.open-native' },       -- Ctrl+Shift+;
+    { id = 'command-palette.open-native' },       -- Ctrl+Shift+:
+    { id = 'workspace.switch-work' },             -- Alt+w
+    { id = 'workspace.switch-default' },          -- Alt+d
+    { id = 'workspace.cycle-next' },              -- Alt+p
+    { id = 'workspace.switch-config' },           -- Alt+c
+    { id = 'workspace.close-current' },           -- Alt+Shift+X
+    { id = 'app.quit' },                          -- Alt+Shift+Q
+    { id = 'clipboard.copy-or-sigint' },          -- Ctrl+c
+    { id = 'clipboard.copy-selection-strict' },   -- Ctrl+Shift+C
+    { id = 'clipboard.paste-smart' },             -- Ctrl+v
+    { id = 'clipboard.paste-plain' },             -- Ctrl+Shift+V
   }
 
-  if #entries ~= #entry_ids then
-    logger.warn('usage', 'keymap entries/entry_ids length mismatch', {
+  if #entries ~= #entry_meta then
+    logger.warn('usage', 'keymap entries/entry_meta length mismatch', {
       entries = #entries,
-      entry_ids = #entry_ids,
+      entry_meta = #entry_meta,
     })
   end
 
-  for i, entry in ipairs(entries) do
-    inst(entry_ids[i], entry)
+  local resolve_override, override_warnings = overrides_lib.build(raw_overrides, entry_meta)
+  for _, msg in ipairs(override_warnings) do
+    logger.warn('keybindings', 'override ignored', { reason = msg })
   end
-  return entries
+
+  local final_entries = {}
+  for i, entry in ipairs(entries) do
+    local meta = entry_meta[i]
+    local decision = meta and resolve_override(meta.id, meta.args) or nil
+    if decision and decision.disabled then
+      logger.info('keybindings', 'binding disabled by override', {
+        id = meta.id,
+        args = meta.args,
+      })
+    else
+      if decision and decision.key then
+        entry.key = decision.key
+        entry.mods = decision.mods
+        logger.info('keybindings', 'binding remapped by override', {
+          id = meta.id,
+          args = meta.args,
+          key = decision.key,
+          mods = decision.mods,
+        })
+      end
+      if meta then
+        inst(meta.id, entry)
+      end
+      final_entries[#final_entries + 1] = entry
+    end
+  end
+  return final_entries
 end
 
 return M

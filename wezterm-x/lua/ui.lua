@@ -29,6 +29,8 @@ function M.apply(opts)
   local runtime = load_ui_module(runtime_dir, 'runtime')
   local keymaps = load_ui_module(runtime_dir, 'keymaps')
   local actions = load_ui_module(runtime_dir, 'actions')
+  local keybinding_overrides = load_ui_module(runtime_dir, 'keybinding_overrides')
+  local raw_keybinding_overrides = keybinding_overrides.load(runtime_dir)
   local logger = opts.logger
   local usage_module = dofile(join_path(runtime_dir, 'lua', 'usage.lua'))
   local usage = usage_module.new {
@@ -187,6 +189,7 @@ function M.apply(opts)
     host = host,
     attention = attention,
     usage = usage,
+    raw_overrides = raw_keybinding_overrides,
   }
 
   config.mouse_bindings = {
