@@ -4,10 +4,21 @@
 # auto-acking a `done` entry whose wezterm_pane_id matches.
 #
 # Invoked from tmux hooks in tmux.conf:
-#   set-hook -g pane-focus-in     'run-shell -b "bash .../tmux-focus-emit.sh \
-#     #{q:socket_path} #{q:session_name} #{q:pane_id}"'
-#   set-hook -g after-select-pane 'run-shell -b "bash .../tmux-focus-emit.sh \
-#     #{q:socket_path} #{q:session_name} #{q:pane_id}"'
+#   set-hook -g  after-select-pane "run-shell -b 'bash .../tmux-focus-emit.sh \
+#     #{q:socket_path} #{q:session_name} #{q:pane_id}'"
+#   set-hook -ga client-focus-in   "run-shell -b 'bash .../tmux-focus-emit.sh \
+#     #{q:socket_path} #{q:session_name} #{q:pane_id}'"
+#
+# after-select-pane covers in-tmux pane switches. client-focus-in covers
+# wezterm-side tab / workspace switches: when wezterm gives a tab focus
+# it sends OSC focus-in (CSI I) to that pane's tmux client, which fires
+# client-focus-in with #{pane_id} resolving to the client's currently-
+# active pane — exactly the value the focus file should hold.
+#
+# Why not pane-focus-in: tmux 3.4 silently ignores `set-hook -g
+# pane-focus-in` because the hook only exists in pane scope, so a global
+# binding never lands on the server. We rely on after-select-pane plus
+# client-focus-in to cover both axes (intra-tmux and wezterm-side).
 #
 # `session_name` (not `session_id`) is intentional: state entries written
 # by emit-agent-status.sh record `tmux_session` from `#{session_name}`,
