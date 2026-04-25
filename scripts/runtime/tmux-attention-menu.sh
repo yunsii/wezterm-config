@@ -55,8 +55,9 @@ bench_mark sourced
 
 # Inline cheap forms of start_ms and trace_id using bash 5 builtins
 # (EPOCHREALTIME / EPOCHSECONDS / RANDOM) so we never fork `date` for
-# either. trace_id only needs uniqueness within the log; epoch seconds
-# + pid + RANDOM is collision-safe enough at the rate this fires.
+# either. trace_id is a placeholder that the live-panes.json read below
+# will overwrite when the lua handler stamped one — a single Alt+/
+# generates ONE trace_id used by lua, this menu, and the picker.
 start_ms=$(( ${EPOCHREALTIME//./} / 1000 ))
 trace_id="attention-$EPOCHSECONDS-$$-$RANDOM"
 
@@ -84,14 +85,28 @@ live_map='{}'
 snapshot_ts=0
 live_panes_path="$(attention_live_panes_path)"
 if [[ -s "$live_panes_path" ]]; then
-  combined="$(jq -rc '"\(.ts // 0)\(.panes // {} | tojson)"' "$live_panes_path" 2>/dev/null || printf '')"
-  if [[ -n "$combined" ]]; then
+  combined="$(jq -rc '"\(.ts // 0)\(.trace // "")\(.panes // {} | tojson)"' "$live_panes_path" 2>/dev/null || printf '')"
+  # Three SOH-delimited fields: ts | trace | panes_json. SOH (\x01)
+  # is guaranteed not to appear in any of them (numeric, hyphen-and-
+  # alnum trace_id, JSON-escaped tojson output).
+  if [[ -n "$combined" && "$combined" == *$'\001'*$'\001'* ]]; then
     snapshot_ts="${combined%%$'\001'*}"
-    panes_json="${combined#*$'\001'}"
+    rest_after_ts="${combined#*$'\001'}"
+    snapshot_trace="${rest_after_ts%%$'\001'*}"
+    panes_json="${rest_after_ts#*$'\001'}"
     [[ "$snapshot_ts" =~ ^[0-9]+$ ]] || snapshot_ts=0
     snapshot_age_ms=$((now_ms - snapshot_ts))
     if (( snapshot_age_ms >= 0 && snapshot_age_ms <= 5000 )) && [[ -n "$panes_json" ]]; then
       live_map="$panes_json"
+      # Adopt the lua-stamped trace_id when present so this menu run
+      # + the picker that follows share one id with the wezterm.log
+      # entry from the lua handler. grep one trace_id across
+      # runtime.log + wezterm.log to assemble the full per-press
+      # timeline of a single Alt+/.
+      if [[ -n "$snapshot_trace" ]]; then
+        trace_id="$snapshot_trace"
+        export WEZTERM_RUNTIME_TRACE_ID="$trace_id"
+      fi
     fi
   fi
 fi

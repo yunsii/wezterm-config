@@ -313,7 +313,15 @@ function M.new(ctx)
         -- `wezterm.exe cli list` over the GUI socket from the popup pty.
         local snapshot_path = constants.attention and constants.attention.live_panes_file
         if attention and attention.write_live_snapshot and snapshot_path then
-          local ok = attention.write_live_snapshot(snapshot_path)
+          -- Pass the trace_id into the snapshot so menu.sh can adopt
+          -- it as its own — same trace_id flows lua → menu → picker.
+          local trace_value
+          if type(trace_id) == 'table' then
+            trace_value = trace_id.trace_id or trace_id.trace or ''
+          else
+            trace_value = trace_id or ''
+          end
+          local ok = attention.write_live_snapshot(snapshot_path, tostring(trace_value))
           logger.info('attention', 'wrote live-panes snapshot', common.merge_fields(trace_id, {
             path = snapshot_path,
             ok = ok,

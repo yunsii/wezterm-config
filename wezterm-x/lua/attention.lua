@@ -355,11 +355,19 @@ end
 
 -- Walk the mux and write a snapshot of every live pane's
 --   pane_id (string) → { workspace, tab_index, tab_title }
--- to `target_path` as JSON, plus a `ts` field. The Alt+/ handler calls this
--- right before forwarding `\x1b/` to the tmux pane so the popup-side picker
--- can render workspace/tab labels without paying for a `wezterm.exe cli list`
--- round-trip across the WSL→GUI socket. Returns true on success.
-function M.write_live_snapshot(target_path)
+-- to `target_path` as JSON, plus `ts` and `trace` fields. The Alt+/
+-- handler calls this right before forwarding `\x1b/` to the tmux pane
+-- so the popup-side picker can render workspace/tab labels without
+-- paying for a `wezterm.exe cli list` round-trip across the WSL→GUI
+-- socket.
+--
+-- The `trace` field is the WezTerm-side trace id for this Alt+/ press;
+-- menu.sh reads it from the snapshot and adopts it as its own trace id
+-- so a single chord generates one consistent trace_id across the three
+-- layers (lua → bash menu → picker), letting `grep trace_id="..."` on
+-- both wezterm.log and runtime.log assemble the full per-press timeline.
+-- Returns true on success.
+function M.write_live_snapshot(target_path, trace_id)
   if type(target_path) ~= 'string' or target_path == '' then
     return false
   end
@@ -408,7 +416,11 @@ function M.write_live_snapshot(target_path)
     end
   end
 
-  local payload = { ts = now_ms(), panes = panes_map }
+  local payload = {
+    ts = now_ms(),
+    trace = (type(trace_id) == 'string') and trace_id or '',
+    panes = panes_map,
+  }
   local ok_enc, encoded = pcall(wezterm.serde.json_encode, payload)
   if not ok_enc or type(encoded) ~= 'string' then
     return false

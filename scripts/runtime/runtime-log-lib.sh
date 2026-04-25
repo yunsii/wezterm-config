@@ -241,7 +241,18 @@ runtime_log_emit() {
   runtime_log_rotate_if_needed
 
   local timestamp line trace_id formatted_fields source_name
-  timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
+  # Millisecond-precision timestamp via bash 5 builtins — no `date` fork
+  # per emit, which matters because hot paths log many lines back to back.
+  # `printf '%(...)T'` is bash's own date formatter (no subprocess); ms
+  # come from EPOCHREALTIME's microsecond fractional, truncated to 3.
+  # Falls back to second-precision if EPOCHREALTIME is unavailable.
+  if [[ -n "${EPOCHREALTIME-}" && "$EPOCHREALTIME" == *.* ]]; then
+    local _epoch_secs="${EPOCHREALTIME%.*}"
+    local _epoch_frac="${EPOCHREALTIME#*.}"
+    printf -v timestamp '%(%Y-%m-%d %H:%M:%S)T.%s' "$_epoch_secs" "${_epoch_frac:0:3}"
+  else
+    timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
+  fi
   trace_id="$(runtime_log_current_trace_id)"
   source_name="${WEZTERM_RUNTIME_LOG_SOURCE:-runtime}"
   formatted_fields="$(runtime_log_format_fields "$@")"

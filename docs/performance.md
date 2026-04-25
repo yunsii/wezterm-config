@@ -208,6 +208,80 @@ they don't get re-proposed without new evidence.
   and the merged-jq optimization already cut jq cost to ~5ms total
   (under 10% of remaining latency). Not worth the correctness risk.
 
+## Long-term observability
+
+Every Alt+/ press already writes a structured `attention.perf` row to
+`~/.local/state/wezterm-runtime/logs/runtime.log` — no extra setup
+required. The data is enough to answer "did anything regress?" weeks
+later without re-running benches.
+
+### Schema
+
+```
+ts="2026-04-25 14:57:28.170" level="info" source="<script>"
+  category="attention.perf" trace_id="..."
+  message="popup paint timing"
+  paint_kind="first|repaint" picker_kind="go|bash"
+  total_ms="N" lua_ms="N" menu_ms="N" picker_ms="N"
+  item_count="N" selected_index="N"
+```
+
+`ts` is millisecond-precision (see runtime-log-lib's EPOCHREALTIME
+path) so events within the same Alt+/ press are ordered correctly.
+`paint_kind="first"` is the per-press measurement; `repaint` rows are
+Up/Down navigation and should be filtered out for first-frame stats.
+
+### Trace ID propagation
+
+The WezTerm `attention.overlay` Lua handler stamps a `trace_id` into
+`live-panes.json` on every Alt+/ press. menu.sh reads it from the
+snapshot, adopts it as `WEZTERM_RUNTIME_TRACE_ID`, and exports it so
+the picker process inherits the same id. Result: a single id flows
+lua → menu → picker → attention-jump.sh, and a single grep assembles
+the full per-press timeline from both `runtime.log` (bash logs) and
+`wezterm.log` (Lua logs):
+
+```bash
+trace='attention-20260425T145728-3835014-7695'
+grep "trace_id=\"$trace\"" \
+  ~/.local/state/wezterm-runtime/logs/runtime.log \
+  /mnt/c/Users/Yuns/AppData/Local/wezterm-runtime/logs/wezterm.log
+```
+
+### Trend reporting
+
+`scripts/dev/perf-trend.sh` reads the historical `attention.perf` rows
+and reports trend / diff / live-tail views. Useful for "did this
+change make things slower over the last week?" without re-driving the
+bench harness.
+
+```bash
+# Daily p50/p95/mean for the last 7 days
+scripts/dev/perf-trend.sh
+
+# Side-by-side stage breakdown for two days
+scripts/dev/perf-trend.sh --diff today yesterday
+scripts/dev/perf-trend.sh --diff 2026-04-25 2026-04-18
+
+# Per-event dump (for spotting outliers)
+scripts/dev/perf-trend.sh --raw today | head -20
+
+# Live tail — useful right after a code change to watch new presses land
+scripts/dev/perf-trend.sh --watch
+
+# Filter by code path (Go binary vs bash fallback)
+scripts/dev/perf-trend.sh --picker-kind go
+```
+
+When investigating a regression, the typical flow is:
+
+1. `--days 14` to spot when the p50 / p95 climbed
+2. `--diff <good-day> <bad-day>` to see which stage (lua / menu /
+   picker) drove it
+3. `--raw <bad-day>` to see whether the regression is everything
+   slowing down or a long tail of cold-start outliers
+4. Re-run `bench-menu-prep.sh` to bisect the change
+
 ## Where to start a new optimization round
 
 1. Run `scripts/dev/bench-menu-prep.sh --runs 30 --warmup 5 --label baseline`
