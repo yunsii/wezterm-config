@@ -202,7 +202,14 @@ internal sealed class ChromeRequestHandler
         {
             $"--remote-debugging-port={port}",
             $"--user-data-dir={userDataDir}",
-            $"--remote-allow-origins=http://localhost:{port}",
+            // Allow any origin so the human-debug path through chrome://inspect
+            // (or edge://inspect, devtools://devtools, etc.) can WebSocket-attach
+            // when the user wants to interactively inspect the headless instance.
+            // Acceptable in this local-dev scenario because Chrome binds the
+            // remote-debugging port to 127.0.0.1 -- the surface is limited to
+            // tabs running on the same machine, and the user-data-dir is a
+            // dedicated debug profile, not their main browsing data.
+            "--remote-allow-origins=*",
             "--disable-extensions",
             "--no-first-run",
             "--no-default-browser-check",
@@ -392,7 +399,14 @@ internal sealed class ChromeRequestHandler
         {
             $"--remote-debugging-port={port}",
             $"--user-data-dir={userDataDir}",
-            $"--remote-allow-origins=http://localhost:{port}",
+            // Allow any origin so the human-debug path through chrome://inspect
+            // (or edge://inspect, devtools://devtools, etc.) can WebSocket-attach
+            // when the user wants to interactively inspect the headless instance.
+            // Acceptable in this local-dev scenario because Chrome binds the
+            // remote-debugging port to 127.0.0.1 -- the surface is limited to
+            // tabs running on the same machine, and the user-data-dir is a
+            // dedicated debug profile, not their main browsing data.
+            "--remote-allow-origins=*",
             "--disable-extensions",
             "--no-first-run",
             "--no-default-browser-check",
