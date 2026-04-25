@@ -1,0 +1,11 @@
+# .NET build outputs.
+# bin/ contains compiled assemblies, obj/ contains intermediate build
+# artifacts and NuGet restore caches; both are regenerated on every
+# `dotnet build` and never belong in version control.
+# Reference: https://github.com/dotnet/core/blob/main/Documentation/csharp-conventions.md
+**/bin/
+**/obj/
+
+# Visual Studio / Rider local user state.
+*.user
+.vs/
