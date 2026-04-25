@@ -102,17 +102,18 @@ Key string rules:
 
 - Modifiers joined by `+`: `Ctrl`, `Shift`, `Alt` (aliases: `Opt`, `Option`, `Meta`), `Cmd` (aliases: `Super`, `Win`).
 - The last `+`-separated token is the main key; case is preserved (`Ctrl+Shift+v` vs `Ctrl+Shift+V`).
-- Chord keys (space-separated segments like `Ctrl+k v`) are **not yet supported** in this file. To change a `Ctrl+k` chord leaf (`pane.split-vertical`, `worktree.quick-create-*`, etc.) edit `tmux.conf` directly.
+- Chord keys use space-separated segments: `Ctrl+k s` rebinds a `command-chord` leaf, `Ctrl+k g e` rebinds a `worktree-chord` leaf. The chord prefix stays `Ctrl+k` at the tmux side regardless of what you write for the prefix segment — only the final segment is consumed. Chord leaves are regenerated at runtime-sync time (`scripts/runtime/render-tmux-bindings.sh`); rerun `wezterm-runtime-sync` after editing.
 
 Discoverability:
 
 - `wezterm-x/commands/manifest.json` lists every id, its default keys, and — for parametrized commands — the `args_schema`.
 - `scripts/dev/hotkey-usage-report.sh` cross-references the manifest with the live keymap, useful when you need to audit what the override actually produced.
 
-Scope and limits of this release:
+Scope and limits:
 
-- **Only WezTerm-layer bindings are customizable.** Overrides that target a `tmux-chord` id are accepted syntactically but ignored with a warning; a future pass will regenerate the tmux `command-chord` / `worktree-chord` tables from the same file.
-- Overriding `command-palette.chord-prefix` (`Ctrl+k`) currently remaps the WezTerm side only. The tmux side still captures the old `Ctrl+k`, so both keys will work until chord rendering lands.
-- You cannot bind a new key to a command that has no default binding (e.g. `session.refresh-*` entries that exist only in the palette). The override surface is limited to remapping / disabling bindings that keymaps.lua already owns.
+- **WezTerm-layer and tmux-chord-layer bindings are customizable.** WezTerm-layer changes take effect on the next WezTerm reload; tmux-chord changes require `wezterm-runtime-sync` to regenerate `wezterm-x/tmux/chord-bindings.generated.conf` and for tmux to re-source it.
+- `command-palette.chord-prefix` (`Ctrl+k`) remaps only the WezTerm side. The tmux root `bind-key -n C-k` stays pinned: WezTerm forwards a literal Ctrl+K byte (`\x0b`) to tmux regardless of what key you used on the WezTerm side, so the forwarding stays intact. If you want a completely different tmux chord prefix you'd need to edit `render-tmux-bindings.sh`.
+- Chord leaves can be rebound within their chord table but not moved across tables (`pane.split-vertical` stays in `command-chord`, `worktree.quick-create-dev` stays in `worktree-chord`).
+- You cannot bind a new key to a command that has no default binding (e.g. `session.refresh-*` entries that exist only in the palette). The override surface is limited to remapping / disabling bindings already declared in `manifest.json`.
 
 Invalid entries (unknown id, bad key string, args out of range, missing args for multi-hotkey ids) are dropped with a `warn` line under logger category `keybindings` at startup — check the diagnostics log (`wezterm-x/local/runtime-logging.sh` routes it) to confirm the override landed.

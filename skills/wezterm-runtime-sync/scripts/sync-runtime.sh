@@ -511,6 +511,14 @@ run_runtime_native_flow() {
   mkdir -p "$TEMP_NATIVE_DIR"
   sync_trace "step=prepare temp_runtime_dir=$TEMP_RUNTIME_DIR temp_native_dir=$TEMP_NATIVE_DIR"
 
+  # Regenerate the tmux chord bindings from the manifest (+ overrides) so
+  # the generated conf is fresh before we copy the runtime tree into place.
+  # The file is gitignored but must exist for tmux.conf's `source-file -q`.
+  if [[ -x "$REPO_ROOT/scripts/runtime/render-tmux-bindings.sh" ]]; then
+    "$REPO_ROOT/scripts/runtime/render-tmux-bindings.sh"
+    sync_trace "step=render-tmux-bindings status=completed"
+  fi
+
   cp -R "$RUNTIME_SOURCE_DIR"/. "$TEMP_RUNTIME_DIR"/
   if [[ -d "$NATIVE_SOURCE_DIR" ]]; then
     cp -R "$NATIVE_SOURCE_DIR"/. "$TEMP_NATIVE_DIR"/

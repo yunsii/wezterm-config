@@ -1,2 +1,3 @@
 .sync-target
 wezterm-x/local/
+wezterm-x/tmux/chord-bindings.generated.conf

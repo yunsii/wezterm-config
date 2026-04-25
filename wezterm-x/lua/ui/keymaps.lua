@@ -78,15 +78,15 @@ function M.build(opts)
     workspace = workspace,
   }
 
-  -- First pass: collect (id, args) meta so keybinding_overrides can
-  -- disambiguate single- vs. multi-hotkey ids when validating overrides.
+  -- First pass: collect (id, args, layer) meta for every hotkey in the
+  -- manifest so keybinding_overrides can disambiguate single- vs.
+  -- multi-hotkey ids AND distinguish wezterm-layer bindings (which we
+  -- consume here) from tmux-chord ones (handled by the bash renderer).
   local meta = {}
   for _, item in ipairs(manifest) do
     if item.binding and item.hotkeys then
       for _, hk in ipairs(item.hotkeys) do
-        if hk.layer == 'wezterm' then
-          meta[#meta + 1] = { id = item.id, args = hk.args }
-        end
+        meta[#meta + 1] = { id = item.id, args = hk.args, layer = hk.layer }
       end
     end
   end

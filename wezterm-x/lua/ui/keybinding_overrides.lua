@@ -91,18 +91,28 @@ function M.load(runtime_dir)
 end
 
 -- Given the raw override table and the meta list from keymaps.lua
--- (`{ { id, args }, ... }`), return:
+-- (`{ { id, args, layer }, ... }`), return:
 --   resolve(id, args) -> nil | { disabled = true } | { key, mods }
 --   warnings          -> list of human-readable warning strings
+--
+-- Overrides for tmux-chord layer ids are silently accepted (no warnings
+-- emitted): the tmux side has its own bash parser (render-tmux-bindings.sh)
+-- that consumes the same local/keybindings.lua file at runtime-sync time.
+-- We still register the ids as "known" so users don't see spurious
+-- "unknown id" warnings for valid chord overrides.
 function M.build(raw, id_meta)
   raw = raw or {}
   local warnings = {}
   local disabled_ids = {}
   local per_entry = {}
 
-  local count_by_id = {}
+  local count_by_id = {}        -- how many hotkeys across all layers
+  local wezterm_count_by_id = {} -- how many hotkeys on the wezterm layer only
   for _, meta in ipairs(id_meta or {}) do
     count_by_id[meta.id] = (count_by_id[meta.id] or 0) + 1
+    if meta.layer == nil or meta.layer == 'wezterm' then
+      wezterm_count_by_id[meta.id] = (wezterm_count_by_id[meta.id] or 0) + 1
+    end
   end
 
   local function warn(msg) warnings[#warnings + 1] = msg end
@@ -112,7 +122,7 @@ function M.build(raw, id_meta)
     per_entry[id][key_for_lookup] = parsed
   end
 
-  local function handle_table_element(id, i, element)
+  local function handle_table_element(id, i, element, hotkey_count)
     if type(element) ~= 'table' or type(element.key) ~= 'string' then
       warn(string.format('override for %q: element #%d must be a table with a `key` string', id, i))
       return
@@ -123,10 +133,10 @@ function M.build(raw, id_meta)
       return
     end
     if element.args == nil then
-      if count_by_id[id] ~= 1 then
+      if hotkey_count ~= 1 then
         warn(string.format(
           'override for %q element #%d: id has %d default hotkeys, `args` is required to disambiguate',
-          id, i, count_by_id[id]))
+          id, i, hotkey_count))
         return
       end
       register(id, SINGLE_SENTINEL, parsed)
@@ -140,14 +150,20 @@ function M.build(raw, id_meta)
       warn('override key must be a non-empty string; got ' .. type(id))
     elseif count_by_id[id] == nil then
       warn(string.format(
-        'override references unknown id %q; it is not a customizable wezterm-layer binding (see commands/manifest.json)', id))
+        'override references unknown id %q; it is not registered in commands/manifest.json', id))
+    elseif wezterm_count_by_id[id] == nil then
+      -- Id exists in manifest but not on the wezterm layer (e.g. tmux-chord
+      -- leaf). Accept silently; the bash renderer handles it at sync time.
+      if value == false then
+        disabled_ids[id] = true
+      end
     elseif value == false then
       disabled_ids[id] = true
     elseif type(value) == 'string' then
-      if count_by_id[id] ~= 1 then
+      if wezterm_count_by_id[id] ~= 1 then
         warn(string.format(
           'override for %q uses a single string but the id has %d default hotkeys; use the list form { { key = "...", args = N }, ... }',
-          id, count_by_id[id]))
+          id, wezterm_count_by_id[id]))
       else
         local parsed, err = M.parse_key_string(value)
         if not parsed then
@@ -158,7 +174,7 @@ function M.build(raw, id_meta)
       end
     elseif type(value) == 'table' then
       for i, element in ipairs(value) do
-        handle_table_element(id, i, element)
+        handle_table_element(id, i, element, wezterm_count_by_id[id])
       end
     else
       warn(string.format('override for %q: unsupported value type %s', id, type(value)))

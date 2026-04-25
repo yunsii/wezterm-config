@@ -61,6 +61,7 @@
     "description": "Create a top/bottom tmux split in the current pane.",
     "scope": "commands-and-splits",
     "context": "tmux-backed",
+    "binding": {"kind": "tmux-chord-leaf", "table": "command-chord", "exec": "split-window -v -c \"#{pane_current_path}\""},
     "hotkeys": [
       { "keys": "Ctrl+k v", "layer": "tmux-chord" }
     ],
@@ -77,6 +78,7 @@
     "description": "Create a left/right tmux split in the current pane.",
     "scope": "commands-and-splits",
     "context": "tmux-backed",
+    "binding": {"kind": "tmux-chord-leaf", "table": "command-chord", "exec": "split-window -h -c \"#{pane_current_path}\""},
     "hotkeys": [
       { "keys": "Ctrl+k h", "layer": "tmux-chord" }
     ],
@@ -105,6 +107,7 @@
     "description": "Run tmux `kill-pane` on the focused pane; if it is the last pane in the window, tmux closes the window too.",
     "scope": "window-and-pane-navigation",
     "context": "tmux-backed",
+    "binding": {"kind": "tmux-chord-leaf", "table": "command-chord", "exec": "kill-pane"},
     "hotkeys": [
       { "keys": "Ctrl+k x", "layer": "tmux-chord" }
     ],
@@ -247,6 +250,7 @@
     "description": "Open a `dev-:` prompt; entered name becomes worktree `dev-<slug>` for long-lived parallel development. Agent uses the `<base>-resume` profile so cwd context is preserved across days.",
     "scope": "project-navigation",
     "context": "tmux-backed",
+    "binding": {"kind": "tmux-chord-leaf", "table": "worktree-chord", "switch_first": true, "exec": "command-prompt -p \"dev-:\" \"run-shell -b 'bash #{@wezterm_runtime_root}/scripts/runtime/worktree/open-task-window --type dev \\\"%1\\\" >/dev/null 2>&1'\""},
     "hotkeys": [
       { "keys": "Ctrl+k g d", "layer": "tmux-chord" }
     ],
@@ -267,6 +271,7 @@
     "description": "Open a `task-:` prompt; entered name becomes worktree `task-<slug>` for PR-scoped focused work. Agent uses the `<base>-resume` profile.",
     "scope": "project-navigation",
     "context": "tmux-backed",
+    "binding": {"kind": "tmux-chord-leaf", "table": "worktree-chord", "switch_first": true, "exec": "command-prompt -p \"task-:\" \"run-shell -b 'bash #{@wezterm_runtime_root}/scripts/runtime/worktree/open-task-window --type task \\\"%1\\\" >/dev/null 2>&1'\""},
     "hotkeys": [
       { "keys": "Ctrl+k g t", "layer": "tmux-chord" }
     ],
@@ -287,6 +292,7 @@
     "description": "Open a `hotfix-:` prompt; entered name becomes worktree `hotfix-<slug>` for urgent fixes. Agent uses the bare `<base>` profile so context is fresh — no stale resume state.",
     "scope": "project-navigation",
     "context": "tmux-backed",
+    "binding": {"kind": "tmux-chord-leaf", "table": "worktree-chord", "switch_first": true, "exec": "command-prompt -p \"hotfix-:\" \"run-shell -b 'bash #{@wezterm_runtime_root}/scripts/runtime/worktree/open-task-window --type hotfix \\\"%1\\\" >/dev/null 2>&1'\""},
     "hotkeys": [
       { "keys": "Ctrl+k g h", "layer": "tmux-chord" }
     ],
@@ -307,6 +313,7 @@
     "description": "Reclaim the current pane's worktree after merge. Refuses on main, dev-*, dirty/untracked changes, or unmerged branch. Switches focus to the main worktree window, runs reclaim detached, then closes the original window.",
     "scope": "project-navigation",
     "context": "tmux-backed",
+    "binding": {"kind": "tmux-chord-leaf", "table": "worktree-chord", "switch_first": true, "exec": "run-shell -b \"bash #{@wezterm_runtime_root}/scripts/runtime/worktree/reclaim-current-window #{q:pane_current_path} #{pane_id}\""},
     "hotkeys": [
       { "keys": "Ctrl+k g r", "layer": "tmux-chord" }
     ],
