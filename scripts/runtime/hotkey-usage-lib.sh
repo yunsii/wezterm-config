@@ -12,38 +12,52 @@
 # over to the new home if the new home is empty. Callers should invoke it
 # before reading/writing.
 
-# Resolve the canonical (WSL-native) counter path. Stable across invocations
-# in the same XDG_STATE_HOME — no detection cost.
+# Resolve the canonical counter path. Lives under
+# ${XDG_STATE_HOME}/wezterm-runtime/state/ to mirror the
+# wezterm-runtime/{state,logs,bin}/ layout the Windows side uses; see
+# scripts/runtime/wsl-runtime-paths-lib.sh for the constant + rationale.
 hotkey_usage_path() {
-  local state_root="${XDG_STATE_HOME:-$HOME/.local/state}/wezterm-runtime"
-  printf '%s/hotkey-usage.json' "$state_root"
-}
-
-# Resolve the legacy (Windows-side) path if present. Used only by the
-# one-time migration. Empty string when WSL is not running on Windows.
-hotkey_usage_legacy_path() {
   local lib_dir
   lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   # shellcheck disable=SC1091
-  . "$lib_dir/windows-runtime-paths-lib.sh" 2>/dev/null || return 0
-  if windows_runtime_detect_paths 2>/dev/null; then
-    printf '%s/hotkey-usage.json' "$WINDOWS_RUNTIME_STATE_WSL"
-  fi
+  . "$lib_dir/wsl-runtime-paths-lib.sh"
+  printf '%s' "$WSL_HOTKEY_USAGE_FILE"
 }
 
-# One-time migration: move /mnt/c counter to WSL native. Idempotent —
-# returns immediately when there's nothing to do (no legacy file, or the
-# new path already has data). Failure is non-fatal; callers continue
-# against whichever path resolved.
+# Emit every legacy location the file may live at, oldest-to-newest, one
+# per line. Used by the migration helper to chain through historical
+# moves without losing data:
+#   1. /mnt/c (pre-Phase-1: file was on Windows NTFS)
+#   2. WSL flat (post-Phase-1, pre-state/: ~/.local/state/wezterm-runtime/hotkey-usage.json)
+hotkey_usage_legacy_paths() {
+  local lib_dir
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # shellcheck disable=SC1091
+  . "$lib_dir/windows-runtime-paths-lib.sh" 2>/dev/null
+  if declare -F windows_runtime_detect_paths >/dev/null 2>&1 && \
+     windows_runtime_detect_paths 2>/dev/null; then
+    printf '%s/hotkey-usage.json\n' "$WINDOWS_RUNTIME_STATE_WSL"
+  fi
+  printf '%s/hotkey-usage.json\n' \
+    "${XDG_STATE_HOME:-$HOME/.local/state}/wezterm-runtime"
+}
+
+# One-time migration: walk the legacy path list and move whichever file
+# is found into the canonical location. Idempotent + non-fatal; returns
+# 0 either way so callers never abort over an mv failure.
 hotkey_usage_migrate_legacy() {
   local new_path="$1" legacy_path
   [[ -n "$new_path" ]] || return 0
-  legacy_path="$(hotkey_usage_legacy_path)" || true
-  [[ -n "$legacy_path" && "$legacy_path" != "$new_path" ]] || return 0
-  [[ -f "$legacy_path" && ! -f "$new_path" ]] || return 0
+  while IFS= read -r legacy_path; do
+    [[ -n "$legacy_path" ]] || continue
+    [[ "$legacy_path" != "$new_path" ]] || continue
+    [[ -f "$legacy_path" && ! -f "$new_path" ]] || continue
 
-  mkdir -p "${new_path%/*}" 2>/dev/null || return 0
-  mv -f "$legacy_path" "$new_path" 2>/dev/null || return 0
-  [[ -f "${legacy_path}.lock" ]] && mv -f "${legacy_path}.lock" "${new_path}.lock" 2>/dev/null
+    mkdir -p "${new_path%/*}" 2>/dev/null || continue
+    mv -f "$legacy_path" "$new_path" 2>/dev/null || continue
+    [[ -f "${legacy_path}.lock" ]] && \
+      mv -f "${legacy_path}.lock" "${new_path}.lock" 2>/dev/null
+    return 0
+  done < <(hotkey_usage_legacy_paths)
   return 0
 }

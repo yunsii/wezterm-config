@@ -1,14 +1,25 @@
 #!/usr/bin/env bash
 
+# Capture this lib's directory at SOURCE time (top-level of the file).
+# Inside `runtime_log_init`, BASH_SOURCE[0] resolves unreliably across
+# bash invocation contexts (interactive `source`, `bash -c`, etc.) and
+# can wrongly resolve to "environment" — see commit message rationale.
+__RUNTIME_LOG_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 runtime_log_init() {
   if [[ -n "${__WEZTERM_RUNTIME_LOG_INITIALIZED:-}" ]]; then
     return
   fi
 
-  local script_dir repo_root config_file
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  repo_root="${WEZTERM_REPO_ROOT:-$(cd "$script_dir/../.." && pwd)}"
+  local repo_root config_file
+  repo_root="${WEZTERM_REPO_ROOT:-$(cd "$__RUNTIME_LOG_LIB_DIR/../.." && pwd)}"
   config_file="$repo_root/wezterm-x/local/runtime-logging.sh"
+
+  # Source canonical WSL path constants so the default log location
+  # tracks docs/performance.md's `wezterm-runtime/{state,logs,bin}/`
+  # convention without each script re-deriving it.
+  # shellcheck disable=SC1091
+  . "$__RUNTIME_LOG_LIB_DIR/wsl-runtime-paths-lib.sh"
 
   if [[ -f "$config_file" ]]; then
     # shellcheck disable=SC1090
@@ -18,10 +29,37 @@ runtime_log_init() {
   : "${WEZTERM_RUNTIME_LOG_ENABLED:=1}"
   : "${WEZTERM_RUNTIME_LOG_LEVEL:=info}"
   : "${WEZTERM_RUNTIME_LOG_CATEGORIES:=}"
-  : "${WEZTERM_RUNTIME_LOG_FILE:=${XDG_STATE_HOME:-$HOME/.local/state}/wezterm-runtime/logs/runtime.log}"
+  : "${WEZTERM_RUNTIME_LOG_FILE:=$WSL_RUNTIME_LOG_FILE}"
   : "${WEZTERM_RUNTIME_LOG_ROTATE_BYTES:=5242880}"
   : "${WEZTERM_RUNTIME_LOG_ROTATE_COUNT:=5}"
   : "${WEZTERM_RUNTIME_LOG_SOURCE:=$(basename "${0:-runtime}")}"
+
+  # One-time migration: the previous override wrote to a flat path
+  # `${XDG_STATE_HOME}/wezterm-runtime.log` (no nested logs/ dir). Fold
+  # any historical data — including content from stale-env writers that
+  # are still appending to the legacy path between sync and tmux reload —
+  # into the canonical location. Use rename-then-append-then-rm so a
+  # concurrent writer can't double-append: once the legacy file is
+  # renamed away, new opens of the original name see ENOENT and create
+  # a fresh file (which we will pick up on the next init).
+  local legacy_log="${XDG_STATE_HOME:-$HOME/.local/state}/wezterm-runtime.log"
+  if [[ -f "$legacy_log" ]]; then
+    mkdir -p "$(dirname "$WEZTERM_RUNTIME_LOG_FILE")" 2>/dev/null
+    local pending="${legacy_log}.migrating-$$"
+    if mv "$legacy_log" "$pending" 2>/dev/null; then
+      [[ -s "$pending" ]] && cat "$pending" >> "$WEZTERM_RUNTIME_LOG_FILE" 2>/dev/null
+      rm -f "$pending" 2>/dev/null
+    fi
+    local i
+    for i in 1 2 3 4 5; do
+      [[ -f "${legacy_log}.$i" ]] || continue
+      local pending_n="${legacy_log}.$i.migrating-$$"
+      if mv "${legacy_log}.$i" "$pending_n" 2>/dev/null; then
+        [[ -s "$pending_n" ]] && cat "$pending_n" >> "${WEZTERM_RUNTIME_LOG_FILE}.$i" 2>/dev/null
+        rm -f "$pending_n" 2>/dev/null
+      fi
+    done
+  fi
 
   __WEZTERM_RUNTIME_LOG_INITIALIZED=1
 }
