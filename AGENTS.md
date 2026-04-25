@@ -36,7 +36,7 @@ Read `AGENTS.md` first, then open only the matching file under `docs/`. Read add
 
 - This repository is the source of truth.
 - Treat `agent-profiles/` as hosted user-level profile source, not as the project-level instruction source for this repo.
-- Windows runtime files are generated from this repo by the `wezterm-runtime-sync` skill in `skills/wezterm-runtime-sync/`.
+- Windows runtime files are generated from this repo by `skills/wezterm-runtime-sync/scripts/sync-runtime.sh`. The `skills/wezterm-runtime-sync/` directory holds the workflow doc + scripts but is **not** a Claude Code Skill (it lives in the repo, not in `~/.claude/skills/`), so do not invoke it via the `Skill` tool — run the script directly with Bash.
 - When agents run Windows-related scripts or smoke tests from WSL, prefer the repo-local wrappers and `scripts/dev/...` entrypoints in this repository over direct `cmd.exe` invocations or ad-hoc `powershell.exe -Command ...`.
 - For Windows file inspection from agents, resolve runtime paths through `scripts/runtime/windows-runtime-paths-lib.sh` and then use WSL-native tools on the `*_WSL` paths instead of `cmd.exe /c dir`, `cmd.exe /c type`, or similar console commands.
 - Keep workspace definitions in `wezterm-x/workspaces.lua`, not inline in `wezterm.lua`.
@@ -46,6 +46,6 @@ Read `AGENTS.md` first, then open only the matching file under `docs/`. Read add
 - `wezterm-x/commands/manifest.json` is the single source of truth for every shortcut. Adding or renaming a hotkey means: (1) add / update the manifest item with a `binding` field; (2) for wezterm-layer bindings, add the named handler to `wezterm-x/lua/ui/action_registry.lua`; (3) for tmux-chord leaves, the `binding.exec` tmux-action string is everything — no code changes elsewhere; `scripts/runtime/render-tmux-bindings.sh` regenerates `wezterm-x/tmux/chord-bindings.generated.conf` during `wezterm-runtime-sync` and `tmux.conf` loads it via `source-file -q`. Do not re-declare keys or actions in `keymaps.lua` or `tmux.conf` directly; both are driven by the manifest now. Missing or unregistered ids show up as `(unregistered)` in `scripts/dev/hotkey-usage-report.sh` — treat that report as the audit signal.
 - Per-machine user overrides live in `wezterm-x/local/keybindings.lua` keyed by manifest id (string → new key, `false` → disable, list → per-variant). The WezTerm side applies them at reload; the tmux-chord side applies them when the renderer runs. Template: `wezterm-x/local.example/keybindings.lua`. Full rules in `docs/keybindings.md`.
 - If behavior, keybindings, workspace semantics, tmux UI, or diagnostics change, update the matching docs in the same edit.
-- After runtime config changes, run the `wezterm-runtime-sync` skill.
+- After runtime config changes, run `skills/wezterm-runtime-sync/scripts/sync-runtime.sh` (Bash, not the `Skill` tool — see the note above).
 - Do not run Git commands that can contend on the index lock in parallel.
 - Do not auto-commit or auto-push unless the user asks or the task explicitly calls for it.
