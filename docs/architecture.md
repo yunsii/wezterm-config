@@ -35,9 +35,10 @@ WezTerm process
 
 ### Ownership rule
 
-- Cross-tab and cross-workspace navigation lives in `wezterm-x/lua/ui/keymaps.lua`. `Alt+n` / `Alt+Shift+n` / `Alt+1..9` switch WezTerm tabs; `Alt+d` / `Alt+w` / `Alt+c` / `Alt+p` switch workspaces.
-- `tmux.conf` only owns behavior that happens inside one WezTerm tab — pane splits, copy-mode, mouse handling, chord dispatch, worktree-window switching, and status-line rendering.
-- WezTerm keys that mutate tmux state (`Alt+v` / `Alt+g` / `Alt+Shift+g` / `Alt+o` / `Ctrl+k` / `Ctrl+Shift+P`) are still declared in `keymaps.lua`; they forward into the active tmux-backed pane via short escape sequences so tmux owns the execution.
+- Cross-tab and cross-workspace navigation lives on the WezTerm layer (`Alt+n` / `Alt+Shift+n` / `Alt+1..9` for tabs; `Alt+d` / `Alt+w` / `Alt+c` / `Alt+p` for workspaces). The key → action wiring is driven by `wezterm-x/commands/manifest.json` + `wezterm-x/lua/ui/action_registry.lua` (handler closures) + `wezterm-x/lua/ui/keymaps.lua` (builds `config.keys` by iterating the manifest and dispatching through the registry).
+- `tmux.conf` owns pane splits, copy-mode, mouse handling, worktree-window switching, and status-line rendering. Its chord key tables (`command-chord`, `worktree-chord`) are **generated** from the same `manifest.json` by `scripts/runtime/render-tmux-bindings.sh` into `wezterm-x/tmux/chord-bindings.generated.conf` (gitignored), which `tmux.conf` loads via `source-file -q`. The renderer runs during `wezterm-runtime-sync`.
+- WezTerm keys that mutate tmux state (`Alt+v` / `Alt+g` / `Alt+Shift+g` / `Alt+o` / `Ctrl+k` / `Ctrl+Shift+P`) resolve through the registry on the WezTerm side; they forward into the active tmux-backed pane via short escape sequences (`\x1bv`, `\x0b`, etc.) so tmux owns the execution. The tmux `bind-key -n M-v / M-g / User0-2` lines that receive those bytes are transport infrastructure and stay inline in `tmux.conf`, not user-customizable.
+- Per-machine keybinding overrides live in `wezterm-x/local/keybindings.lua`, addressed by manifest `id`. The WezTerm path consumes them directly at reload (`wezterm-x/lua/ui/keybinding_overrides.lua`); the tmux-chord path consumes the same file at sync time via the bash renderer. Both sides share one source of truth and one override file.
 - Agent attention is layered: hooks (`scripts/claude-hooks/emit-agent-status.sh`) write a shared JSON file at `$runtime_state_dir/state/agent-attention/attention.json` via `scripts/runtime/attention-state-lib.sh` and nudge WezTerm with an OSC 1337 `attention_tick`. `wezterm-x/lua/attention.lua` reads the file on every tick / `update-status` and renders tab badges plus the right-status counter — no pane walking, no user_var state. Jump is Lua-driven: `Alt+,` / `Alt+.` (and `Alt+/` selection) pick a target from state, issue `SwitchToWorkspace` + mux `tab:activate()` + `pane:activate()` for cross-workspace GUI focus, and spawn `scripts/runtime/attention-jump.sh --session <id>` in the background for `tmux select-window`/`select-pane`.
 
 ### Naming guidance for code and docs
@@ -49,7 +50,7 @@ WezTerm process
 
 ## Command Manifest
 
-`wezterm-x/commands/manifest.json` is the single source of truth for invocable commands across the WezTerm keymap, the `tmux.conf` bindings, the tmux-owned command palette, and the `docs/keybindings.md` reference. Consumers (palette reader, WezTerm keymap codegen, tmux.conf codegen, docs generator) resolve commands by `id` and must not re-declare keys or palette entries outside the manifest.
+`wezterm-x/commands/manifest.json` is the single source of truth for invocable commands across the WezTerm keymap, the tmux chord tables, the tmux-owned command palette, and the `docs/keybindings.md` reference. Consumers (WezTerm keymap builder, tmux chord renderer, palette reader, hotkey usage report) resolve commands by `id` and must not re-declare keys, actions, or palette entries outside the manifest.
 
 Entry schema:
 
@@ -58,16 +59,23 @@ Entry schema:
 - `description` string. One-line explainer reused by the palette popup and docs.
 - `scope` string. Docs/UI grouping. One of: `workspaces`, `project-navigation`, `commands-and-splits`, `window-and-pane-navigation`, `clipboard`, `session-maintenance`.
 - `context` string. Where the command is usable. One of: `any`, `tmux-backed`, `hybrid-wsl`.
-- `hotkeys` array. Zero or more bindings; each item has `keys` (e.g. `Alt+v`, `Ctrl+k v`) and `layer` (`wezterm`, `tmux`, or `tmux-chord`) so codegen can dispatch into the right layer.
+- `binding` object, optional. Declares how the command executes. Two shapes:
+  - WezTerm layer: `{ "handler": "<name>", "args": <optional static args> }`. `handler` is the key into `wezterm-x/lua/ui/action_registry.lua`; the handler function receives optional static `args` (from manifest) and per-hotkey `args` (e.g. `Alt+N` passes `N`) and returns a wezterm action.
+  - tmux-chord layer: `{ "kind": "tmux-chord-leaf", "table": "command-chord" | "worktree-chord", "exec": "<tmux action chain>", "switch_first": <optional bool> }`. `exec` is a raw tmux action string (may embed `#{...}` interpolations); the renderer wraps it with chord-hint clear + usage-bump + a `switch-client -T root` that defaults to running after `exec` (`switch_first: true` moves it before `exec` for modal actions like `command-prompt`).
+- `args_schema` object, optional. For parametrized ids (`tab.select-by-index`): `{ "kind": "integer" | "string" | "object", "range"?, "enum"?, "shape"? }`. Consumed by the override loader to validate user-supplied args.
+- `hotkeys` array. Zero or more bindings; each item has `keys` (e.g. `Alt+v`, `Ctrl+k v`), `layer` (`wezterm` or `tmux-chord`), and optional `args` (for parametrized ids).
 - `hotkey_display` string, optional. Render-only override for the palette hotkey column; when present, replaces the comma-joined `hotkeys[].keys` text (e.g. `Alt+1..9` instead of `Alt+1,Alt+2,...,Alt+9`). Does not affect codegen — the real bindings still come from `hotkeys[]`.
 - `palette` object, optional. Present only when the command should appear in the tmux command palette. Either `display_only: true` (the entry is rendered for search/discovery and running it prints a toast asking the user to use the hotkey), or a real entry with `accelerator` (single-char hint), `command` (argv array executed by `tmux-command-run.sh`; elements may contain the `{repo_root}` placeholder which is replaced with the current repository root at register time), and optional `confirm_message`, `success_message`, `failure_message`.
 
 Invariants:
 
 - `id` is unique across the manifest.
-- `hotkeys[].keys` is unique across the manifest.
+- `hotkeys[].keys` is unique across the manifest (for the default key; user overrides may introduce temporary shadows until resolved).
+- Every wezterm-layer `binding.handler` must be registered in `action_registry.lua`, and every tmux-chord `binding` must carry `table` + `exec`.
 - `palette.accelerator` is unique within a given runtime-mode visibility set.
 - `context = hybrid-wsl` entries only run when the active runtime mode matches.
+
+Adding a new shortcut means: (1) new item in `manifest.json` with `binding`; (2) for wezterm-layer, new handler function in `action_registry.lua`; (3) for tmux-chord leaves, the `exec` string covers everything — no code changes elsewhere. Rerun `wezterm-runtime-sync` after edits so the tmux chord table regenerates.
 
 ## Entry Points
 
