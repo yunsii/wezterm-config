@@ -495,12 +495,19 @@ local function read_tmux_active_pane(socket, session)
   if not state_path then
     return nil
   end
-  local base_dir = state_path:match('^(.*)/[^/]+$')
+  -- Strip the trailing filename. Accept either separator: state_path is
+  -- built with the host's path separator (constants.lua / defaults.lua),
+  -- so on Windows it is backslash-separated. Lua io.open accepts both
+  -- on Windows but a `/`-only regex would silently miss and we would
+  -- never read the focus file.
+  local base_dir = state_path:match('^(.*)[/\\][^/\\]+$')
   if not base_dir then
     return nil
   end
   -- Mirror the filename transform in tmux-focus-emit.sh so both sides
   -- agree on the path without having to parse the full socket string.
+  -- Use forward slash for the subdirectory join: Windows io.open
+  -- accepts mixed separators, and this keeps the path readable in logs.
   local safe_socket = (socket:gsub('/', '_'))
   local safe_session = (session:gsub('^%$', ''))
   local path = base_dir .. '/tmux-focus/' .. safe_socket .. '__' .. safe_session .. '.txt'
