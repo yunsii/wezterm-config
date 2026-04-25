@@ -6,6 +6,8 @@ TMUX_CONF="$SCRIPT_DIR/../../tmux.conf"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/runtime-log-lib.sh"
 # shellcheck disable=SC1091
+source "$SCRIPT_DIR/tmux-version-lib.sh"
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/tmux-worktree-lib.sh"
 
 start_ms="$(runtime_log_now_ms)"
@@ -14,32 +16,6 @@ if [[ -z "$cwd" || "$cwd" =~ ^/mnt/[a-z]/Users/[^/]+$ ]]; then
   cwd="${HOME:-$PWD}"
 fi
 cwd="$(tmux_worktree_abs_path "$cwd")"
-
-tmux_version() {
-  tmux -V 2>/dev/null | awk '{print $2}' | sed 's/[^0-9.]//g'
-}
-
-tmux_version_at_least() {
-  local version
-  version="$(tmux_version)"
-  local target_major="$1"
-  local target_minor="$2"
-  local major minor
-  IFS='.' read -r major minor _ <<< "$version"
-  major="${major:-0}"
-  minor="${minor:-0}"
-  (( major > target_major )) && return 0
-  (( major == target_major && minor >= target_minor )) && return 0
-  return 1
-}
-
-ensure_tmux_support() {
-  if ! tmux_version_at_least 3 3; then
-    local installed
-    installed="$(tmux_version)"
-    runtime_log_warn workspace "default WSL tmux session uses tmux older than 3.3" "tmux_version=${installed:-unknown}"
-  fi
-}
 
 resolve_login_shell() {
   if [[ -n "${WEZTERM_MANAGED_SHELL:-}" && -x "${WEZTERM_MANAGED_SHELL:-}" ]]; then
@@ -94,7 +70,7 @@ repo_root_path() {
   printf '%s\n' "$repo_root"
 }
 
-ensure_tmux_support
+tmux_version_ensure_supported
 
 primary_shell_command="$(build_primary_shell_command)"
 session_name="wezterm_default_shell_$(date +%Y%m%dT%H%M%S)-$$"

@@ -6,7 +6,7 @@ Use this doc when you need prerequisites and local setup.
 
 - `hybrid-wsl` uses the Windows WezTerm nightly build plus a WSL domain configured in `wezterm-x/local/constants.lua`.
 - `posix-local` runs directly on Linux or macOS without a WSL domain.
-- `tmux` must be available in the runtime environment that will host managed project tabs.
+- `tmux 3.6+` must be available in the runtime environment that will host managed project tabs. The repo's `tmux.conf` advertises DEC mode 2026 (synchronized output / BSU+ESU) so Claude Code and similar agent CLIs can wrap each render frame atomically, keeping the IME candidate-window anchor stable under streaming output. tmux 3.4 stalls idle renders waiting on ESU; 3.6 added a 1s flush timeout that prevents the freeze. Ubuntu 24.04 LTS still ships 3.4, so build 3.6+ from source if your distro lags. Full investigation in [`ime-flicker-and-sync-output.md`](./ime-flicker-and-sync-output.md).
 - WakaTime status needs `python3` in that same runtime environment and a private `WAKATIME_API_KEY` in `wezterm-x/local/shared.env`.
 - Repo-local helper wrappers such as `scripts/runtime/agent-clipboard.sh` require `hybrid-wsl`, `cmd.exe`, `powershell.exe`, `wslpath`, and a synced Windows helper runtime.
 

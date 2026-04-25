@@ -24,6 +24,9 @@ Read `AGENTS.md` first, then open only the matching file under `docs/`. Read add
 - Performance work on the Alt+/ popup, the cross-FS routing rule for
   state files, or the bench harnesses:
   Read [`docs/performance.md`](docs/performance.md).
+- IME candidate-window stability, DEC mode 2026 (synchronized output),
+  why tmux 3.6+ is required, or agent-CLI render flicker investigation:
+  Read [`docs/ime-flicker-and-sync-output.md`](docs/ime-flicker-and-sync-output.md).
 - Ownership boundaries, runtime architecture, or entry points:
   Read [`docs/architecture.md`](docs/architecture.md).
 - Preparing a commit message or deciding commit split:

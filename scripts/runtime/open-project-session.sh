@@ -6,6 +6,8 @@ TMUX_CONF="$SCRIPT_DIR/../../tmux.conf"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/runtime-log-lib.sh"
 # shellcheck disable=SC1091
+source "$SCRIPT_DIR/tmux-version-lib.sh"
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/tmux-worktree-lib.sh"
 
 if [[ $# -lt 2 ]]; then
@@ -60,37 +62,7 @@ cleanup_failed_startup() {
 
 trap cleanup_failed_startup EXIT
 
-tmux_version() {
-  tmux -V 2>/dev/null | awk '{print $2}' | sed 's/[^0-9.]//g'
-}
-
-tmux_version_at_least() {
-  local version
-  version=$(tmux_version)
-  local target_major=$1
-  local target_minor=$2
-  local major minor
-  IFS='.' read -r major minor _ <<< "$version"
-  major=${major:-0}
-  minor=${minor:-0}
-  (( major > target_major )) && return 0
-  (( major == target_major && minor >= target_minor )) && return 0
-  return 1
-}
-
-ensure_tmux_support() {
-  if ! tmux_version_at_least 3 3; then
-    local installed
-    installed=$(tmux_version)
-    runtime_log_warn workspace "tmux version lacks allow-passthrough support" "tmux_version=${installed:-unknown}"
-    cat <<EOF >&2
-Warning: tmux ${installed:-} lacks allow-passthrough support.
-Managed tmux workspaces work best with tmux 3.3 or newer.
-EOF
-  fi
-}
-
-ensure_tmux_support
+tmux_version_ensure_supported
 
 repo_root_path() {
   local repo_root=""
