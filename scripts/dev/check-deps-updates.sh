@@ -6,7 +6,7 @@ set -euo pipefail
 #
 # Floors:
 #   - tmux:  3.6  (scripts/runtime/tmux-version-lib.sh: tmux_version_at_least 3 6)
-#   - go:    1.21 (scripts/runtime/picker/go.mod)
+#   - go:    1.21 (native/picker/go.mod)
 #   - wezterm: no declared floor; reports installed vs latest only.
 #
 # go is checked only when a `go` binary is on PATH (matches build-picker's
@@ -163,7 +163,7 @@ if command -v tmux >/dev/null 2>&1; then
   tmux_installed="$(tmux -V 2>/dev/null | awk '{print $2}')"
 fi
 
-# Mirror scripts/runtime/picker/build.sh's discovery chain: PATH, then
+# Mirror native/picker/build.sh's discovery chain: PATH, then
 # ~/.local/go/bin/go, then /usr/local/go/bin/go. sync-runtime.sh runs in a
 # non-interactive shell that may not inherit a user's PATH additions, and the
 # repo treats `go` as installed if any of these resolve.
@@ -251,7 +251,7 @@ check_tool "tmux"    "$tmux_installed"    "$tmux_latest"    "3.6"
 check_tool "go"      "$go_installed"      "$go_latest"      "1.21"
 
 if (( ANY_FLOOR_VIOLATION )); then
-  emit "$(printf '%sreminder%s tool below repo floor — see scripts/runtime/tmux-version-lib.sh / scripts/runtime/picker/go.mod' \
+  emit "$(printf '%sreminder%s tool below repo floor — see scripts/runtime/tmux-version-lib.sh / native/picker/go.mod' \
     "$c_red" "$c_reset")"
 elif (( ANY_BEHIND )); then
   emit "$(printf '%sreminder%s update available — bump the host tool to stay current' \

@@ -5,7 +5,7 @@
 # Build flags: CGO_ENABLED=0 + GOOS=linux for a fully static ELF (no
 # libc / glibc dependency). `-ldflags='-s -w'` strips debug info so the
 # binary is ~2MB instead of ~6MB. The result lives at
-# scripts/runtime/picker/bin/picker and is gitignored — sync-runtime.sh
+# native/picker/bin/picker and is gitignored — sync-runtime.sh
 # regenerates it on every sync, the same way the tmux chord bindings
 # are regenerated.
 #

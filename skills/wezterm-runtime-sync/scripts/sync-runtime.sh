@@ -559,8 +559,8 @@ run_runtime_native_flow() {
   # rebuild every sync so source changes pick up; skip silently when `go`
   # is missing so machines without the toolchain still complete the sync
   # (the bash fallback in tmux-attention-menu.sh handles the absence).
-  if [[ -x "$REPO_ROOT/scripts/runtime/picker/build.sh" ]]; then
-    if "$REPO_ROOT/scripts/runtime/picker/build.sh"; then
+  if [[ -x "$REPO_ROOT/native/picker/build.sh" ]]; then
+    if "$REPO_ROOT/native/picker/build.sh"; then
       sync_trace "step=build-picker status=completed"
     else
       sync_trace "step=build-picker status=failed"

@@ -37,10 +37,10 @@ performance contract.
 | `scripts/runtime/tmux-attention-menu.sh` | Reads state + builds row tuples + opens popup. Bench-instrumented via `WEZTERM_BENCH_NO_POPUP=1` | p50 49ms (was 545ms) |
 | `scripts/runtime/windows-runtime-paths-lib.sh` | Resolves Windows `%LOCALAPPDATA%` etc. once + caches to disk | 24h TTL cache at `~/.cache/wezterm-runtime/windows-paths.env`; bypass with `WEZTERM_NO_PATH_CACHE=1` |
 | `scripts/runtime/attention-state-lib.sh` | Reads attention state. Sources paths-lib once at lib-load, memoizes resolved path | All callers share one `__ATTENTION_STATE_PATH_CACHED` |
-| `scripts/runtime/picker/main.go` | Subcommand dispatcher + shared helpers (perf log, term IO, shell escape). Hosts the `attention` subcommand. | ~2-5ms cold (vs ~30-80ms bash fallback) |
-| `scripts/runtime/picker/cmd_command.go` | `picker command` — replaces `tmux-command-picker.sh`. Consumes a 6-field TSV menu.sh prefetched. | Skips ~50ms of `command_panel_load_items` re-run inside the popup pty |
-| `scripts/runtime/picker/cmd_worktree.go` | `picker worktree` — replaces `tmux-worktree-picker.sh`. Consumes a 4-field TSV with `existing_window_id` already resolved. | Skips ~30ms of bash boot + render-lib source inside popup |
-| `scripts/runtime/picker/bin/picker` | Compiled binary, gitignored | Built by sync; missing → bash fallback kicks in for whichever panel needs it |
+| `native/picker/main.go` | Subcommand dispatcher + shared helpers (perf log, term IO, shell escape). Hosts the `attention` subcommand. | ~2-5ms cold (vs ~30-80ms bash fallback) |
+| `native/picker/cmd_command.go` | `picker command` — replaces `tmux-command-picker.sh`. Consumes a 6-field TSV menu.sh prefetched. | Skips ~50ms of `command_panel_load_items` re-run inside the popup pty |
+| `native/picker/cmd_worktree.go` | `picker worktree` — replaces `tmux-worktree-picker.sh`. Consumes a 4-field TSV with `existing_window_id` already resolved. | Skips ~30ms of bash boot + render-lib source inside popup |
+| `native/picker/bin/picker` | Compiled binary, gitignored | Built by sync; missing → bash fallback kicks in for whichever panel needs it |
 | `scripts/runtime/tmux-attention-picker.sh` | Bash fallback for `picker attention` | Sources 3 libs cold |
 | `scripts/runtime/tmux-command-picker.sh` | Bash fallback for `picker command` | Re-runs `command_panel_load_items` inside the popup pty |
 | `scripts/runtime/tmux-worktree-picker.sh` | Bash fallback for `picker worktree` | Slurps a pre-rendered first frame to bound first-paint at "bash startup + 1 syscall" |
@@ -51,10 +51,10 @@ performance contract.
 
 | File | Role |
 |---|---|
-| `scripts/runtime/picker/build.sh` | Builds the Go binary. Auto-discovers `go` from PATH / `~/.local/go/bin` / `/usr/local/go/bin`. Skips silently when Go is missing |
-| `scripts/runtime/picker/{go.mod, go.sum}` | Go module pinning `golang.org/x/term` |
+| `native/picker/build.sh` | Builds the Go binary. Auto-discovers `go` from PATH / `~/.local/go/bin` / `/usr/local/go/bin`. Skips silently when Go is missing |
+| `native/picker/{go.mod, go.sum}` | Go module pinning `golang.org/x/term` |
 | `skills/wezterm-runtime-sync/scripts/sync-runtime.sh` | Added `step=build-picker` between `render-tmux-bindings` and `copy-source` |
-| `.gitignore` | Excludes `scripts/runtime/picker/bin/` (build artifact) |
+| `.gitignore` | Excludes `native/picker/bin/` (build artifact) |
 
 ### Diagnostic UI (temporary, slated for removal)
 
@@ -114,7 +114,7 @@ bench.
 
 | Decision | Measured data | Choice | Where |
 |---|---|---|---|
-| Bash vs Go picker on the popup-pty side | Bash startup + 3 lib sources cold = 30-80ms; Go static binary = 2-5ms (~15-25x) | Go on the hot path, bash as fallback when binary is missing | `scripts/runtime/picker/`, `tmux-attention-menu.sh` dispatch |
+| Bash vs Go picker on the popup-pty side | Bash startup + 3 lib sources cold = 30-80ms; Go static binary = 2-5ms (~15-25x) | Go on the hot path, bash as fallback when binary is missing | `native/picker/`, `tmux-attention-menu.sh` dispatch |
 | Cache the Windows env detection (`%LOCALAPPDATA%` / `%USERPROFILE%`) | Each Windows shell spawn from WSL ~100-200ms; menu.sh triggered detection 6+ times per Alt+/ → up to 600ms pure interop overhead | 24h disk cache at `~/.cache/wezterm-runtime/windows-paths.env`. Most savings of any single change | `windows-runtime-paths-lib.sh` |
 | Hoist `windows-runtime-paths-lib` source from per-call to lib-load | Per-call source parsed ~150 lines × 3 calls per menu.sh run | Source once at `attention-state-lib.sh` load; in-process memo for `attention_state_path` | `attention-state-lib.sh` |
 | Replace `date +%s%3N` with `EPOCHREALTIME` arithmetic | Each `date` fork = ~5ms; multiple stamps per menu.sh run | bash 5 builtins (`EPOCHREALTIME`, `EPOCHSECONDS`, `RANDOM`) for `start_ms` and `trace_id` | `tmux-attention-menu.sh` |

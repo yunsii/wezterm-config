@@ -1,4 +1,4 @@
-module github.com/yunsii/wezdeck/scripts/runtime/picker
+module github.com/yunsii/wezdeck/native/picker
 
 go 1.21
 

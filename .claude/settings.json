@@ -43,7 +43,7 @@
       "Bash(tmux select-pane *)",
       "Bash(skills/wezterm-runtime-sync/scripts/sync-runtime.sh:*)",
       "Bash(scripts/dev/reload-tmux.sh)",
-      "Bash(scripts/runtime/picker/build.sh)",
+      "Bash(native/picker/build.sh)",
       "Bash(scripts/dev/bench-menu-prep.sh *)",
       "Bash(scripts/dev/perf-trend.sh *)",
       "Bash(scripts/runtime/worktree/worktree-task *)",
