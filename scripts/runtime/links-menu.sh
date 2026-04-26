@@ -75,7 +75,10 @@ menu_done_ts="$(date +%s%3N)"
 
 dispatch="$script_dir/links-dispatch.sh"
 
-# tmux already wraps display-popup -E around our exec inside its own
-# pty, so this script is the popup body. exec straight into the
-# binary so it owns the tty.
-exec "$picker_bin" links "$prefetch" "$dispatch" "$cwd" "$keypress_ts" "$menu_start_ts" "$menu_done_ts"
+# Spawn the popup ourselves rather than relying on the chord exec to
+# do it: `display-popup`'s shell-command argument does NOT expand
+# tmux format strings (`#{@wezterm_runtime_root}` etc.), so the
+# chord can only safely invoke `run-shell` (which DOES expand) and
+# let this launcher run the popup with already-resolved paths.
+exec tmux display-popup -E -h "60%" -w "80%" \
+  "'$picker_bin' links '$prefetch' '$dispatch' '$cwd' '$keypress_ts' '$menu_start_ts' '$menu_done_ts'"

@@ -214,7 +214,7 @@
     "binding": {
       "kind": "tmux-chord-leaf",
       "table": "command-chord",
-      "exec": "display-popup -E -w 80% -h 60% \"bash #{@wezterm_runtime_root}/scripts/runtime/links-menu.sh '#{pane_current_path}'\""
+      "exec": "run-shell -b \"bash #{@wezterm_runtime_root}/scripts/runtime/links-menu.sh '#{pane_current_path}'\""
     },
     "hotkeys": [
       { "keys": "Ctrl+k l", "layer": "tmux-chord" }
