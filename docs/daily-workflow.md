@@ -30,46 +30,13 @@ Run those commands from the repo root, or set `WEZTERM_CONFIG_REPO=/absolute/pat
 The sync step publishes the runtime, updates the stable top-level bootstrap last, and installs the Windows helper on Windows targets. The installer now prefers a local Windows `dotnet` build from `%USERPROFILE%\.wezterm-native\host-helper\windows\src\...`; if `dotnet` is unavailable, it can fall back to a version-pinned GitHub release package declared in `native/host-helper/windows/release-manifest.json`. `.sync-target` is repo-local and gitignored.
 It also refreshes `~/.wezterm-x/agent-tools.env` in the target home so external agent platforms can discover repo-local wrappers from one stable marker file.
 
-Sync also copies `config/worktree-task.env` into the runtime dir as `repo-worktree-task.env` so the Windows-side wezterm.exe can read it; without that local copy, the `<base>_resume` profiles only declared in the env file silently miss registration in Lua and workspace open falls back to the bare profile. Edits to `config/worktree-task.env` only take effect after the next sync.
+Sync also mirrors `config/worktree-task.env` into the runtime dir as `repo-worktree-task.env` so the Windows-side wezterm.exe can read it; edits to `config/worktree-task.env` only take effect after the next sync. Why this matters for `<base>_resume` profile registration: see [`workspaces.md#behavior`](./workspaces.md#behavior).
 
 Between `publish-runtime` and the Windows helper install, sync runs a `lua-precheck` that dofile-loads `wezterm-x/lua/constants.lua` under a mocked `wezterm` and asserts managed-launcher resolution still works (`default_resume_profile ≠ default_profile`, resume command literally contains `--continue` or `resume`). On failure, sync aborts with a profile-list snapshot. Requires `lua5.4` (or `lua5.3`/`lua`) on the WSL/Linux side; see [`setup.md`](./setup.md#prerequisites). When no lua is installed, the precheck is skipped with a warning rather than failing.
 
-## Host Helper Release Rollout
+## Host Helper Release
 
-When you need the Windows helper to install on machines without a local Windows `dotnet` SDK:
-
-1. Run the GitHub Actions workflow [`.github/workflows/host-helper-release.yml`](/home/yuns/github/wezterm-config/.github/workflows/host-helper-release.yml) with a new `host-helper-v...` tag, or push that tag to trigger the workflow automatically.
-2. Copy the release tag and SHA-256 from the workflow summary.
-3. For non-draft releases, the workflow now opens a PR that updates `native/host-helper/windows/release-manifest.json` on top of the default branch.
-4. If you need to update the manifest manually from a repo checkout:
-
-```bash
-scripts/dev/update-host-helper-release-manifest.sh --tag host-helper-v2026.04.19.1 --sha256 <sha256>
-```
-
-5. Sync the runtime as usual so the updated manifest is copied to Windows targets.
-
-To force the release path even on a machine that already has Windows `dotnet`, set:
-
-```bash
-WEZTERM_WINDOWS_HELPER_INSTALL_SOURCE=release skills/wezterm-runtime-sync/scripts/sync-runtime.sh
-```
-
-Use `WEZTERM_WINDOWS_HELPER_INSTALL_SOURCE=local` when you want to verify the local-build path explicitly. Leave it unset for normal `auto` behavior.
-
-When GitHub download speed is poor, the Windows helper installer now checks these release-archive sources in order before it falls back to the manifest URL:
-
-- `WEZTERM_WINDOWS_HELPER_RELEASE_ARCHIVE=C:\path\to\asset.zip`
-- `%LOCALAPPDATA%\wezterm-runtime\artifacts\host-helper\<version>\<assetName>`
-- `%LOCALAPPDATA%\wezterm-runtime\artifacts\host-helper\<assetName>`
-- the existing `%LOCALAPPDATA%\wezterm-runtime\cache\downloads\<version>\<assetName>` cache entry
-
-For network overrides, use one of:
-
-- `WEZTERM_WINDOWS_HELPER_RELEASE_URL=https://.../asset.zip`
-- `WEZTERM_WINDOWS_HELPER_RELEASE_BASE_URL=https://mirror.example.com/host-helper/<version>`
-
-Both local archives and URL overrides are still verified against the manifest SHA-256 before installation.
+Cutting a Windows host-helper release, updating `release-manifest.json`, forcing the release-install branch locally, or side-loading a pre-fetched zip is maintainer flow — see [`host-helper-release.md`](./host-helper-release.md).
 
 ## Reload Rules
 

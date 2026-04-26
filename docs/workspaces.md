@@ -33,6 +33,32 @@ WezTerm workspaces are the top-level session unit. For the full WezTerm-vs-tmux 
 - `session.refresh-current-window` only respawns the focused pane: focus the agent pane to bring the agent back under the resume profile, focus a secondary pane to respawn just that shell. The "primary pane" of a managed window is identified by pane id (the first entry from `tmux list-panes`), not pane index — under this repo's `tmux.conf` (`pane-base-index 1`) the agent pane's index is `1`. Use `refresh-current-session` if you want the whole window rebuilt regardless of focus.
 - Profile command strings are sourced from `config/worktree-task.env` (repo-level) and `~/.config/worktree-task/config.env` (user-level). The Lua baseline in `wezterm-x/lua/constants.lua` only carries bare fallbacks used when no env file populates them, so both WezTerm workspace panes and worktree-task quick-create windows read the same single source of truth; edit the env file to change every surface at once.
 - Naming convention asymmetry: shell-side reads use the literal `<base>-resume` form (hyphen) to derive `WT_PROVIDER_AGENT_PROFILE_<UPPER>_RESUME_COMMAND` env keys, while the Lua env parser in `wezterm-x/lua/config/managed_cli.lua` normalizes the captured profile name with `[^a-z0-9]+ → _`, so the registered Lua key is `<base>_resume` (underscore). The workspace-open resolver in `wezterm-x/lua/constants.lua` looks up `<base>_resume`. If you add a new managed agent profile, update both sides or `default_resume_profile` will silently fall back to the bare profile.
+
+  Resolution chain (each arrow names the consumer that owns the next link):
+
+  ```mermaid
+  flowchart LR
+    ENV[("config/worktree-task.env<br/>WT_PROVIDER_AGENT_PROFILE_<br/>CLAUDE_RESUME_COMMAND=...")]
+    SYNC[("&lt;runtime_dir&gt;/<br/>repo-worktree-task.env<br/>(NTFS-readable mirror)")]
+    LUA["wezterm-x/lua/<br/>config/managed_cli.lua<br/>parses + normalises<br/>'-' → '_'"]
+    REG{{"managed_cli.profiles<br/>['claude_resume']"}}
+    DEF["constants.lua<br/>default_resume_profile<br/>looks up 'claude_resume'"]
+    LAUNCH(["workspace open /<br/>Ctrl+k g d/t/h /<br/>Alt+g picker /<br/>refresh-* actions"])
+
+    ENV -->|"wezterm-runtime-sync<br/>(P0 step)"| SYNC
+    SYNC -->|"io.open from<br/>wezterm.exe Lua"| LUA
+    LUA -->|"register"| REG
+    REG -->|"name lookup<br/>(underscore)"| DEF
+    DEF -->|"resolved command<br/>(claude --continue)"| LAUNCH
+
+    SHELL["shell side<br/>reads &lt;base&gt;-resume<br/>(hyphen)"] -.->|"derives env key"| ENV
+
+    classDef warn fill:#fff8c5,stroke:#9a6700
+    class LUA,SHELL warn
+  ```
+
+  The two yellow nodes are where the hyphen / underscore split lives — they read the same env file but address it through different name shapes. Skip the sync step (top arrow) and the entire NTFS mirror is missing, so `claude_resume` never registers and workspace open falls back to bare `claude` (no `--continue`).
+
 - Hybrid-wsl env file pickup: `config/worktree-task.env` is copied into `<runtime_dir>/repo-worktree-task.env` at sync time and `constants.lua` reads that local copy first. Necessary because `repo-root.txt` stores a WSL-native path (`/home/yuns/...`) which Windows-side wezterm.exe cannot resolve via `io.open`. Without the local copy, the env-only `<base>_resume` profiles would never register and workspace open would fall back to the bare profile.
 - Managed agent commands run inside the resolved login shell so workspace startup sees the same shell environment as your normal terminal sessions.
 - Raw `command = { ... }` overrides still bypass the managed launcher profile entirely.
@@ -53,6 +79,40 @@ The worktree-task runtime supports a two-tier model where directory naming encod
 | `hotfix-*` | hours | `Ctrl+k g h` | `Ctrl+k g r` after merge | `claude-resume` / `codex-resume` |
 
 Long-lived `dev-*` worktrees act like persistent parallel "workstations" — accumulated agent context, dev-server state, dependency caches survive across days. Reclaim is intentionally refused on them by both the CLI and the hotkey to prevent loss of that state.
+
+Lifecycle visualised — directory prefix encodes which transitions are allowed:
+
+```mermaid
+stateDiagram-v2
+  [*] --> main: initial clone
+  main --> dev: Ctrl+k g d (long-lived parallel)
+  main --> task: Ctrl+k g t (PR-scoped)
+  main --> hotfix: Ctrl+k g h (urgent fix)
+
+  task --> [*]: Ctrl+k g r<br/>(reclaim after merge)
+  hotfix --> [*]: Ctrl+k g r<br/>(reclaim after merge)
+  dev --> dev: Ctrl+k g r refused<br/>(use git worktree remove<br/>to drop manually)
+
+  note right of dev
+    Reclaim refused on dev-* by both
+    the CLI and Ctrl+k g r — protects
+    accumulated agent context, dev-server
+    state, dependency caches.
+  end note
+
+  note left of main
+    Reclaim refused on main:
+    primary worktree is permanent.
+  end note
+
+  state "Ctrl+k g r checks" as RC {
+    [*] --> RefuseDirty: dirty / untracked → use --force
+    [*] --> RefuseUnmerged: branch not merged into primary HEAD
+    [*] --> Allow: clean + merged → close window, prune
+  }
+```
+
+(`task-*` and `hotfix-*` differ only in directory prefix and intended lifetime; their lifecycle transitions are identical.)
 
 ### Branch naming is independent
 

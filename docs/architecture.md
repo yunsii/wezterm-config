@@ -39,7 +39,7 @@ WezTerm process
 - `tmux.conf` owns pane splits, copy-mode, mouse handling, worktree-window switching, and status-line rendering. Its chord key tables (`command-chord`, `worktree-chord`) are **generated** from the same `manifest.json` by `scripts/runtime/render-tmux-bindings.sh` into `wezterm-x/tmux/chord-bindings.generated.conf` (gitignored), which `tmux.conf` loads via `source-file -q`. The renderer runs during `wezterm-runtime-sync`.
 - WezTerm keys that mutate tmux state (`Alt+v` / `Alt+g` / `Alt+Shift+g` / `Alt+/` / `Alt+o` / `Ctrl+k` / `Ctrl+Shift+P`) resolve through the registry on the WezTerm side; they forward into the active tmux-backed pane via short escape sequences (`\x1bv`, `\x1b/`, `\x0b`, etc.) so tmux owns the execution. The tmux `bind-key -n M-v / M-g / M-/ / User0-2` lines that receive those bytes are transport infrastructure and stay inline in `tmux.conf`, not user-customizable.
 - Per-machine keybinding overrides live in `wezterm-x/local/keybindings.lua`, addressed by manifest `id`. The WezTerm path consumes them directly at reload (`wezterm-x/lua/ui/keybinding_overrides.lua`); the tmux-chord path consumes the same file at sync time via the bash renderer. Both sides share one source of truth and one override file.
-- Agent attention is layered: hooks (`scripts/claude-hooks/emit-agent-status.sh`) write a shared JSON file at `$runtime_state_dir/state/agent-attention/attention.json` via `scripts/runtime/attention-state-lib.sh` and nudge WezTerm with an OSC 1337 `attention_tick`. `wezterm-x/lua/attention.lua` reads the file on every tick / `update-status` and renders tab badges plus the right-status counter — no pane walking, no user_var state. Jump splits by entry point: `Alt+,` / `Alt+.` are Lua-driven and pick a target from state, issue `SwitchToWorkspace` + mux `tab:activate()` + `pane:activate()`, and spawn `scripts/runtime/attention-jump.sh --direct …` in the background. `Alt+/` is forwarded to tmux and runs `scripts/runtime/tmux-attention-menu.sh`, which opens `tmux display-popup -E scripts/runtime/tmux-attention-picker.sh` — but before forwarding `\x1b/`, the WezTerm-side handler calls `attention.write_live_snapshot(constants.attention.live_panes_file)` so the popup picker reads a fresh `pane_id → {workspace, tab_index, tab_title}` JSON file (`state/agent-attention/live-panes.json`) instead of paying for a `wezterm.exe cli list` round-trip from the popup pty. The picker dispatches the slow path `attention-jump.sh --session <id>`. Putting the overlay inside the popup is what makes `Alt+/` a true toggle: the popup is the only thing listening to the keyboard while it is up, so the same chord that opens it also closes it (the picker's input loop matches `\x1b/` as exit).
+- Agent attention is layered: hooks (`scripts/claude-hooks/emit-agent-status.sh`) write a shared JSON file via `scripts/runtime/attention-state-lib.sh` and nudge WezTerm with an OSC 1337 `attention_tick`; `wezterm-x/lua/attention.lua` reads it on every tick and renders tab badges + right-status counter (render-only; no pane walking, no user_var state). Jump path splits by entry point: `Alt+,` / `Alt+.` are Lua-driven `--direct` calls; `Alt+/` is forwarded into tmux and runs the popup picker. Full pipeline (state schema, transitions, rendering, focus-based auto-ack, keyboard, hooks): [`agent-attention.md`](./agent-attention.md).
 
 ### Naming guidance for code and docs
 
@@ -83,13 +83,8 @@ Adding a new shortcut means: (1) new item in `manifest.json` with `binding`; (2)
 - `wezterm-x/workspaces.lua`: managed workspace definitions
 - `wezterm-x/commands/manifest.json`: single source of truth for invocable commands (see `Command Manifest`)
 - `wezterm-x/lua/logger.lua`: WezTerm-side structured diagnostics helper
-- `wezterm-x/lua/attention.lua`: reads the shared agent-attention state file, renders tab badges + right-status counter, and schedules the background delayed `--forget` for focus-based auto-ack when the currently-focused WezTerm pane **and** active tmux pane match a live `done` entry (render-owning; delegates all mutation to `attention-jump.sh`)
-- `scripts/runtime/attention-state-lib.sh`: shared bash helpers for read / upsert / remove / prune of the attention state file, with flock for concurrent writes
-- `scripts/claude-hooks/emit-agent-status.sh`: user-level Claude Code hook emitter that updates state.json and sends the OSC 1337 `attention_tick` nudge
-- `scripts/runtime/attention-jump.sh`: WSL-side orchestrator for attention jumps — runs `tmux select-window`/`select-pane`, recovers a missing `wezterm_pane_id` from tmux session env when needed, and falls back to `wezterm.exe cli activate-pane` for contexts where Lua isn't driving the GUI side (explicit CLI invocation, `--clear-all`). Also owns the `--forget` and `--prune` entrypoints that implement the delayed auto-clear (used by both `Alt+.`/`Alt+/` jumps and the focus-based auto-ack) and the periodic TTL sweep
-- `scripts/runtime/tmux-attention-menu.sh` + `tmux-attention-picker.sh`: tmux-popup picker for `Alt+/`. The menu wrapper opens `tmux display-popup -E`; the picker reads state.json + the `live-panes.json` snapshot the WezTerm `attention.overlay` handler writes on the same keystroke, then dispatches selections via `attention-jump.sh --session <id>` or `--clear-all`. The picker's input loop accepts `Esc`, `Ctrl+C`, **and** `\x1b/` as exit, which is what makes `Alt+/` behave as a toggle
-- `scripts/runtime/tmux-worktree-menu.sh` + `tmux-worktree-picker.sh`: tmux-popup picker for `Alt+g`. The menu wrapper resolves repo-family context, **prefetches** the worktree list (`tmux_worktree_list` + per-row `tmux_worktree_find_window`) into a `mktemp` TSV file *before* opening `tmux display-popup -E`, then passes that file plus `current_worktree_root` and `repo_label` as extra args to the picker. The picker uses the prefetch file to skip its own `tmux_worktree_context_for_context` / `tmux_worktree_list` calls and the `tmux has-session` probe, so the popup paints content on the first frame instead of flashing empty while the picker re-runs git. `render_picker` builds the whole frame into one string and emits it with a single `printf` (`\033[H` + body + `\033[J`) so there is no visible clear-then-redraw step. On selection the picker fires `tmux-worktree-open.sh` via `tmux run-shell -b` and exits immediately, so the popup closes before the (potentially template-driven) window creation runs
-- `scripts/runtime/tmux-focus-emit.sh`: wired from tmux `pane-focus-in` / `after-select-pane` hooks to record the currently-active tmux pane per `(socket, session)` into a per-session file, so `attention.maybe_ack_focused` can require tmux-pane-level focus (not just WezTerm pane focus) before auto-acking a `done` entry
+- Agent-attention pipeline (`wezterm-x/lua/attention.lua`, `scripts/runtime/attention-{state-lib,jump}.sh`, `scripts/claude-hooks/emit-agent-status.sh`, `scripts/runtime/tmux-{attention,focus}-*.sh`, `scripts/runtime/tmux-attention-{menu,picker}.sh`): see [`agent-attention.md`](./agent-attention.md) for the per-file ownership.
+- `scripts/runtime/tmux-worktree-menu.sh` + `tmux-worktree-picker.sh`: tmux-popup picker for `Alt+g`. The menu wrapper prefetches the worktree list into a TSV file before opening `tmux display-popup -E` so the popup paints content on the first frame; the picker dispatches via `tmux run-shell -b tmux-worktree-open.sh` and exits immediately so the popup closes before window creation finishes. Performance contract: [`performance.md`](./performance.md).
 - `wezterm-x/local/`: gitignored machine-local overrides copied by the sync skill when present
 - `config/worktree-task.env`: tracked repo profile for the `worktree-task` runtime; sync-time mirrored to `<runtime_dir>/repo-worktree-task.env` so Windows-side wezterm.exe Lua can read it (the WSL path in `repo-root.txt` is unreachable from Win32 file APIs). `wezterm-x/lua/constants.lua` reads the local copy first; the env file is the single source of truth for `<base>` / `<base>_resume` profile commands.
 - `skills/wezterm-runtime-sync/`: runtime sync workflow, prompt rendering, and prompt regression scripts
@@ -111,7 +106,7 @@ Adding a new shortcut means: (1) new item in `manifest.json` with `binding`; (2)
 
 - Managed project tabs bootstrap through `scripts/runtime/open-project-session.sh`.
 - Linked task worktree windows bootstrap through the built-in tmux provider under `scripts/runtime/worktree/providers/tmux-agent.sh`.
-- The built-in task-worktree tmux provider must derive repo-family session reuse and task-window ownership from live git context instead of stored tmux metadata.
+- The built-in task-worktree tmux provider derives repo-family session reuse and task-window ownership from live git context, not from stored tmux metadata.
 - `open-project-session.sh` launches managed commands inside an interactive login shell so the environment matches the right-side shell pane.
 - The managed command runs under `primary-pane-wrapper.sh`, which traps INT/HUP/TERM and execs the user's login shell after the agent returns. Logs each transition under `category=primary_pane` so pane deaths can be diagnosed post-mortem.
 - `run-managed-command.sh` is a thin wrapper that logs and execs the command.
@@ -125,28 +120,92 @@ Adding a new shortcut means: (1) new item in `manifest.json` with `binding`; (2)
 - `%LOCALAPPDATA%\wezterm-runtime\` is the Windows runtime state root. It keeps `logs/`, `state/`, `cache/`, and `bin/` in one place.
 - `%LOCALAPPDATA%\wezterm-runtime\bin\helper-manager.exe` is the active Windows host control plane.
 - `%LOCALAPPDATA%\wezterm-runtime\bin\helperctl.exe` is the thin console IPC client that WezTerm Lua, tmux-side scripts, and smoke tests invoke when they need a request or response.
-- `scripts/runtime/agent-clipboard.sh` is the repo-local high-level clipboard writer for agent workflows. It stays in WSL, ensures the synced Windows helper is healthy, and then calls `helperctl.exe`; it should be preferred over raw IPC in agent-facing automation.
-- Sync also writes `~/.wezterm-x/agent-tools.env` in the target home so external agent platforms can discover repo-local wrappers such as `agent-clipboard.sh` without inferring repository paths.
+- Repo-local high-level wrappers (`scripts/runtime/agent-clipboard.sh` and friends) and the `~/.wezterm-x/agent-tools.env` discovery marker are documented in [`setup.md#repo-local-runtime-wrappers`](./setup.md#repo-local-runtime-wrappers); agent-facing automation should prefer those wrappers over raw `helperctl.exe` IPC.
 - `%USERPROFILE%\.wezterm-native\host-helper\windows\` is the published source tree that sync installs from; `%LOCALAPPDATA%\wezterm-runtime\bin\` is the stable installed binary location that the runtime actually launches.
-- `native/host-helper/windows/release-manifest.json` is the version-pinned release fallback declaration. When Windows `dotnet` is available, the installer publishes from the synced native source tree; otherwise it downloads and verifies the manifest-selected GitHub release asset before replacing `%LOCALAPPDATA%\wezterm-runtime\bin\`.
+- `native/host-helper/windows/release-manifest.json` is the version-pinned release fallback declaration. When Windows `dotnet` is available, the installer publishes from the synced native source tree; otherwise it downloads and verifies the manifest-selected GitHub release asset before replacing `%LOCALAPPDATA%\wezterm-runtime\bin\`. Cutting a release / updating the manifest / side-loading: [`host-helper-release.md`](./host-helper-release.md).
 - `wezterm-x/scripts/` is intentionally thin on Windows. It keeps the helper installer, launcher, and bootstrap pieces, but the old Windows request handlers and worker-plugin chain are no longer part of the active design.
 
-### Request Flow
+### Communication Overview
+
+Three independent channels cross the WSL ⇄ Windows boundary; everything else in the codebase is a layer on top of these three:
+
+1. **Named-pipe IPC** for synchronous requests (`Alt+v` / `Alt+b` / `Ctrl+v` etc.). WSL bash spawns `helperctl.exe`, which talks to `helper-manager.exe` over `\\.\pipe\wezterm-host-helper-v1` and gets a typed response back. Latency budget: ~50-150 ms.
+2. **OSC 1337 escape codes** for async nudges (attention ticks, IME-state pushes). The agent CLI or hook script writes the OSC byte sequence to its tty; tmux DCS-wraps it; `wezterm.exe` consumes it and re-renders within one frame. Latency: under one paint frame (~16 ms).
+3. **Shared NTFS state files under `/mnt/c`** for poll-style reads where both sides need the data at their own cadence. WSL processes write (hooks, jump scripts), Windows processes read on every tick (Lua status update, helper liveness watcher). Cross-FS routing rule lives in [`performance.md`](./performance.md).
 
 ```mermaid
 flowchart LR
-  A["WezTerm Lua\nAlt+v / Alt+b / Ctrl+v"] --> B["runtime.lua\nbuild request + trace_id"]
-  B --> C["helperctl.exe\nrequest client"]
-  C --> D["Named Pipe\n\\\\.\\pipe\\wezterm-host-helper-v1"]
-  D --> E["helper-manager.exe\nsingle native control plane"]
-  E --> F["Reuse policy\nwindow-cache.json + process/window scan"]
-  E --> G["Clipboard service\nsingle STA thread + live read/write"]
-  F --> H["Activate existing window\nor launch target app"]
-  G --> I["return text\nor exported image path"]
-  H --> J["typed response envelope\ndomain / action / result_type / result"]
+  subgraph WSL["WSL · Linux processes"]
+    direction TB
+    W_LUA["WezTerm Lua handlers<br/>(spawned via wsl.exe)"]
+    W_HOOK["Claude hook<br/>emit-agent-status.sh"]
+    W_AGENT["agent CLI<br/>claude / codex"]
+    W_BASH["picker / menu / jump<br/>(bash + Go)"]
+  end
+
+  subgraph FS["/mnt/c · shared NTFS state"]
+    direction TB
+    F_ATT[("attention.json")]
+    F_LIVE[("live-panes.json")]
+    F_FOCUS[("tmux-focus/*.txt")]
+    F_CHROME[("chrome-debug/state.json")]
+    F_HELPER[("helper-install-state.json")]
+  end
+
+  subgraph WIN["Windows · host processes"]
+    direction TB
+    H_WEZ["wezterm.exe<br/>(GUI + Lua tick)"]
+    H_CTL["helperctl.exe<br/>(IPC client)"]
+    H_MGR["helper-manager.exe<br/>(control plane)"]
+    H_CHR["Chrome<br/>(headless / visible)"]
+    H_VSC["VS Code"]
+  end
+
+  W_BASH ==>|"cmd.exe shim"| H_CTL
+  H_CTL ==>|"named pipe"| H_MGR
+  H_MGR --> H_CHR
+  H_MGR --> H_VSC
+
+  W_AGENT -.->|"OSC 1337<br/>via tmux DCS"| H_WEZ
+  W_HOOK  -.->|"OSC tick"| H_WEZ
+  W_LUA   -.->|"wsl.exe args"| H_WEZ
+
+  W_HOOK -- write --> F_ATT
+  W_BASH -- read --> F_ATT
+  W_LUA  -- "write on Alt+/" --> F_LIVE
+  W_BASH -- read --> F_LIVE
+  W_BASH -- write --> F_FOCUS
+  H_WEZ  -- "tick read" --> F_ATT
+  H_WEZ  -- "tick read" --> F_LIVE
+  H_WEZ  -- "tick read" --> F_FOCUS
+  H_MGR  -- write --> F_CHROME
+  H_MGR  -- write --> F_HELPER
+  H_WEZ  -- "tick read" --> F_CHROME
+
+  classDef pipe stroke:#1f6feb,stroke-width:2px
+  classDef osc  stroke:#9a6700,stroke-width:2px,stroke-dasharray:5 3
+```
+
+Edge legend: bold solid arrows = synchronous named-pipe IPC; dashed arrows = OSC 1337 nudges; thin solid arrows = file reads/writes against `/mnt/c` (the routing rule and per-file rationale live in [`performance.md`](./performance.md)).
+
+### Request Flow
+
+The named-pipe channel above, zoomed in to one Alt+v / Alt+b / Ctrl+v press:
+
+```mermaid
+flowchart LR
+  A["WezTerm Lua<br/>Alt+v / Alt+b / Ctrl+v"] --> B["runtime.lua<br/>build request + trace_id"]
+  B --> C["helperctl.exe<br/>request client"]
+  C --> D["Named Pipe<br/>\\\\.\\pipe\\wezterm-host-helper-v1"]
+  D --> E["helper-manager.exe<br/>single native control plane"]
+  E --> F["Reuse policy<br/>window-cache.json + process/window scan"]
+  E --> G["Clipboard service<br/>single STA thread + live read/write"]
+  F --> H["Activate existing window<br/>or launch target app"]
+  G --> I["return text<br/>or exported image path"]
+  H --> J["typed response envelope<br/>domain / action / result_type / result"]
   I --> J
   J --> B
-  B --> K["WezTerm action\nfocus app or paste result"]
+  B --> K["WezTerm action<br/>focus app or paste result"]
 ```
 
 ### Constraints
@@ -165,10 +224,11 @@ flowchart LR
 
 ## Worktree Task
 
-- Use the `worktree-task` runtime when you want a fresh agent CLI implementation session in a linked worktree instead of continuing in the current worktree.
-- It creates linked worktrees under the repository parent's `.worktrees/<repo>/` directory.
-- `WEZTERM_CONFIG_REPO` is required. Use `scripts/runtime/worktree/worktree-task configure --repo /absolute/path` as the stable recovery path whenever it is missing.
-- This repository's tracked worktree-task profile lives at `config/worktree-task.env`.
-- Machine-local agent selection belongs in `wezterm-x/local/shared.env` as `MANAGED_AGENT_PROFILE=claude|codex|...`.
-- Managed workspace launchers and the built-in `tmux-agent` provider execute the actual agent CLI inside the resolved login shell so PATH and shell startup files come from one stable source.
-- Runtime launch uses a temporary prompt file only long enough for the new pane to start; the repository does not keep a prompt archive.
+The `worktree-task` runtime creates linked worktrees under the repository parent's `.worktrees/<repo>/` directory and opens them as additional tmux windows in the same repo-family session. Architectural ownership only:
+
+- Tracked profile lives at `config/worktree-task.env`; machine-local agent selection lives at `wezterm-x/local/shared.env` (`MANAGED_AGENT_PROFILE`).
+- `WEZTERM_CONFIG_REPO` is required; recover with `scripts/runtime/worktree/worktree-task configure --repo /absolute/path`.
+- The built-in `tmux-agent` provider executes the agent CLI inside the resolved login shell so PATH and rc files match the user's normal terminal.
+- Runtime launch uses a temporary prompt file only long enough to start the new pane; no prompt archive is kept.
+
+Lifecycle prefixes (`dev-` / `task-` / `hotfix-`), reclaim safety rules, branch-naming policy, base-ref strategy, and `Ctrl+k g {d,t,h,r}` quick-create wiring: see [`workspaces.md#task-worktree-lifecycle-model`](./workspaces.md#task-worktree-lifecycle-model).

@@ -6,11 +6,13 @@ Use this doc when you need prerequisites and local setup.
 
 - `hybrid-wsl` uses the Windows WezTerm nightly build plus a WSL domain configured in `wezterm-x/local/constants.lua`.
 - `posix-local` runs directly on Linux or macOS without a WSL domain.
-- `tmux 3.6+` must be available in the runtime environment that will host managed project tabs. The repo's `tmux.conf` advertises DEC mode 2026 (synchronized output / BSU+ESU) so Claude Code and similar agent CLIs can wrap each render frame atomically, keeping the IME candidate-window anchor stable under streaming output. tmux 3.4 stalls idle renders waiting on ESU; 3.6 added a 1s flush timeout that prevents the freeze. Ubuntu 24.04 LTS still ships 3.4, so build 3.6+ from source if your distro lags. Full investigation in [`ime-flicker-and-sync-output.md`](./ime-flicker-and-sync-output.md).
+- `tmux 3.6+` must be available in the runtime environment that will host managed project tabs. Required because the repo's `tmux.conf` advertises DEC mode 2026 (synchronized output) and tmux 3.4 deadlocks on stuck sync windows where 3.6's 1-second flush timeout does not. Ubuntu 24.04 LTS still ships 3.4, so build 3.6+ from source if your distro lags. Background, verification recipe, and the IME-flicker symptom that originally drove this requirement: [`ime-flicker-and-sync-output.md`](./ime-flicker-and-sync-output.md).
 - `lua5.4` (or `lua5.3` / `lua`) **recommended** in the WSL/Linux side. Used by `wezterm-runtime-sync`'s `lua-precheck` step (`skills/wezterm-runtime-sync/scripts/lua-precheck.lua`) to dofile the synced `wezterm-x/lua/constants.lua` under a mocked `wezterm` module and assert that managed-launcher resolution still works (`default_profile` resolves, `default_resume_profile ≠ default_profile`, the resume command literally contains `--continue` or `resume`). Without it, sync skips the precheck with a warning instead of failing — same surface that historically let `<base>-resume` vs `<base>_resume` mis-naming and unreachable WSL-path env files slip through to runtime. Install with `sudo apt install lua5.4` on Ubuntu/Debian.
+- `go 1.21+` **recommended** in the WSL/Linux side. Used by `wezterm-runtime-sync`'s `build-picker` step (`scripts/runtime/picker/build.sh`, invoked from `skills/wezterm-runtime-sync/scripts/sync-runtime.sh`) to compile the static `scripts/runtime/picker/bin/picker` ELF that powers the three high-frequency tmux popups: `Alt+/` (attention), `Alt+g` (worktree), and `Ctrl+Shift+P` (command palette). The build script auto-discovers `go` in `PATH` → `~/.local/go/bin/go` → `/usr/local/go/bin/go` and silently skips with a one-line note when none are found; the popups then fall back to the bash pickers (`tmux-attention-picker.sh`, `tmux-worktree-picker.sh`, `tmux-command-picker.sh`), which work but cold-start at ~30-80ms vs ~2-5ms for the Go binary (~10×, per `docs/performance.md`). Only direct dep is `golang.org/x/term`. Install with `sudo apt install golang-go` on Ubuntu 24.04+ (ships ≥ 1.22), or download from <https://go.dev/dl/> into `~/.local/go`. After install, run `wezterm-runtime-sync` once and confirm `scripts/runtime/picker/bin/picker` exists and the sync trace logs `step=build-picker status=completed`.
+- `jq` **recommended** in the WSL/Linux side. Used by the agent-attention state writer (`scripts/runtime/attention-state-lib.sh`), the focus emit path (`scripts/runtime/tmux-focus-emit.sh`), and the hotkey-usage telemetry (`scripts/runtime/hotkey-usage-bump.sh`); also opportunistically by `scripts/claude-hooks/emit-agent-status.sh` to extract `session_id` / `message` / `prompt` from hook payloads. Without it, the Claude hook still writes attention entries but keys them to `pane:<WEZTERM_PANE>` with canned per-status labels, and the other call sites take their respective degraded paths. Install with `sudo apt install jq` on Ubuntu/Debian.
 - WakaTime status needs `python3` in that same runtime environment and a private `WAKATIME_API_KEY` in `wezterm-x/local/shared.env`.
 - Repo-local helper wrappers such as `scripts/runtime/agent-clipboard.sh` require `hybrid-wsl`, `cmd.exe`, `powershell.exe`, `wslpath`, and a synced Windows helper runtime.
-- In `hybrid-wsl` mode, `wezterm.exe` runs on Windows and its Lua cannot resolve WSL-native paths like `/home/yuns/...` — Windows file APIs do not understand them. `wezterm-runtime-sync` works around this by copying `config/worktree-task.env` into the runtime dir as `repo-worktree-task.env` (Windows-readable NTFS path), and `wezterm-x/lua/constants.lua` reads that local copy first before falling back to the repo path. This is what registers the `<base>_resume` profiles into Lua so workspace first-open resolves to `claude --continue` / `codex resume`. Skipping a sync after editing `config/worktree-task.env` will leave wezterm.exe on the previous snapshot.
+- In `hybrid-wsl` mode, `wezterm.exe` runs on Windows and its Lua cannot resolve WSL-native paths like `/home/yuns/...`, so `wezterm-runtime-sync` mirrors `config/worktree-task.env` into the runtime dir as `repo-worktree-task.env` (Windows-readable NTFS path) on every sync. Skipping a sync after editing `config/worktree-task.env` will leave wezterm.exe on the previous snapshot. Full pickup chain and the `<base>-resume` / `<base>_resume` naming asymmetry: see [`workspaces.md#behavior`](./workspaces.md#behavior).
 
 ## Local Setup
 
@@ -51,93 +53,7 @@ Pin each app, then drag the icons so WezTerm sits in slot 1, the browser in slot
 
 ## Claude Agent Attention Hooks
 
-The agent-attention feature (see [`tmux-ui.md`](./tmux-ui.md#agent-attention) and [`keybindings.md`](./keybindings.md#agent-attention)) expects Claude Code to emit OSC 1337 user vars from five hook events (`UserPromptSubmit`, `Notification`, `Stop`, `PostToolUse`, `SessionStart`). The hook script ships in this repo at `scripts/claude-hooks/emit-agent-status.sh` and is keyboard-first: when it runs it only decorates the pane, so installing it globally is safe and a no-op in non-WezTerm terminals.
-
-> **Upgrading from an earlier version of this doc** — the hook argument for `UserPromptSubmit` changed from `cleared` to `running`. If your existing `~/.claude/settings.json` still points at `... emit-agent-status.sh cleared`, swap it for `running`. Claude Code re-reads `settings.json` on every hook firing, so the change takes effect on the next event (send a fresh prompt to exercise `UserPromptSubmit`) — no Claude restart needed. Use the verification command at the bottom of this section to confirm the new command is firing.
-
-> **Upgrading from a four-hook install** — a fifth hook, `SessionStart` with `matcher: "clear"`, was added to drop the discarded session's `running` entry when the user runs `/clear`. Without it, the ⟳ counter stays stuck for up to 30 minutes (or until the next `UserPromptSubmit` on the same pane triggers same-pane eviction). Merge the `SessionStart` block from the template below; no Claude restart needed. To confirm it is wired, run `/clear` in a pane that currently shows a ⟳, and watch the badge drop within one WezTerm status tick.
-
-### Install / update
-
-Merge the block below into the `hooks` section of `~/.claude/settings.json` (do not replace the file). Five hook events, each with one shell invocation:
-
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          { "type": "command", "command": "/home/yuns/github/wezterm-config/scripts/claude-hooks/emit-agent-status.sh running" }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "hooks": [
-          { "type": "command", "command": "/home/yuns/github/wezterm-config/scripts/claude-hooks/emit-agent-status.sh waiting" }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          { "type": "command", "command": "/home/yuns/github/wezterm-config/scripts/claude-hooks/emit-agent-status.sh done" }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "hooks": [
-          { "type": "command", "command": "/home/yuns/github/wezterm-config/scripts/claude-hooks/emit-agent-status.sh resolved" }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "matcher": "clear",
-        "hooks": [
-          { "type": "command", "command": "/home/yuns/github/wezterm-config/scripts/claude-hooks/emit-agent-status.sh pane-evict" }
-        ]
-      }
-    ]
-  }
-}
-```
-
-Substitute the absolute path for your clone if different. `jq` is optional — with it, the hook reads `.session_id` from the piped hook payload and extracts `.message` / `.stop_reason` / `.prompt` as the state entry's `reason`; without it, the hook still writes the entry but keys it to `pane:<WEZTERM_PANE>` and uses canned per-status labels. There is no Windows dependency; the hook script writes only the `attention_tick` OSC to `/dev/tty` in the enclosing WezTerm pane.
-
-### What each hook does
-
-- `UserPromptSubmit → running` lights the `⟳ N running` counter the moment a turn begins so the user can see at a glance which panes are mid-turn.
-- `Notification → waiting` raises the `⚠ N waiting` counter only for `permission_prompt` / `elicitation_dialog` notifications. `idle_prompt` and `auth_success` are ignored — they are neither a user-action signal nor a turn-end signal, so the current `running` / `waiting` / `done` entry is left untouched. This matters for Monitor subscriptions that hold the agent idle mid-turn: an earlier implementation re-routed `idle_prompt` to `done`, which silently flipped a still-running session to done. Sticky: a second `waiting` on a session whose current status is already `waiting` is a no-op, so repeated prompts inside one turn do not oscillate the counter.
-- `Stop → done` flips the entry to `done` when the turn ends, so the `✓ N done` counter surfaces work that finished while you were elsewhere.
-- `PostToolUse → resolved` flips `waiting` or `done` back to `running` when a tool call lands (the tool ran and completed, so Claude is mid-turn again). The `waiting → running` path drains `⚠` into `⟳` the moment a permission prompt is allowed. The `done → running` path is the Monitor wake-up recovery: after a prior turn's `Stop` wrote `done`, an async Monitor event can wake the agent and the next tool call's PostToolUse flips the counter back. `running` is a no-op so auto-allowed tools do not churn the state.
-- `SessionStart (matcher: "clear") → pane-evict` drops every entry on the current `(tmux_socket, tmux_pane)` when the user runs `/clear`. Without this hook, the discarded session's `running` entry has no mechanism of its own to leave state.json — `/clear` does not fire `Stop` and the session_id resets, so the stale `⟳` sits until the 30-minute TTL or until the next `UserPromptSubmit` on the same pane triggers same-pane eviction. The matcher is scoped to `clear` so `startup` / `resume` / `compact` SessionStart variants do not touch pane state.
-
-Without `UserPromptSubmit → running` the `⟳ running` counter will never light up, and without `PostToolUse → resolved` the `⚠ waiting` counter will linger from the permission prompt all the way until `Stop` fires at the end of the turn. Without `SessionStart → pane-evict`, `/clear` mid-turn will leave a stuck `⟳` for minutes.
-
-### After editing settings.json
-
-Claude Code re-reads `settings.json` on each hook firing, so an edit takes effect immediately — no Claude restart is required. Exercise the new hook by sending a prompt in each Claude pane, then verify from a WSL shell:
-
-```bash
-tail -200 ~/.local/state/wezterm-runtime.log \
-  | grep -a 'status="running"' \
-  | sed -n 's/.*session_id="\([^"]*\)".*/\1/p' \
-  | sort -u
-```
-
-You should see one UUID per active pane. If the list only shows `pane:<N>` entries (the script's fallback key when no Claude payload is piped in) or is empty, the `running` hook is not wired — double-check `~/.claude/settings.json` points at `... emit-agent-status.sh running` (not `cleared`) and that the hook script is executable.
-
-### Codex integration
-
-Codex's hook surface is narrower than Claude Code's: `~/.codex/config.toml`'s `notify` fires once per `agent-turn-complete`, equivalent to Claude's `Stop` hook, and there is no stable event yet for permission prompts or for the user submitting the next prompt. Codex's `hooks.json` lifecycle system, which would let us wire `waiting` and `cleared`, is still under development upstream (tracked in [openai/codex#2150](https://github.com/openai/codex/discussions/2150) and [#15497](https://github.com/openai/codex/issues/15497)).
-
-Practical consequence for this repo:
-
-- Wiring `notify` to `emit-agent-status.sh done` would give a half-integration — `done` badges and counts work, but those entries would never auto-clear on the next prompt. You would rely on the 30-minute TTL, a fresh `Stop` overwrite, or the `Alt+/` clear-all sentinel.
-- Codex's `notify` payload does not publish a stable `session_id` today, so the hook's fallback key (`pane:<WEZTERM_PANE>`) would be used. In the hybrid-wsl one-agent-per-pane layout this still dedupes correctly; mixing Claude and Codex in the same WezTerm pane is not supported in that mode.
-- Nothing Codex-specific ships in `~/.codex/config.toml` from this repo. When the upstream lifecycle hooks GA and cover the `waiting` / `cleared` / `resolved` equivalents, integration collapses to adding the matching `notify`/`hooks.json` entries that call the same `emit-agent-status.sh waiting|done|cleared|resolved` interface — no changes in the hook script or Lua side.
+Hook install / upgrade template, "what each hook does", verification, and Codex integration live in [`agent-attention.md#hook-installation`](./agent-attention.md#hook-installation). The hook script ships in this repo at `scripts/claude-hooks/emit-agent-status.sh`.
 
 ## Tmux Status Prompt Hook
 

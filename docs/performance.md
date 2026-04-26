@@ -59,7 +59,9 @@ performance contract.
 ### Diagnostic UI (temporary, slated for removal)
 
 These exist while the Go picker and bash fallback run side-by-side.
-Drop both once the bash fallback is removed.
+Drop both once the bash fallback is removed (i.e. once `go` is treated
+as a hard prerequisite rather than a recommended one — see
+[`setup.md`](./setup.md#prerequisites)).
 
 | Surface | Purpose |
 |---|---|
@@ -141,20 +143,61 @@ that should govern every future state-file placement decision:
 > already hits the page cache nearly free (e.g. files read once per
 > minute) — the migration code is also a cost.
 
-Concrete classification of the current files (re-derive when adding
-new state):
+The rule visualised against the current file inventory — direction of
+each arrow is "the side that opens the file lives here, the side at
+the other end pays the cross-FS penalty if it ever needs to read":
 
-- WSL ext4 (pure-WSL, frequently accessed):
-  `~/.local/state/wezterm-runtime/wezterm-runtime.log` (bash logs),
-  `~/.local/state/wezterm-runtime/hotkey-usage.json`,
-  `~/.cache/wezterm-runtime/windows-paths.env`
-- /mnt/c (writer or reader is a Windows process):
-  `state/agent-attention/{attention.json, live-panes.json, tmux-focus/*}` (lua tick reads),
-  `state/clipboard/exports/*.png` (Windows helper reads),
-  `state/helper/*` (Windows helper IPC),
-  `cache/helper/*` (Windows helper writes),
-  `bin/helperctl.exe` (Windows binary),
-  `logs/{wezterm.log, helper.log}` (lua/helper write locally; humans grep occasionally)
+```mermaid
+flowchart LR
+  subgraph EXT4["WSL ext4 · pure-WSL hot path"]
+    direction TB
+    L1["~/.local/state/wezterm-runtime/<br/>runtime.log"]
+    L2["~/.local/state/wezterm-runtime/<br/>hotkey-usage.json"]
+    L3["~/.cache/wezterm-runtime/<br/>windows-paths.env"]
+  end
+
+  subgraph NTFS["/mnt/c · Windows-NTFS shared"]
+    direction TB
+    N1["state/agent-attention/<br/>attention.json + live-panes.json + tmux-focus/*"]
+    N2["state/chrome-debug/state.json"]
+    N3["state/clipboard/exports/*.png"]
+    N4["bin/helperctl.exe + helper-install-state.json"]
+    N5["logs/wezterm.log + helper.log"]
+  end
+
+  subgraph WSLP["WSL processes"]
+    direction TB
+    WP1["bash hooks /<br/>menu / picker / jump"]
+    WP2["WezTerm Lua<br/>(spawned via wsl.exe)"]
+  end
+
+  subgraph WINP["Windows processes"]
+    direction TB
+    HP1["wezterm.exe<br/>(Lua tick, 4 Hz)"]
+    HP2["helper-manager.exe"]
+  end
+
+  WP1 -- "bash logging<br/>(~50 lines/s)" --> L1
+  WP1 -- "press counter" --> L2
+  WP1 -- "24h env cache" --> L3
+
+  WP1 -- "hook write +<br/>picker read" --> N1
+  HP1 -- "tick read<br/>(0.02 ms)" --> N1
+  HP1 -- "tick read" --> N2
+  HP2 -- write --> N2
+  HP2 -- "image export" --> N3
+  HP2 -- "self-update +<br/>install state" --> N4
+  WP1 -- "IPC client invoke" --> N4
+  HP1 -- "Lua-side log" --> N5
+  HP2 -- "helper-side log" --> N5
+
+  classDef good fill:#dafbe1,stroke:#1f6feb
+  classDef bad fill:#ffebe9,stroke:#cf222e
+  class EXT4 good
+  class NTFS good
+```
+
+The yardstick that drives the rule: `wezterm.exe` reads `/mnt/c/…` at p50 **0.02 ms** vs `\\wsl$\<distro>\…` at p50 **3.12 ms** — a **~150× gap** measured by `bench-wezterm-side-fs.ps1`. With the Lua tick running at 4 Hz over `attention.json` + `live-panes.json` + N `tmux-focus/*` files, even a single migration to ext4 burns tens to hundreds of ms/sec of `wezterm.exe` CPU. Conversely, the bash menu paying a one-shot ~5 ms cross-FS read on Alt+/ is invisible because it only happens on keypress.
 
 ## Optimization techniques (replicable patterns)
 

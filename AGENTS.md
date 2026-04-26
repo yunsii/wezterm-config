@@ -19,6 +19,19 @@ Read `AGENTS.md` first, then open only the matching file under `docs/`. Read add
   Read [`docs/keybindings.md`](docs/keybindings.md).
 - tmux UI, tab titles, status rendering, copy-mode, or visible terminal behavior:
   Read [`docs/tmux-ui.md`](docs/tmux-ui.md).
+- Agent-attention pipeline: Claude hook install / upgrade, attention.json
+  schema and transitions, tab badges + right-status counters, focus-based
+  auto-ack, the `Alt+,` / `Alt+.` / `Alt+/` keyboard entry points, or
+  Codex integration:
+  Read [`docs/agent-attention.md`](docs/agent-attention.md).
+- Headless Chrome debug instance, auto-start behavior, `Alt+b` /
+  `Alt+Shift+b`, `chrome://inspect` workflow, or the right-status `CDP·…`
+  badge:
+  Read [`docs/browser-debug.md`](docs/browser-debug.md).
+- Cutting a Windows host-helper release, updating
+  `release-manifest.json`, forcing the release-install branch, or
+  side-loading the release zip:
+  Read [`docs/host-helper-release.md`](docs/host-helper-release.md).
 - Diagnostics, logs, or smoke tests:
   Read [`docs/diagnostics.md`](docs/diagnostics.md).
 - Performance work on the Alt+/ popup, the cross-FS routing rule for

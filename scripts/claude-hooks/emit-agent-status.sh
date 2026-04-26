@@ -7,7 +7,9 @@
 #   emit-agent-status.sh running     # UserPromptSubmit hook (agent turn begins)
 #   emit-agent-status.sh waiting     # Notification hook
 #   emit-agent-status.sh done        # Stop hook
-#   emit-agent-status.sh resolved    # PostToolUse hook (waiting → running, else no-op)
+#   emit-agent-status.sh resolved    # PreToolUse + PostToolUse hooks
+#                                    # (waiting → running on permission approve;
+#                                    #  done → running on Monitor wake-up; else no-op)
 #   emit-agent-status.sh cleared     # explicit remove (drops the entry)
 #   emit-agent-status.sh pane-evict  # SessionStart source=clear hook — drop every
 #                                    # entry on the current (tmux_socket, tmux_pane)
@@ -35,6 +37,11 @@ status="${1:-}"
 if [[ -z "$status" ]]; then
   exit 0
 fi
+
+# Earliest possible timestamp inside the hook. Pairs with emit-side
+# `elapsed_ms` and the wezterm-side `tick received` log to attribute the
+# wallclock gap between visible UI and rendered status counter.
+entry_ts_ms="$(date +%s%3N 2>/dev/null || printf '')"
 
 case "$status" in
   running)    default_reason="running…" ;;
@@ -78,6 +85,13 @@ if [[ "$status" == "waiting" && -n "$notification_type" ]]; then
   case "$notification_type" in
     permission_prompt|elicitation_dialog) ;;
     idle_prompt|auth_success)
+      runtime_log_info attention "notification ignored" \
+        "status=$status" \
+        "notification_type=$notification_type" \
+        "session_id=${session_id:-}" \
+        "wezterm_pane=${WEZTERM_PANE:-}" \
+        "tmux_pane=${TMUX_PANE:-}" \
+        "entry_ts_ms=$entry_ts_ms" 2>/dev/null || true
       exit 0
       ;;
   esac
@@ -148,7 +162,10 @@ elif [[ "$status" == "resolved" ]]; then
   # is missing (focus-ack forgot the waiting row before this hook fired)
   # upsert a fresh `running` so the counter still reflects that Claude
   # is mid-turn. `running` / `done` are no-ops so we do not nudge wezterm
-  # or log on every auto-allowed tool call.
+  # or log on every auto-allowed tool call. We do log a single
+  # `resolved no-op` line so the diagnostics trail still shows the hook
+  # was invoked (separate message text keeps it greppable from the
+  # state-changing emit line below).
   if ! attention_state_transition_to_running \
       "$session_id" \
       "${WEZTERM_PANE:-}" \
@@ -158,6 +175,18 @@ elif [[ "$status" == "resolved" ]]; then
       "$tmux_pane" \
       "$git_branch" \
       2>/dev/null; then
+    noop_emit_ts_ms="$(date +%s%3N 2>/dev/null || printf '')"
+    noop_elapsed_ms=''
+    if [[ -n "$entry_ts_ms" && -n "$noop_emit_ts_ms" ]]; then
+      noop_elapsed_ms=$(( noop_emit_ts_ms - entry_ts_ms ))
+    fi
+    runtime_log_info attention "hook resolved no-op" \
+      "status=$status" \
+      "session_id=$session_id" \
+      "wezterm_pane=${WEZTERM_PANE:-}" \
+      "tmux_pane=$tmux_pane" \
+      "entry_ts_ms=$entry_ts_ms" \
+      "elapsed_ms=$noop_elapsed_ms" 2>/dev/null || true
     exit 0
   fi
 else
@@ -196,6 +225,17 @@ fi
 
 # Sender-side trace. Pair with attention category in wezterm.log (the
 # `tick received` entry from attention.lua) to diagnose the OSC pipeline.
+# `entry_ts_ms` is captured at the very top of the script; `elapsed_ms` is
+# the in-script latency (jq + flock + git + DCS write). Cross-clock latency
+# (hook emit → wezterm tick received) is logged on the Lua side as
+# `latency_ms` since both timestamps come from the same Windows clock there
+# (tick_ms encodes the linux-side emit time, so this elapsed is also a
+# rough WSL↔Windows clock-skew probe).
+emit_ts_ms="$(date +%s%3N 2>/dev/null || printf '')"
+elapsed_ms=''
+if [[ -n "$entry_ts_ms" && -n "$emit_ts_ms" ]]; then
+  elapsed_ms=$(( emit_ts_ms - entry_ts_ms ))
+fi
 runtime_log_info attention "hook emitted agent status" \
   "status=$status" \
   "session_id=$session_id" \
@@ -203,9 +243,12 @@ runtime_log_info attention "hook emitted agent status" \
   "tmux_socket=$tmux_socket" \
   "tmux_pane=$tmux_pane" \
   "git_branch=$git_branch" \
+  "notification_type=${notification_type:-}" \
   "inside_tmux=$([[ -n "${TMUX-}" ]] && echo 1 || echo 0)" \
   "dev_tty_writable=$([[ -e /dev/tty ]] && echo 1 || echo 0)" \
   "osc_emitted=$osc_emitted" \
-  "tick_ms=$tick_ms" 2>/dev/null || true
+  "tick_ms=$tick_ms" \
+  "entry_ts_ms=$entry_ts_ms" \
+  "elapsed_ms=$elapsed_ms" 2>/dev/null || true
 
 exit 0
