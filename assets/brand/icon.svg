@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="WezDeck">
+  <title>WezDeck</title>
+  <defs>
+    <linearGradient id="deck" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2e3a4d"/>
+      <stop offset="1" stop-color="#080c14"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4a5870"/>
+      <stop offset="1" stop-color="#14192a"/>
+    </linearGradient>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="8"/>
+    </filter>
+  </defs>
+
+  <!-- deck plate -->
+  <rect x="40" y="40" width="432" height="432" rx="76" fill="url(#edge)"/>
+  <rect x="56" y="56" width="400" height="400" rx="64" fill="url(#deck)"/>
+
+  <!-- 3x3 parking grid (slot outlines, dim) -->
+  <g fill="none" stroke="#2f3a4c" stroke-width="3">
+    <rect x="104" y="104" width="96" height="96" rx="18"/>
+    <rect x="208" y="104" width="96" height="96" rx="18"/>
+    <rect x="312" y="104" width="96" height="96" rx="18"/>
+    <rect x="104" y="208" width="96" height="96" rx="18"/>
+    <rect x="208" y="208" width="96" height="96" rx="18"/>
+    <rect x="312" y="208" width="96" height="96" rx="18"/>
+    <rect x="104" y="312" width="96" height="96" rx="18"/>
+    <rect x="208" y="312" width="96" height="96" rx="18"/>
+    <rect x="312" y="312" width="96" height="96" rx="18"/>
+  </g>
+
+  <!-- empty-slot parking dots (counter-diagonal accents to break emptiness) -->
+  <g fill="#43536a" opacity="0.55">
+    <circle cx="360" cy="152" r="3.5"/>
+    <circle cx="256" cy="152" r="3.5"/>
+    <circle cx="152" cy="256" r="3.5"/>
+    <circle cx="360" cy="256" r="3.5"/>
+    <circle cx="152" cy="360" r="3.5"/>
+    <circle cx="256" cy="360" r="3.5"/>
+  </g>
+
+  <!-- running: top-left (col 0, row 0) -->
+  <g>
+    <circle cx="152" cy="152" r="40" fill="#22d3ee" opacity="0.18" filter="url(#soft)"/>
+    <rect x="116" y="116" width="72" height="72" rx="14" fill="#22d3ee" opacity="0.14" stroke="#22d3ee" stroke-opacity="0.55" stroke-width="2"/>
+    <g transform="translate(152 152)" stroke="#22d3ee" stroke-width="5.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 22 0 a 22 22 0 1 1 -22 -22 c 6.16 0 12.05 2.44 16.47 6.7 L 22 -9.78"/>
+      <path d="M 22 -22 v 12.22 h -12.22"/>
+    </g>
+  </g>
+
+  <!-- waiting: center (col 1, row 1) -->
+  <g>
+    <circle cx="256" cy="256" r="40" fill="#f59e0b" opacity="0.20" filter="url(#soft)"/>
+    <rect x="220" y="220" width="72" height="72" rx="14" fill="#f59e0b" opacity="0.14" stroke="#f59e0b" stroke-opacity="0.55" stroke-width="2"/>
+    <g transform="translate(256 256)" fill="none" stroke="#f59e0b" stroke-width="5.5" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M 0 -21 L 23 17 L -23 17 Z"/>
+      <line x1="0" y1="-6" x2="0" y2="3"/>
+      <line x1="0" y1="10" x2="0.01" y2="10"/>
+    </g>
+  </g>
+
+  <!-- done: bottom-right (col 2, row 2) -->
+  <g>
+    <circle cx="360" cy="360" r="40" fill="#34d399" opacity="0.20" filter="url(#soft)"/>
+    <rect x="324" y="324" width="72" height="72" rx="14" fill="#34d399" opacity="0.14" stroke="#34d399" stroke-opacity="0.55" stroke-width="2"/>
+    <path d="M 335 362 L 353 380 L 385 345" fill="none" stroke="#34d399" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+</svg>

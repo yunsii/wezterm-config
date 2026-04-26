@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/brand/banner.svg" alt="WezDeck — a flight deck for your AI agents" width="960">
+</p>
+
 # WezDeck
 
 > *A flight deck for your AI agents — built on WezTerm, tmux, and git worktrees.*
@@ -76,3 +80,15 @@ Useful direct links:
 - Agent attention pipeline: [`docs/agent-attention.md`](docs/agent-attention.md)
 - Browser debug workflow: [`docs/browser-debug.md`](docs/browser-debug.md)
 - Performance hot path: [`docs/performance.md`](docs/performance.md)
+
+## Brand Assets
+
+Brand SVGs live in [`assets/brand/`](assets/brand/) and share a single visual language: dark deck plate with a diagonal `#2e3a4d → #080c14` gradient, three diagonal status colors `#22d3ee` (running) / `#f59e0b` (waiting) / `#34d399` (done), and lucide-aligned glyph proportions.
+
+| File | Size | Purpose |
+|---|---|---|
+| [`icon.svg`](assets/brand/icon.svg) | 512×512 | Primary app icon — full 3×3 deck grid with three lit slots showing `running` / `waiting` / `done` glyphs |
+| [`favicon.svg`](assets/brand/favicon.svg) | 32×32 | Simplified version of `icon.svg` — keeps only deck plate + three diagonal status dots |
+| [`banner.svg`](assets/brand/banner.svg) | 1280×320 | README banner — embeds the deck icon plus wordmark, tagline, and live status counter |
+
+`favicon.svg` is geometrically derived from `icon.svg` at 1/16 scale: edge padding 7.8% / inner padding 10.9% / corner radius 14.8% (outer) and 12.5% (inner) all match. The three status dots sit on icon's lit-slot centers (29.7% / 50% / 70.3%) with radius matching the icon slot rect's inscribed circle (`r = 2.25` in 32-vp = `r = 36` in 512-vp). When `icon.svg` and `favicon.svg` are overlaid at the same render size the dots land inside the icon's lit-slot rectangles. Keep these proportions in sync if either is edited.
