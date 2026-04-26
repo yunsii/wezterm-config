@@ -14,6 +14,8 @@ The agent-attention feature expects Claude Code to emit OSC 1337 user vars from 
 
 > **Upgrading from a five-hook install** — a sixth hook, `PreToolUse → resolved`, was added so that approving a permission prompt flips `⚠ waiting → ⟳ running` the moment the approve keystroke lands, instead of staying on `⚠` for the full tool-execution window until `PostToolUse` fires. The two `resolved` hooks are idempotent — once `PreToolUse` flips the entry, `PostToolUse` sees `running` on the fast path and short-circuits without lock, OSC tick, or log line — so wiring both is a free belt-and-suspenders. Merge the `PreToolUse` block from the template below; no Claude restart needed. To confirm, answer a permission prompt and watch the badge flip from `⚠` to `⟳` immediately rather than after the tool finishes.
 
+> **Upgrading: closing the agent-side git-status lag** — `PostToolUse` and `Stop` each now carry a second hook entry that backgrounds `tmux-status-refresh.sh --force --refresh-client`. This is the agent-side counterpart to the shell prompt hook described in [`setup.md#tmux-status-prompt-hook`](./setup.md#tmux-status-prompt-hook): without it, file edits driven by Claude (Edit / Write / Bash `git …`) only show up in the tmux status segment after the 30s poll. The `tmux-status-refresh.sh` script's own `@tmux_status_force_debounce` (default 2s) absorbs PostToolUse spam, so high-frequency tool calls do not stampede git/node probes. Merge both new entries from the template below; no Claude restart needed. To confirm, send a prompt that runs `git status` or edits a tracked file and watch the tmux status segment update within a tick instead of after 30s.
+
 ### Install / update
 
 Merge the block below into the `hooks` section of `~/.claude/settings.json` (do not replace the file). Each hook event has one shell invocation:
@@ -38,7 +40,8 @@ Merge the block below into the `hooks` section of `~/.claude/settings.json` (do 
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "/home/yuns/github/wezterm-config/scripts/claude-hooks/emit-agent-status.sh done" }
+          { "type": "command", "command": "/home/yuns/github/wezterm-config/scripts/claude-hooks/emit-agent-status.sh done" },
+          { "type": "command", "command": "bash /home/yuns/github/wezterm-config/scripts/runtime/tmux-status-refresh.sh --force --refresh-client >/dev/null 2>&1 &" }
         ]
       }
     ],
@@ -52,7 +55,8 @@ Merge the block below into the `hooks` section of `~/.claude/settings.json` (do 
     "PostToolUse": [
       {
         "hooks": [
-          { "type": "command", "command": "/home/yuns/github/wezterm-config/scripts/claude-hooks/emit-agent-status.sh resolved" }
+          { "type": "command", "command": "/home/yuns/github/wezterm-config/scripts/claude-hooks/emit-agent-status.sh resolved" },
+          { "type": "command", "command": "bash /home/yuns/github/wezterm-config/scripts/runtime/tmux-status-refresh.sh --force --refresh-client >/dev/null 2>&1 &" }
         ]
       }
     ],
@@ -74,9 +78,9 @@ Substitute the absolute path for your clone if different. `jq` is optional — w
 
 - `UserPromptSubmit → running` lights the `⟳ N running` counter the moment a turn begins so the user can see at a glance which panes are mid-turn.
 - `Notification → waiting` raises the `⚠ N waiting` counter only for `permission_prompt` / `elicitation_dialog` notifications. `idle_prompt` and `auth_success` are ignored — they are neither a user-action signal nor a turn-end signal, so the current `running` / `waiting` / `done` entry is left untouched. This matters for Monitor subscriptions that hold the agent idle mid-turn: an earlier implementation re-routed `idle_prompt` to `done`, which silently flipped a still-running session to done. Sticky: a second `waiting` on a session whose current status is already `waiting` is a no-op, so repeated prompts inside one turn do not oscillate the counter.
-- `Stop → done` flips the entry to `done` when the turn ends, so the `✓ N done` counter surfaces work that finished while you were elsewhere.
+- `Stop → done` flips the entry to `done` when the turn ends, so the `✓ N done` counter surfaces work that finished while you were elsewhere. The companion `tmux-status-refresh.sh --force --refresh-client` invocation forces a final tmux status repaint so any git/branch state the turn touched lands within a tick instead of waiting on the 30s poll.
 - `PreToolUse → resolved` flips `waiting → running` the moment a permission prompt is approved (the tool is about to run, so Claude is mid-turn again). Without this hook the `⚠` counter sits on `waiting` for the full tool-execution window — seconds to tens of seconds for slow tools — until `PostToolUse` fires.
-- `PostToolUse → resolved` is a belt-and-suspenders for the Monitor wake-up case: after a prior turn's `Stop` wrote `done`, an async Monitor event can wake the agent and its next tool call (auto-allowed, no `UserPromptSubmit`) flips `done → running`. `PreToolUse` catches this in practice too, so the double-firing is redundancy — it is free because it is idempotent: once `PreToolUse` has flipped the entry, `PostToolUse` sees `running` on the fast path and short-circuits without lock, OSC tick, or log line.
+- `PostToolUse → resolved` is a belt-and-suspenders for the Monitor wake-up case: after a prior turn's `Stop` wrote `done`, an async Monitor event can wake the agent and its next tool call (auto-allowed, no `UserPromptSubmit`) flips `done → running`. `PreToolUse` catches this in practice too, so the double-firing is redundancy — it is free because it is idempotent: once `PreToolUse` has flipped the entry, `PostToolUse` sees `running` on the fast path and short-circuits without lock, OSC tick, or log line. The companion `tmux-status-refresh.sh --force --refresh-client` invocation forces tmux to recompute the status segment after each tool call so file edits / `git` Bash calls reflect immediately; PostToolUse spam is absorbed by the script's 2s `@tmux_status_force_debounce` window.
 - `SessionStart (matcher: "clear") → pane-evict` drops every entry on the current `(tmux_socket, tmux_pane)` when the user runs `/clear`. Without this hook, the discarded session's `running` entry has no mechanism of its own to leave state.json — `/clear` does not fire `Stop` and the session_id resets, so the stale `⟳` sits until the 30-minute TTL or until the next `UserPromptSubmit` on the same pane triggers same-pane eviction. The matcher is scoped to `clear` so `startup` / `resume` / `compact` SessionStart variants do not touch pane state.
 
 Without `UserPromptSubmit → running` the `⟳ running` counter will never light up. Without `PreToolUse → resolved` the `⚠ waiting` counter will linger from the permission prompt all the way until `PostToolUse` (or `Stop`) fires at the end of the tool call. Without `PostToolUse → resolved` the Monitor wake-up path loses its belt-and-suspenders (`PreToolUse` still covers it in practice, but the redundancy is intentional). Without `SessionStart → pane-evict`, `/clear` mid-turn will leave a stuck `⟳` for minutes.
