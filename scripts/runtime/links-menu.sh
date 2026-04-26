@@ -18,11 +18,28 @@ runtime_root="$(cd "$script_dir/.." && pwd)"
 cwd="${1:-$PWD}"
 keypress_ts="${2:-0}"
 
-bin="${VSCODE_LINKS_BIN:-vscode-links}"
-if ! command -v "$bin" >/dev/null 2>&1; then
-  printf 'links: %s not on PATH\n' "$bin" >&2
-  printf 'install via: curl -fsSL https://github.com/yunsii/vscode-links/releases/latest/download/install.sh | sh\n' >&2
-  printf 'or set VSCODE_LINKS_BIN=/path/to/vscode-links\n' >&2
+resolve_vscode_links_bin() {
+  if [[ -n "${VSCODE_LINKS_BIN:-}" ]]; then
+    printf '%s\n' "$VSCODE_LINKS_BIN"
+    return 0
+  fi
+  # Prefer the version pinned by native/vscode-links/release-manifest.json
+  # (managed by sync-runtime). Falls back to PATH for users who installed
+  # via the upstream install.sh themselves.
+  local managed="$runtime_root/../native/vscode-links/bin/vscode-links"
+  if [[ -x "$managed" ]]; then
+    printf '%s\n' "$managed"
+    return 0
+  fi
+  command -v vscode-links 2>/dev/null && return 0
+  return 1
+}
+
+bin="$(resolve_vscode_links_bin || true)"
+if [[ -z "$bin" ]] || ! [[ -x "$bin" ]]; then
+  printf 'links: vscode-links not found\n' >&2
+  printf 'install with: bash %s/scripts/runtime/setup-vscode-links.sh --install\n' "$runtime_root/.." >&2
+  printf 'or run sync-runtime; or set VSCODE_LINKS_BIN=/path/to/vscode-links\n' >&2
   printf 'press any key to close...' >&2
   IFS= read -rsn1 _ || true
   exit 1

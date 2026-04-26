@@ -646,6 +646,15 @@ runtime_log_info sync "sync-runtime completed" \
   "duration_ms=$(runtime_log_duration_ms "$start_ms")"
 sync_trace "step=completed duration_ms=$(runtime_log_duration_ms "$start_ms")"
 
+VSCODE_LINKS_SETUP="$REPO_ROOT/scripts/runtime/setup-vscode-links.sh"
+if [[ -x "$VSCODE_LINKS_SETUP" ]]; then
+  sync_trace "step=vscode-links-setup status=starting"
+  # Default mode: auto-install if missing, advise (no auto-replace) if behind.
+  # Output is prefixed so it slots into the same [sync] table as other steps.
+  "$VSCODE_LINKS_SETUP" 2>&1 | sed 's/^/[sync] /' || true
+  sync_trace "step=vscode-links-setup status=completed"
+fi
+
 DEPS_CHECK_SCRIPT="$REPO_ROOT/scripts/dev/check-deps-updates.sh"
 if [[ -x "$DEPS_CHECK_SCRIPT" ]] && [[ "${WEZTERM_SYNC_SKIP_DEPS_CHECK:-0}" != "1" ]]; then
   sync_trace "step=deps-check status=starting"

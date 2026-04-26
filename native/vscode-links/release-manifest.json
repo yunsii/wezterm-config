@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "enabled": true,
+  "version": "0.1.1",
+  "tag": "cli-v0.1.1",
+  "repo": "yunsii/vscode-links",
+  "assets": {
+    "linux-x64-gnu": {
+      "assetName": "vscode-links-linux-x64-gnu.tar.gz",
+      "downloadUrl": "https://github.com/yunsii/vscode-links/releases/download/cli-v0.1.1/vscode-links-linux-x64-gnu.tar.gz",
+      "sha256": "77100f436e68c1ccb38cc0889907b5c7ea18ea009b0a49f9f307d2eec85d6ff5"
+    },
+    "linux-arm64-gnu": {
+      "assetName": "vscode-links-linux-arm64-gnu.tar.gz",
+      "downloadUrl": "https://github.com/yunsii/vscode-links/releases/download/cli-v0.1.1/vscode-links-linux-arm64-gnu.tar.gz",
+      "sha256": "6a40d8e41ce172d2f188d401c494c58e597ab6692bf1cb608cc7a11795ec49ad"
+    },
+    "darwin-x64": {
+      "assetName": "vscode-links-darwin-x64.tar.gz",
+      "downloadUrl": "https://github.com/yunsii/vscode-links/releases/download/cli-v0.1.1/vscode-links-darwin-x64.tar.gz",
+      "sha256": "1dca55d4a28031b1927696f22beb3db2daeb3a96b6fbcfe6790b5c0f0aee960b"
+    },
+    "darwin-arm64": {
+      "assetName": "vscode-links-darwin-arm64.tar.gz",
+      "downloadUrl": "https://github.com/yunsii/vscode-links/releases/download/cli-v0.1.1/vscode-links-darwin-arm64.tar.gz",
+      "sha256": "02a8ffb1de631b44b7bc9457f223a2476b93338a79e46232cd460d0747ad0f81"
+    },
+    "win32-x64-msvc": {
+      "assetName": "vscode-links-win32-x64-msvc.zip",
+      "downloadUrl": "https://github.com/yunsii/vscode-links/releases/download/cli-v0.1.1/vscode-links-win32-x64-msvc.zip",
+      "sha256": "08505fded4a9f94824d717f83c7fff1a270b0ec40bf0f2b490b6b79d818e33ca"
+    }
+  }
+}
