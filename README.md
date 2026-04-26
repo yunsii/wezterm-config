@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/brand/banner.svg" alt="WezDeck — a flight deck for your AI agents" width="960">
+  <img src="assets/brand/banner.svg" alt="WezDeck — A flight deck for your AI agents" width="960">
 </p>
 
 <h1 align="center">WezDeck</h1>
