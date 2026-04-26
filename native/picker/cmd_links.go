@@ -439,7 +439,7 @@ func (ui *linksUI) displayedSelected() int {
 // wants, mirroring cmd_command's pattern.
 func (ui *linksUI) dispatch(row linkRow, action string, fd int, state *term.State) bool {
 	_ = term.Restore(fd, state)
-	_, _ = os.Stdout.WriteString("\x1b[0m\x1b[?25h\x1b[H\x1b[2J")
+	_, _ = os.Stdout.WriteString("\x1b[0m\x1b[?25h")
 
 	cmd := exec.Command("bash", ui.dispatchScript, action, row.url, row.title)
 	cmd.Stdin = os.Stdin
