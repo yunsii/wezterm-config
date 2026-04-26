@@ -28,6 +28,31 @@ Topic files under `en/`:
 - [en/preferences.md](./en/preferences.md)
 - [en/permissions.md](./en/permissions.md)
 
+Host adapter files (linked only into the matching host's target by
+`scripts/dev/link-agent-profile.sh`):
+
+- [en/permissions-claude.md](./en/permissions-claude.md)
+
+## Design Notes
+
+Per-topic design rationale lives under `notes/` and is not loaded by
+agents — reference material for maintainers.
+
+- [notes/permissions-design.md](./notes/permissions-design.md) — why
+  the `permissions` topic was added, why it was split into a
+  host-agnostic core plus a Claude Code adapter, why no
+  `permissions-codex.md` exists, and the recurrence-gate /
+  decline-memory rationale.
+
+## Host Setup
+
+Operator-facing recipes for configuring an agent host. Not loaded by
+agents; consult when setting up a CLI tool or rotating machines.
+
+- [host-setup/codex.md](./host-setup/codex.md) — Codex CLI
+  (`~/.codex/config.toml`) tuning: approval policy × sandbox mode,
+  profiles, writable roots, env policy, MCP mirroring, notify hook.
+
 Each topic file carries YAML frontmatter (`name`, `scope`, `triggers`, `tags`) so agents or tools can index and load on demand.
 Each rule carries a stable identifier of the form `[<topic>-NN]` so feedback, memory entries, and reviewers can reference rules precisely.
 

@@ -7,6 +7,11 @@
 #   ~/.claude/   AGENTS.md -> CLAUDE.md ; topic files keep their name
 #   ~/.codex/    AGENTS.md -> AGENTS.md ; topic files keep their name
 #
+# Host-adapter files use a `<topic>-<host>.md` naming convention. They
+# are linked only into the matching host's target and skipped for
+# others (e.g. permissions-claude.md goes to ~/.claude/ but not
+# ~/.codex/). The host token is the second segment after the topic.
+#
 # A target whose directory does not exist is skipped silently (well,
 # with one "skip" line). Re-running is idempotent: links already
 # pointing at the right source report "ok" and are left alone.
@@ -90,10 +95,23 @@ process_target() {
     return
   fi
   printf '[%s] %s\n' "$label" "$dir"
-  local f base dst_name
+  local f base dst_name host_suffix
+  # Host adapter convention: <topic>-<host>.md where <host> is a known
+  # target label (claude, codex, ...). Topic names that contain hyphens
+  # (tool-use.md, platform-actions.md) are NOT host adapters because
+  # their suffix does not match a known host.
+  local known_hosts=" claude codex "
   for f in "$source_dir"/*.md; do
     [[ -f "$f" ]] || continue
     base=$(basename "$f")
+    if [[ "$base" =~ -([A-Za-z0-9_]+)\.md$ ]]; then
+      host_suffix="${BASH_REMATCH[1]}"
+      if [[ "$known_hosts" == *" $host_suffix "* ]]; then
+        if [[ "$host_suffix" != "$label" ]]; then
+          continue
+        fi
+      fi
+    fi
     if [[ "$base" == "AGENTS.md" ]]; then
       dst_name="$entry_name"
     else

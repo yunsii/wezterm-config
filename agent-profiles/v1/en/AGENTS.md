@@ -53,7 +53,8 @@ Read additional topic files only when the current file points to them or the tas
 - Commits, branches, merges, pushes, pull/merge requests → [vcs.md](./vcs.md)
 - Final responses and progress updates → [reporting.md](./reporting.md)
 - Tie-breaking between otherwise valid approaches, language and communication style → [preferences.md](./preferences.md)
-- Editing `settings.json` / `settings.local.json`, allowlist entries, pre-approval rules → [permissions.md](./permissions.md)
+- Pre-approval policy, recurrence-gated promotion, what must stay prompted → [permissions.md](./permissions.md)
+- Claude Code-specific allowlist files (`settings.json` / `.claude/settings.json` / `settings.local.json`), layering, PreToolUse hooks → [permissions-claude.md](./permissions-claude.md)
 
 Each topic file carries YAML frontmatter (`name`, `scope`, `triggers`, `tags`) for indexed discovery.
 Each rule carries a stable identifier of the form `[<topic>-NN]` so feedback, memory entries, and reviewers can reference rules precisely.
