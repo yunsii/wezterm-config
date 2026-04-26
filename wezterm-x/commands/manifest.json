@@ -206,6 +206,27 @@
     ]
   },
   {
+    "id": "links.picker",
+    "label": "Links: Open picker",
+    "description": "Resolve project links via the `vscode-links` CLI for the current pane's cwd, then offer them through fzf inside a centered tmux popup. Enter opens the URL on the Windows host; Ctrl+Y copies it. Requires `vscode-links` (install via the project's install.sh) plus `fzf` and `jq` on PATH.",
+    "scope": "project-navigation",
+    "context": "tmux-backed",
+    "binding": {
+      "kind": "tmux-chord-leaf",
+      "table": "command-chord",
+      "exec": "display-popup -E -w 80% -h 60% \"bash #{@wezterm_runtime_root}/scripts/runtime/links-picker.sh '#{pane_current_path}'\""
+    },
+    "hotkeys": [
+      { "keys": "Ctrl+k l", "layer": "tmux-chord" }
+    ],
+    "palette": {
+      "accelerator": "l",
+      "command": ["bash", "-lc", "tmux display-popup -E -w 80% -h 60% \"bash $WEZTERM_RUNTIME_ROOT/scripts/runtime/links-picker.sh '$PWD'\""],
+      "success_message": "Opened links picker.",
+      "failure_message": "Failed to open links picker."
+    }
+  },
+  {
     "id": "vscode.open-current-dir",
     "label": "VS Code: Open current directory",
     "description": "In tmux-backed panes forward to tmux; in hybrid-wsl outside tmux open the worktree root on the Windows host.",

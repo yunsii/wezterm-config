@@ -35,6 +35,7 @@ This workspace is designed keyboard-first: every feature is expected to have a k
   - `Ctrl+k` `g` `t`: prompt `task-:`, create `.worktrees/<repo>/task-<slug>/` for PR-scoped focused work. Resume profile.
   - `Ctrl+k` `g` `h`: prompt `hotfix-:`, create `.worktrees/<repo>/hotfix-<slug>/` for urgent fixes. Resume profile (the agent CLI falls back to a fresh session on first open of a brand-new worktree).
   - `Ctrl+k` `g` `r`: reclaim the worktree owning the current pane. Refuses on main, on `dev-*`, on dirty/untracked, and on unmerged branches (checked against `origin/HEAD` after `git fetch`). On confirm, switches focus to the main worktree's window, runs reclaim detached, then closes the original window.
+- `Ctrl+k` `l`: open the project links picker for the current pane's cwd. Calls the `vscode-links` CLI (https://github.com/yunsii/vscode-links) for the rendered link list (provider auto-detect plus `.vscode/settings.json` `links.resources` / `links.remoteResources`), then offers the rows through `fzf` inside a centered tmux popup. Enter opens the URL on the Windows host via `windows_run_powershell_command_utf8` → `Start-Process`; `Ctrl+Y` copies it to the Windows clipboard via `Set-Clipboard`. Requires `vscode-links` (install with the project's `install.sh` or set `VSCODE_LINKS_BIN`), `fzf`, and `jq` on `PATH`.
 - `LeftClick`: inside tmux, use the click only to focus the pane under the mouse; it does not start tmux selection and is not forwarded as a mouse click into the pane application
 
 ## Tabs
