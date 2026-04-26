@@ -241,8 +241,8 @@ if [[ -x "$picker_binary" ]]; then
   prefetch_frame_file=''
 else
   prefetch_frame_file="$(mktemp -t wezterm-attention-frame.XXXXXX)"
-  client_geom="$(tmux display-message -p '#{client_width}\t#{client_height}' 2>/dev/null || printf '100\t30')"
-  IFS=$'\t' read -r client_width client_height <<<"$client_geom"
+  client_width="$(tmux display-message -p '#{client_width}' 2>/dev/null || echo 100)"
+  client_height="$(tmux display-message -p '#{client_height}' 2>/dev/null || echo 30)"
   popup_cols=$(( client_width * 80 / 100 - 2 ))
   (( popup_cols < 20 )) && popup_cols=20
   popup_rows=$(( client_height * 70 / 100 - 2 ))
