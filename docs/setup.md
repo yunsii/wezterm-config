@@ -76,6 +76,8 @@ typeset -f __tmux_status_prompt_refresh >/dev/null && echo ok || echo missing
 
 If it prints `missing`, the rc did not source the hook. Without the hook, the 30s poll and pane-switch hooks keep working unchanged, so `git` state can lag up to 30s before the status line updates.
 
+The same gap exists for file edits driven by Claude Code (Edit / Write / Bash `git …`) — the shell prompt is not in the loop, so the prompt hook never fires. The agent-side counterpart lives in the Claude install template at [`agent-attention.md#install--update`](./agent-attention.md#install--update): a second hook entry under `PostToolUse` and `Stop` backgrounds the same `tmux-status-refresh.sh --force --refresh-client` after every tool call and at turn end, sharing the 2s `@tmux_status_force_debounce` window with this prompt hook.
+
 ## IME State Indicator
 
 In `hybrid-wsl` the WezTerm right status bar renders a compact IME state badge so keyboard-first interactions (chord prefixes, `y/n` confirmations, single-letter shortcuts) do not have to guess which input mode is active.
