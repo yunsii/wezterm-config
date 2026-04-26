@@ -7,12 +7,9 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
-	"time"
 
 	"golang.org/x/term"
 )
@@ -34,12 +31,14 @@ type worktreeUI struct {
 	sessionName         string
 	currentWindowID     string
 	cwd                 string
-	keypressTS          int64
-	menuStartTS         int64
-	menuDoneTS          int64
+	ts                  perfTimings
 }
 
-func runWorktree(args []string) int {
+type worktreePicker struct{}
+
+func (worktreePicker) Name() string { return "worktree" }
+
+func (worktreePicker) Run(args []string) int {
 	if len(args) < 7 {
 		fmt.Fprintln(os.Stderr, "usage: picker worktree <prefetch_tsv> <open_script> <session_name> <current_window_id> <cwd> <current_worktree_root> <repo_label> [keypress_ts] [menu_start_ts] [menu_done_ts]")
 		return 2
@@ -51,20 +50,7 @@ func runWorktree(args []string) int {
 	cwd := args[4]
 	currentRoot := args[5]
 	repoLabel := args[6]
-
-	parseTS := func(i int) int64 {
-		if len(args) <= i {
-			return 0
-		}
-		v, err := strconv.ParseInt(args[i], 10, 64)
-		if err != nil || v <= 0 {
-			return 0
-		}
-		return v
-	}
-	keypressTS := parseTS(7)
-	menuStartTS := parseTS(8)
-	menuDoneTS := parseTS(9)
+	ts := parsePerfTimings(args, 7)
 
 	rows, err := loadWorktreeRows(prefetchPath)
 	if err != nil {
@@ -86,17 +72,11 @@ func runWorktree(args []string) int {
 		}
 	}
 
-	fd := int(os.Stdin.Fd())
-	state, err := term.MakeRaw(fd)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "picker: MakeRaw: %v\n", err)
+	fd, state, ok := enterRawMode()
+	if !ok {
 		return 1
 	}
-	defer func() {
-		_ = term.Restore(fd, state)
-		_, _ = os.Stdout.WriteString("\x1b[0m\x1b[?25h")
-	}()
-	_, _ = os.Stdout.WriteString("\x1b[?25l")
+	defer restoreRawMode(fd, state)
 
 	ui := &worktreeUI{
 		rows:                rows,
@@ -107,29 +87,19 @@ func runWorktree(args []string) int {
 		sessionName:         sessionName,
 		currentWindowID:     currentWindowID,
 		cwd:                 cwd,
-		keypressTS:          keypressTS,
-		menuStartTS:         menuStartTS,
-		menuDoneTS:          menuDoneTS,
+		ts:                  ts,
 	}
 	ui.render("first")
 
-	for {
-		key, err := readKey()
-		if err != nil {
-			if err == io.EOF {
-				return 0
-			}
-			continue
-		}
-
+	return runKeyLoop(func(key string) (loopAction, int) {
 		switch key {
 		case "\r", "\n":
 			ui.dispatch(fd, state)
-			return 0
+			return loopExit, 0
 		case "\x1b", "\x03", "\x1bg":
 			// Bare Esc / Ctrl+C / forwarded Alt+g (the chord that opened
 			// this popup, treated as a toggle exit). Mirrors bash picker.
-			return 0
+			return loopExit, 0
 		case "\x1b[B", "\x1bOB":
 			ui.move(1)
 			ui.render("repaint")
@@ -140,10 +110,11 @@ func runWorktree(args []string) int {
 			if i := ui.findAccelerator(key); i >= 0 {
 				ui.selected = i
 				ui.dispatch(fd, state)
-				return 0
+				return loopExit, 0
 			}
 		}
-	}
+		return loopContinue, 0
+	})
 }
 
 func loadWorktreeRows(path string) ([]worktreeRow, error) {
@@ -207,13 +178,7 @@ func (ui *worktreeUI) findAccelerator(key string) int {
 }
 
 func (ui *worktreeUI) render(paintKind string) {
-	cols, lines, err := term.GetSize(int(os.Stdout.Fd()))
-	if err != nil || cols < 1 {
-		cols = 80
-	}
-	if lines < 1 {
-		lines = 24
-	}
+	_, lines := getTermSize()
 	visibleRows := lines - 6
 	if visibleRows < 1 {
 		visibleRows = 1
@@ -287,50 +252,13 @@ func (ui *worktreeUI) render(paintKind string) {
 	b.WriteString("\x1b[2mEnter open | Up/Down move | 1-9,0,a-z open | Esc close  ·  powered by ")
 	b.WriteString("\x1b[22;1;38;5;108mgo")
 	b.WriteString(reset)
-
-	var elapsed, lua, menu, picker int64
-	if ui.keypressTS > 0 {
-		nowMs := time.Now().UnixMilli()
-		elapsed = nowMs - ui.keypressTS
-		if elapsed < 0 {
-			elapsed = 0
-		}
-		if ui.menuStartTS > 0 && ui.menuDoneTS > 0 {
-			lua = ui.menuStartTS - ui.keypressTS
-			menu = ui.menuDoneTS - ui.menuStartTS
-			picker = nowMs - ui.menuDoneTS
-			if lua < 0 {
-				lua = 0
-			}
-			if menu < 0 {
-				menu = 0
-			}
-			if picker < 0 {
-				picker = 0
-			}
-			fmt.Fprintf(&b, "\x1b[2m  ·  %dms = %d+%d+%d (lua+menu+picker)%s", elapsed, lua, menu, picker, reset)
-		} else {
-			fmt.Fprintf(&b, "\x1b[2m  ·  %dms key→paint%s", elapsed, reset)
-		}
-	}
+	ui.ts.renderFooterTail(&b)
 	b.WriteString(clearEOL)
 	b.WriteString("\x1b[J")
 
 	_, _ = os.Stdout.WriteString(b.String())
 
-	if ui.keypressTS > 0 {
-		emitPerfEvent("worktree.perf", "worktree picker paint timing", map[string]string{
-			"paint_kind":     paintKind,
-			"picker_kind":    "go",
-			"panel":          "worktree",
-			"total_ms":       strconv.FormatInt(elapsed, 10),
-			"lua_ms":         strconv.FormatInt(lua, 10),
-			"menu_ms":        strconv.FormatInt(menu, 10),
-			"picker_ms":      strconv.FormatInt(picker, 10),
-			"item_count":     strconv.Itoa(itemCount),
-			"selected_index": strconv.Itoa(ui.selected),
-		})
-	}
+	ui.ts.emit("worktree.perf", "worktree", "worktree picker paint timing", paintKind, itemCount, ui.selected, nil)
 }
 
 func (ui *worktreeUI) dispatch(fd int, state *term.State) {
@@ -355,3 +283,5 @@ func (ui *worktreeUI) dispatch(fd int, state *term.State) {
 		shellEscape(ui.cwd))
 	_ = exec.Command("tmux", "run-shell", "-b", cmd).Run()
 }
+
+func init() { register(worktreePicker{}) }
