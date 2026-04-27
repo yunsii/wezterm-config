@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
 )
 
 type attentionRow struct {
@@ -447,7 +446,7 @@ func dispatchAttention(r attentionRow, jumpScript string) {
 		_ = exec.Command("tmux", "run-shell", "-b", cmd).Run()
 		return
 	}
-	emitPerfEvent("attention", "alt-slash trigger dispatch", map[string]string{
+	emitPerfEvent("attention", "alt-slash dispatch", map[string]string{
 		"row_status":   r.status,
 		"row_id":       r.id,
 		"payload_len":  fmt.Sprintf("%d", len(payload)),
@@ -456,9 +455,10 @@ func dispatchAttention(r attentionRow, jumpScript string) {
 		"tmux_window":  r.tmuxWindow,
 		"tmux_pane":    r.tmuxPane,
 	})
-	if !writeAttentionJumpTrigger(payload, jumpScript) {
-		// Trigger write failed for some reason — fall through to the
-		// legacy `--session` dispatch so the user gets some attempt.
+	if !sendAttentionJump(payload) {
+		// Bus delivery failed (read-only state dir, missing event dir
+		// env, etc.) — fall back to the legacy --session dispatch so
+		// the user still gets some attempt at a jump.
 		cmd := fmt.Sprintf("bash %s --session %s", shellEscape(jumpScript), shellEscape(r.id))
 		_ = exec.Command("tmux", "run-shell", "-b", cmd).Run()
 	}
@@ -525,49 +525,29 @@ func lookupLiveWezTermPane(socket, session string) string {
 	return strings.TrimPrefix(line, "WEZTERM_PANE=")
 }
 
-// writeAttentionJumpTrigger drops a small JSON file with the jump payload
-// into a known location; titles.lua's `update-status` handler (250ms tick)
-// reads + deletes + dispatches. We use a file instead of an OSC user-var
-// because the OSC route is unreliable from a tmux popup pty: DCS
-// pass-through is forwarded to the parent wezterm pane only when bytes
-// originate from a regular tmux pane's `/dev/tty` (the path the
-// attention_tick hook uses), not from a `display-popup -E` sub-pty.
-//
-// `attentionTriggerPath` is computed via `attention-jump.sh --print-trigger-path`,
-// piggybacking on the same wezterm-runtime path resolution the rest of
-// the agent-attention pipeline already uses, so picker doesn't have to
-// re-implement WSL/Windows path detection.
-func writeAttentionJumpTrigger(payload, jumpScript string) bool {
-	out, err := exec.Command("bash", jumpScript, "--print-trigger-path").Output()
+// sendAttentionJump publishes the picker's jump intent through the
+// unified event bus (see wezbus.go and docs/event-bus.md). Picker is
+// always invoked from inside a `tmux display-popup -E` sub-pty, where
+// the OSC route would silently drop, so the bus's transport selection
+// (with WEZTERM_EVENT_FORCE_FILE=1 injected by tmux-attention-menu.sh)
+// reliably picks the file branch. The transport is logged so the
+// runtime trail shows which branch ran without us having to know it
+// here.
+func sendAttentionJump(payload string) bool {
+	transport, err := wezbusSend("attention.jump", payload)
 	if err != nil {
-		emitPerfEvent("attention", "trigger path resolve failed", map[string]string{"err": err.Error()})
-		return false
-	}
-	path := strings.TrimSpace(string(out))
-	if path == "" {
-		emitPerfEvent("attention", "trigger path empty", nil)
-		return false
-	}
-	tmp := path + ".tmp"
-	body := fmt.Sprintf("{\"version\":1,\"payload\":%q,\"ts\":%d}\n", payload, nowMs())
-	if err := os.WriteFile(tmp, []byte(body), 0o644); err != nil {
-		emitPerfEvent("attention", "trigger write failed", map[string]string{
-			"path": tmp, "err": err.Error(),
+		emitPerfEvent("attention", "event-bus send failed", map[string]string{
+			"event":     "attention.jump",
+			"transport": transport,
+			"err":       err.Error(),
 		})
 		return false
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		emitPerfEvent("attention", "trigger rename failed", map[string]string{
-			"from": tmp, "to": path, "err": err.Error(),
-		})
-		return false
-	}
+	emitPerfEvent("attention", "event-bus dispatched", map[string]string{
+		"event":     "attention.jump",
+		"transport": transport,
+	})
 	return true
-}
-
-func nowMs() int64 {
-	return time.Now().UnixMilli()
 }
 
 func init() { register(attentionPicker{}) }

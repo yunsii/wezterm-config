@@ -293,6 +293,16 @@ attention_jump_script="$script_dir/attention-jump.sh"
 repo_root="$(cd "$script_dir/../.." && pwd)"
 picker_binary="$repo_root/native/picker/bin/picker"
 
+# Pin the picker (Go or bash) onto the file transport: it always runs
+# inside `tmux display-popup -E`, whose sub-pty does NOT forward DCS
+# pass-through to the parent client tty, so the OSC route would be
+# silently dropped. Inject WEZBUS_EVENT_DIR so the picker doesn't have
+# to redo the wezterm-runtime path detection from inside the popup.
+# shellcheck disable=SC1091
+. "$script_dir/wezterm-event-lib.sh"
+picker_event_dir="$(wezterm_event_dir)"
+mkdir -p "$picker_event_dir" 2>/dev/null || true
+
 # Keypress reference: the Lua handler writes live-panes.json with ts =
 # now_ms() right before forwarding `\x1b/`, so its ts is the closest
 # we have to "moment user pressed Alt+/". Pass it through to the picker
@@ -308,7 +318,7 @@ if [[ -x "$picker_binary" ]]; then
   # popup) so bucket M reflects all of menu.sh's actual work. Inline
   # EPOCHREALTIME (µs/1000 → ms) avoids the ~5ms `date` fork.
   menu_done_ts=$(( ${EPOCHREALTIME//./} / 1000 ))
-  picker_command="WEZTERM_RUNTIME_TRACE_ID=$(printf %q "$trace_id") $(printf %q "$picker_binary") attention $(printf %q "$prefetch_file") $(printf %q "$attention_jump_script") $(printf %q "$keypress_ts") $(printf %q "$menu_start_ts") $(printf %q "$menu_done_ts")"
+  picker_command="WEZTERM_RUNTIME_TRACE_ID=$(printf %q "$trace_id") WEZTERM_EVENT_FORCE_FILE=1 WEZBUS_EVENT_DIR=$(printf %q "$picker_event_dir") $(printf %q "$picker_binary") attention $(printf %q "$prefetch_file") $(printf %q "$attention_jump_script") $(printf %q "$keypress_ts") $(printf %q "$menu_start_ts") $(printf %q "$menu_done_ts")"
   picker_kind='go'
   prefetch_frame_file=''
 else
@@ -327,7 +337,7 @@ else
   # end-to-end key→interactive time.
   attention_picker_emit_frame "$popup_cols" "$visible_rows" 0 "$total_rows" 0 0 0 0 > "$prefetch_frame_file"
   menu_done_ts=$(( ${EPOCHREALTIME//./} / 1000 ))
-  picker_command="WEZTERM_RUNTIME_TRACE_ID=$(printf %q "$trace_id") bash $(printf %q "$script_dir/tmux-attention-picker.sh") $(printf %q "$prefetch_file") $(printf %q "$prefetch_frame_file") $(printf %q "$keypress_ts") $(printf %q "$menu_start_ts") $(printf %q "$menu_done_ts")"
+  picker_command="WEZTERM_RUNTIME_TRACE_ID=$(printf %q "$trace_id") WEZTERM_EVENT_FORCE_FILE=1 WEZBUS_EVENT_DIR=$(printf %q "$picker_event_dir") bash $(printf %q "$script_dir/tmux-attention-picker.sh") $(printf %q "$prefetch_file") $(printf %q "$prefetch_frame_file") $(printf %q "$keypress_ts") $(printf %q "$menu_start_ts") $(printf %q "$menu_done_ts")"
   picker_kind='bash'
 fi
 

@@ -52,6 +52,11 @@ Read `AGENTS.md` first, then open only the matching file under `docs/`. Read add
 - IME candidate-window stability, DEC mode 2026 (synchronized output),
   why tmux 3.6+ is required, or agent-CLI render flicker investigation:
   Read [`docs/ime-flicker-and-sync-output.md`](docs/ime-flicker-and-sync-output.md).
+- Sending a signal from a hook / picker / external helper into the
+  WezTerm Lua process, picking between OSC and file transports, adding
+  a new event, or migrating producers/consumers when upstream tmux or
+  wezterm fix popup OSC pass-through:
+  Read [`docs/event-bus.md`](docs/event-bus.md).
 - Ownership boundaries, runtime architecture, or entry points:
   Read [`docs/architecture.md`](docs/architecture.md).
 - Preparing a commit message or deciding commit split:

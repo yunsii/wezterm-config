@@ -310,23 +310,22 @@ cycle_status_filter() {
   apply_filter
 }
 
-write_attention_jump_trigger() {
-  # Drop a JSON trigger file the wezterm-side update-status tick consumes.
-  # File-based IPC is more reliable than OSC from a tmux popup pty (see
-  # attention.consume_jump_trigger comment).
-  local payload="$1" trigger_path tmp ts esc
-  trigger_path="$(bash "$script_dir/attention-jump.sh" --print-trigger-path 2>/dev/null || true)"
-  if [[ -z "$trigger_path" ]]; then
-    runtime_log_warn attention "trigger path unresolved" "trace=$trace_id"
-    return 1
+# Source the unified event bus producer. Bash picker also runs inside
+# a tmux popup pty, so menu.sh injects WEZTERM_EVENT_FORCE_FILE=1 +
+# WEZBUS_EVENT_DIR; the bus picks the file transport accordingly.
+# shellcheck disable=SC1091
+source "$script_dir/wezterm-event-lib.sh"
+
+send_attention_jump_event() {
+  local payload="$1"
+  if wezterm_event_send "attention.jump" "$payload"; then
+    runtime_log_info attention "event-bus dispatched" \
+      "trace=$trace_id" "event=attention.jump" "transport=$(wezterm_event_pick_transport)"
+    return 0
   fi
-  ts="$(date +%s%3N 2>/dev/null || printf 0)"
-  tmp="${trigger_path}.tmp.$$"
-  esc="${payload//\\/\\\\}"
-  esc="${esc//\"/\\\"}"
-  printf '{"version":1,"payload":"%s","ts":%s}\n' "$esc" "$ts" > "$tmp" 2>/dev/null || return 1
-  mv "$tmp" "$trigger_path" 2>/dev/null || { rm -f "$tmp"; return 1; }
-  return 0
+  runtime_log_warn attention "event-bus send failed" \
+    "trace=$trace_id" "event=attention.jump" "transport=$(wezterm_event_pick_transport)"
+  return 1
 }
 
 dispatch_selection() {
@@ -384,12 +383,12 @@ dispatch_selection() {
       "trace=$trace_id" "session_id=$id" "wezterm_pane=$wp"
     payload="v1|jump|${id}|${wp}|${sock}|${win}|${pane}"
   fi
-  if write_attention_jump_trigger "$payload"; then
+  if send_attention_jump_event "$payload"; then
     return 0
   fi
-  # Last-resort fallback if the trigger write fails (read-only state dir,
-  # disk full, etc.) — keep the legacy --session dispatch so the user
-  # still gets some attempt.
+  # Last-resort fallback if the bus send fails (read-only state dir,
+  # disk full, missing event dir env, etc.) — keep the legacy --session
+  # dispatch so the user still gets some attempt.
   local cmd="WEZTERM_RUNTIME_TRACE_ID=$(printf %q "$trace_id") bash $(printf %q "$script_dir/attention-jump.sh") --session $(printf %q "$id")"
   tmux run-shell -b "$cmd" 2>/dev/null || true
   return 0

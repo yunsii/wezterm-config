@@ -217,6 +217,9 @@ local base_constants = {
     state_file = defaults.default_attention_state_file(runtime_state_dir, join_path),
     live_panes_file = defaults.default_attention_live_panes_file(runtime_state_dir, join_path),
   },
+  wezterm_event_bus = {
+    event_dir = defaults.default_wezterm_event_dir(runtime_state_dir, join_path),
+  },
 }
 
 local constants = helpers.deep_merge(base_constants, local_constants)

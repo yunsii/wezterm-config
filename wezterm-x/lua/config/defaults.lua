@@ -172,6 +172,14 @@ function M.default_attention_live_panes_file(runtime_state_dir, join_path)
   return join_path(runtime_state_dir, 'state', 'agent-attention', 'live-panes.json')
 end
 
+-- Directory where producers drop file-transport events for the unified
+-- wezterm event bus. Mirrors the path computed by
+-- scripts/runtime/wezterm-event-lib.sh's wezterm_event_dir, so both
+-- sides agree without per-call duplication. See docs/event-bus.md.
+function M.default_wezterm_event_dir(runtime_state_dir, join_path)
+  return join_path(runtime_state_dir, 'state', 'wezterm-events')
+end
+
 function M.default_chrome_debug_state_file(runtime_state_dir, join_path)
   return join_path(runtime_state_dir, 'state', 'chrome-debug', 'state.json')
 end

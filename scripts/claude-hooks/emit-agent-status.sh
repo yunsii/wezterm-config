@@ -274,23 +274,23 @@ else
 fi
 
 # Nudge WezTerm. Value carries the timestamp so repeated emits produce
-# distinct user-var-changed events.
+# distinct user-var-changed events. Routed through the unified event bus
+# (scripts/runtime/wezterm-event-lib.sh): hook runs in a regular tmux
+# pane with a writable /dev/tty, so transport selection lands on OSC
+# (sub-frame latency); if /dev/tty is unavailable for some reason, the
+# bus transparently falls back to a file event consumed within ~250 ms
+# by wezterm's update-status tick. See docs/event-bus.md.
+# shellcheck disable=SC1091
+. "$script_dir/../runtime/wezterm-event-lib.sh"
 osc_emitted=0
 tick_ms=''
+event_transport=''
 if [[ -e /dev/tty ]]; then
   tick_ms="$(attention_state_now_ms)"
-  encoded="$(printf '%s' "$tick_ms" | base64 | tr -d '\n')"
-  seq="$(printf '\033]1337;SetUserVar=attention_tick=%s\007' "$encoded")"
-  if [[ -n "${TMUX-}" ]]; then
-    escaped="${seq//$'\033'/$'\033\033'}"
-    if printf '\033Ptmux;%s\033\\' "$escaped" >/dev/tty 2>/dev/null; then
-      osc_emitted=1
-    fi
-  else
-    if printf '%s' "$seq" >/dev/tty 2>/dev/null; then
-      osc_emitted=1
-    fi
+  if wezterm_event_send "attention.tick" "$tick_ms" 2>/dev/null; then
+    osc_emitted=1
   fi
+  event_transport="$(wezterm_event_pick_transport)"
 fi
 
 # Sender-side trace. Pair with attention category in wezterm.log (the
@@ -317,6 +317,7 @@ runtime_log_info attention "hook emitted agent status" \
   "inside_tmux=$([[ -n "${TMUX-}" ]] && echo 1 || echo 0)" \
   "dev_tty_writable=$([[ -e /dev/tty ]] && echo 1 || echo 0)" \
   "osc_emitted=$osc_emitted" \
+  "event_transport=$event_transport" \
   "tick_ms=$tick_ms" \
   "entry_ts_ms=$entry_ts_ms" \
   "elapsed_ms=$elapsed_ms" 2>/dev/null || true

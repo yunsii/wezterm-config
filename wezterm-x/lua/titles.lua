@@ -29,12 +29,21 @@ function M.register(opts)
   local actions_mod = nil
   if constants then
     -- Lazy-load actions only when titles is wired with constants; the
-    -- jump-trigger consumer in update-status needs it to build the
-    -- wsl.exe-wrapped argv for `attention-jump.sh --direct` (the tmux
-    -- side of a picker-driven jump).
+    -- attention.jump bus handler needs it to build the wsl.exe-wrapped
+    -- argv for `attention-jump.sh --direct` (the tmux side of a
+    -- picker-driven jump).
     local ok, mod = pcall(load_module, 'ui/actions')
     if ok then actions_mod = mod end
   end
+  -- Wire up the unified event bus consumer. Producers (hooks, picker,
+  -- future Go/bash callers) target named events through the same API;
+  -- this side just registers per-name handlers. See docs/event-bus.md.
+  local event_bus = load_module 'event_bus'
+  local event_dir = constants
+    and constants.wezterm_event_bus
+    and constants.wezterm_event_bus.event_dir
+    or nil
+  event_bus.configure { event_dir = event_dir, logger = logger }
   local workspace_label_cache = {}
   local badge_last_status = {}
   local last_rendered_status = nil
@@ -285,92 +294,98 @@ function M.register(opts)
       attention.maybe_ack_focused(window, pane)
     end
 
-    -- Picker-driven jump trigger. The picker drops a small JSON file
-    -- with the parsed coords on Enter; we consume + dispatch here on
-    -- the 250ms tick. Same in-process mux activate Alt+,/. use, just
-    -- with a file as the IPC primitive instead of OSC (tmux popup
-    -- DCS pass-through is unreliable, see attention.consume_jump_trigger).
-    if attention and attention.consume_jump_trigger then
-      local coords = attention.consume_jump_trigger()
-      if coords then
-        local activated = attention.activate_in_gui(coords.wezterm_pane, window, pane)
-        if actions_mod and actions_mod.attention_jump_args and constants then
-          local trailing = {
-            '--direct',
-            '--tmux-socket', coords.tmux_socket,
-            '--tmux-window', coords.tmux_window,
-          }
-          if coords.tmux_pane and coords.tmux_pane ~= '' then
-            table.insert(trailing, '--tmux-pane')
-            table.insert(trailing, coords.tmux_pane)
-          end
-          local args = actions_mod.attention_jump_args(constants, pane, trailing, logger, nil)
-          if args then
-            pcall(wezterm.background_child_process, args)
-          end
-        end
-        if logger then
-          logger.info('attention', 'trigger jump dispatched', {
-            kind         = coords.kind,
-            session_id   = coords.session_id,
-            archived_ts  = coords.archived_ts,
-            wezterm_pane = coords.wezterm_pane,
-            activated    = activated,
-          })
-        end
-      end
-    end
+    -- Drain pending file-transport events. Hooks targeting OSC arrive
+    -- via user-var-changed (sub-frame); anything that landed via the
+    -- file branch — picker-driven attention.jump in particular —
+    -- shows up here within one tick. See docs/event-bus.md.
+    event_bus.poll_files(window, pane)
 
     refresh_right_status(window, pane)
     log_rendered_status(window)
   end)
 
-  -- Fast path: the attention hook emits OSC 1337 SetUserVar=attention_tick
-  -- after every state transition, and WezTerm delivers it here. Reload
-  -- state and repaint the right-status segment immediately instead of
-  -- waiting up to 250ms for the next update-status tick.
-  --
-  -- `value` is the hook-side `tick_ms` (epoch ms) decoded from base64 by
-  -- WezTerm. `latency_ms` is the gap between the shell-side OSC emit and
-  -- this Lua handler firing — i.e. WSL→tmux→wezterm OSC delivery latency
-  -- (subject to WSL/Windows clock skew, so treat sub-100ms values as
-  -- noise; the signal is when it spikes into seconds).
-  wezterm.on('user-var-changed', function(window, pane, name, value)
-    if not attention then
-      return
+  -- attention.tick handler. Fires when a hook signals that state.json
+  -- has changed (currently always via OSC because hooks run in regular
+  -- panes; the bus would route the same handler if it ever lands via
+  -- file). Repaints the right-status counter immediately rather than
+  -- waiting up to 250 ms for the next update-status tick.
+  event_bus.on('attention.tick', function(value, meta)
+    if not attention then return end
+    if attention.reload_state then attention.reload_state() end
+    if meta.window then
+      refresh_right_status(meta.window, meta.pane)
+      log_rendered_status(meta.window)
     end
-    if name == attention.USER_VAR_TICK then
-      if attention.reload_state then
-        attention.reload_state()
-      end
-      refresh_right_status(window, pane)
-      log_rendered_status(window)
-      if logger then
-        local latency_ms = nil
-        local tick_ms = tonumber(value)
-        if tick_ms then
-          local ok, now_str = pcall(function()
-            return wezterm.time.now():format '%s%3f'
-          end)
-          if ok and type(now_str) == 'string' and now_str:match '^%d+$' then
-            latency_ms = tonumber(now_str) - tick_ms
-          end
+    if logger then
+      local latency_ms = nil
+      local tick_ms = tonumber(value)
+      if tick_ms then
+        local ok, now_str = pcall(function()
+          return wezterm.time.now():format '%s%3f'
+        end)
+        if ok and type(now_str) == 'string' and now_str:match '^%d+$' then
+          latency_ms = tonumber(now_str) - tick_ms
         end
-        logger.info('attention', 'tick received', {
-          pane_id = pane and pane.pane_id and pane:pane_id() or nil,
-          value = value,
-          latency_ms = latency_ms,
-        })
+      end
+      logger.info('attention', 'tick received', {
+        pane_id = meta.pane and meta.pane.pane_id and meta.pane:pane_id() or nil,
+        value = value,
+        latency_ms = latency_ms,
+        transport = meta.transport,
+      })
+    end
+  end)
+
+  -- attention.jump handler. Fires on picker-driven jumps, currently
+  -- always via the file transport because the picker runs inside a
+  -- tmux popup whose DCS pass-through doesn't reach wezterm. Same
+  -- in-process mux activate Alt+,/. use, plus a background spawn of
+  -- `attention-jump.sh --direct` for the tmux side.
+  event_bus.on('attention.jump', function(payload, meta)
+    if not attention or not attention.parse_jump_payload then return end
+    local coords = attention.parse_jump_payload(payload)
+    if not coords then
+      if logger then
+        logger.warn('attention', 'jump payload unparseable',
+          { value = payload, transport = meta.transport })
       end
       return
     end
-    -- Picker-driven jumps used to come through here as
-    -- `attention_jump` user-vars, but tmux's `display-popup -E` does
-    -- not forward DCS pass-through from the popup pty to the parent
-    -- client tty, so the OSC route silently dropped its payloads. The
-    -- live path is now a file trigger consumed by `update-status`
-    -- above (see attention.consume_jump_trigger).
+    local activated = attention.activate_in_gui(
+      coords.wezterm_pane, meta.window, meta.pane)
+    if actions_mod and actions_mod.attention_jump_args and constants then
+      local trailing = {
+        '--direct',
+        '--tmux-socket', coords.tmux_socket,
+        '--tmux-window', coords.tmux_window,
+      }
+      if coords.tmux_pane and coords.tmux_pane ~= '' then
+        table.insert(trailing, '--tmux-pane')
+        table.insert(trailing, coords.tmux_pane)
+      end
+      local args = actions_mod.attention_jump_args(
+        constants, meta.pane, trailing, logger, nil)
+      if args then
+        pcall(wezterm.background_child_process, args)
+      end
     end
+    if logger then
+      logger.info('attention', 'jump dispatched', {
+        kind         = coords.kind,
+        session_id   = coords.session_id,
+        archived_ts  = coords.archived_ts,
+        wezterm_pane = coords.wezterm_pane,
+        activated    = activated,
+        transport    = meta.transport,
+      })
+    end
+  end)
+
+  -- Single user-var-changed entry point. Anything matching the `we_`
+  -- prefix is routed through the bus to the matching event handler
+  -- registered above; everything else is ignored.
+  wezterm.on('user-var-changed', function(window, pane, name, value)
+    event_bus.dispatch_user_var(name, value, window, pane)
   end)
 end
 
