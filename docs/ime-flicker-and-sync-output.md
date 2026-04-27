@@ -205,8 +205,8 @@ Verified: no IME flicker, no idle freeze, mouse wheel still works.
 | Approach | Why rejected |
 |---|---|
 | `mux_output_parser_coalesce_delay_ms = 8` | Writes are not byte-fragmented; coalescing has nothing to merge. |
-| `CLAUDE_CODE_NO_FLICKER=1` (alone) | Loses tmux native click-and-drag selection (alt-screen + mouse capture take over). |
-| `CLAUDE_CODE_NO_FLICKER=1 + CLAUDE_CODE_DISABLE_MOUSE=1` | Restores tmux selection but loses mouse-wheel scroll inside Claude. Shift+Up extends selection only when an active mouse selection exists, which DISABLE_MOUSE turns off. UX trade-offs unacceptable. |
+| `CLAUDE_CODE_NO_FLICKER=1` (alone) | Loses tmux native click-and-drag selection (alt-screen + mouse capture take over). Worth knowing: this *would* also fix the unrelated scrollback-pollution symptom tracked under "Claude Code scrollback frame leak" below — but the rejection here stands on the mouse-selection regression alone. |
+| `CLAUDE_CODE_NO_FLICKER=1 + CLAUDE_CODE_DISABLE_MOUSE=1` | Restores tmux selection but loses mouse-wheel scroll inside Claude. Shift+Up extends selection only when an active mouse selection exists, which DISABLE_MOUSE turns off. Plus [claude-code#42821] — `=1` swallows `Ctrl+J` (chat:newline). UX trade-offs unacceptable. See "Claude Code scrollback frame leak" below for why we still don't reach for this even though it's the only knob that addresses both flicker *and* the scrollback dup. |
 | Wezterm-side: gate `update_text_cursor` on cursor visibility | Claude's renderer does not emit `CSI ?25l/h` around per-frame redraws (those markers are only emitted entering/exiting alt-screen). The hook would fire too rarely to matter. |
 | Wezterm-side: gate IME path on sync state | Equivalent to what we get for free once paint batching works during BSU/ESU. Worth filing upstream as defense-in-depth, but not required to fix the symptom once tmux 3.6+ is in place. |
 | Build a wezterm IME-debounce knob | Not needed once the protocol-level path works. |
@@ -270,6 +270,37 @@ If any of these fail, work backwards through the chain.
   reports ~85% reduction vs. earlier builds. The remaining ~15% are
   short panes and cursor-bursts on tool-output expansion; no action
   on our side.
+- **Claude Code scrollback frame leak.** In default (non-alt-screen)
+  rendering, every full-redraw event leaves the previous frame in
+  scrollback instead of clearing it. Triggers observed in this repo:
+  SIGWINCH (terminal / tmux pane resize), output exceeding the
+  visible viewport during streaming, tool-output expansion, long
+  markdown tables; users on adjacent issues also report dup with no
+  obvious trigger. Symptom: scrolling up in tmux copy-mode (or in
+  wezterm scrollback) shows the same conversation block 2–25× over,
+  with the input box / status banner wedged between repeats.
+
+  Tracked upstream as [claude-code#49086] (canonical, "per-frame
+  redraw leak"); duplicates [claude-code#46462],
+  [claude-code#49057], [claude-code#15476]; reverse-symptom
+  ([claude-code#41965], `NO_FLICKER` *erasing* scrollback) and
+  side-effect ([claude-code#42821], `NO_FLICKER=1` swallows
+  `Ctrl+J`) live on the same renderer.
+
+  Status as of 2026-04-27: the `claude` bot account commented on
+  #49086 "fixed as of 2.1.116" — verifiably untrue; users on
+  v2.1.116 / v2.1.118 / v2.1.119 (macOS, Linux, Windows, VS Code
+  terminal) all report the symptom unchanged. No Anthropic engineer
+  has re-engaged, no fix PR, no timeline.
+
+  No action on our side. The only Anthropic-supplied workaround is
+  `CLAUDE_CODE_NO_FLICKER=1` (force alt-screen), which does kill the
+  scrollback dup, but the rejection table above documents why we
+  refuse it: tmux mouse-selection regression (with `=1` alone) and
+  Ctrl+J / mouse-wheel regressions (with `=1 + DISABLE_MOUSE=1`).
+  Users hitting this should `exit` + resume the session as a one-off
+  cleanup; do not advise the env knob without re-checking these
+  upstream issues for a real fix.
 
 ## Adjacent issues (for future research)
 
@@ -293,6 +324,12 @@ If any of these fail, work backwards through the chain.
 
 [claude-code#37283]: https://github.com/anthropics/claude-code/issues/37283
 [claude-code#6342]: https://github.com/anthropics/claude-code/issues/6342
+[claude-code#49086]: https://github.com/anthropics/claude-code/issues/49086
+[claude-code#46462]: https://github.com/anthropics/claude-code/issues/46462
+[claude-code#49057]: https://github.com/anthropics/claude-code/issues/49057
+[claude-code#15476]: https://github.com/anthropics/claude-code/issues/15476
+[claude-code#41965]: https://github.com/anthropics/claude-code/issues/41965
+[claude-code#42821]: https://github.com/anthropics/claude-code/issues/42821
 [wezterm#7465]: https://github.com/wezterm/wezterm/issues/7465
 [wezterm#5560]: https://github.com/wezterm/wezterm/issues/5560
 [wezterm#2569]: https://github.com/wezterm/wezterm/issues/2569
