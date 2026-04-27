@@ -133,6 +133,12 @@ Three independent channels cross the WSL ⇄ Windows boundary; everything else i
 2. **OSC 1337 escape codes** for async nudges (attention ticks, IME-state pushes). The agent CLI or hook script writes the OSC byte sequence to its tty; tmux DCS-wraps it; `wezterm.exe` consumes it and re-renders within one frame. Latency: under one paint frame (~16 ms).
 3. **Shared NTFS state files under `/mnt/c`** for poll-style reads where both sides need the data at their own cadence. WSL processes write (hooks, jump scripts), Windows processes read on every tick (Lua status update, helper liveness watcher). Cross-FS routing rule lives in [`performance.md`](./performance.md).
 
+**Design rule for channel (3) — continuous maintenance over press-coupled writes.** When a producer writes a `/mnt/c` file that another process is about to read in response to the same user gesture, do not couple the write to the gesture (synchronous "write file → trigger consumer"). The cross-FS visibility of an `os.rename` is not synchronous between WSL and Windows views of NTFS: a reader on the other side of the mount can land on the previous file content for tens to hundreds of milliseconds after the writer has logically completed. Any defensive freshness gate the reader adds to detect stale data ends up firing on the legitimate write→read race and the consumer falls back to a degraded view.
+
+Instead, schedule the write from a periodic source so the file is *already* recent enough whenever any consumer reads it. WezTerm's `update-status` tick is the natural producer for any data WezTerm derives; throttle to one rewrite per `*_INTERVAL_MS` constant tuned against the data's staleness budget. Keep the press-time write too if you want zero staleness when the producer is awake — both writers should share a single `last_*_ms` so a press resets the throttle. The reader then drops the freshness gate, drops any clever multi-field framing on top of the file, and reads the data structure plainly. Reference incident: commit `defb56b` (`live-panes.json` was written only on `Alt+/` press; menu.sh tripped on the rename-race ≈10% of presses and rendered every popup row as `?/?/...`; the fix was the tick-driven refresh in `attention.maybe_refresh_live_snapshot`).
+
+This rule applies only to channel (3). The named-pipe channel is request/response so it's natively synchronous; OSC is sub-frame and not file-backed; reserve the rule for the file channel.
+
 ```mermaid
 flowchart LR
   subgraph WSL["WSL · Linux processes"]
@@ -172,7 +178,7 @@ flowchart LR
 
   W_HOOK -- write --> F_ATT
   W_BASH -- read --> F_ATT
-  W_LUA  -- "write on Alt+/" --> F_LIVE
+  W_LUA  -- "tick + Alt+/" --> F_LIVE
   W_BASH -- read --> F_LIVE
   W_BASH -- write --> F_FOCUS
   H_WEZ  -- "tick read" --> F_ATT
