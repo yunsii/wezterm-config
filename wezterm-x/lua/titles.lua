@@ -163,14 +163,20 @@ function M.register(opts)
       fg = palette.tab_hover_fg
     end
 
-    local badge = attention and attention.tab_badge(tab, pane_infos) or nil
+    local badge = attention and attention.tab_badge(tab) or nil
     local segments = {}
     if badge then
-      local badge_bg, badge_fg = attention.badge_colors(palette, badge.status)
-      table.insert(segments, { Background = { Color = badge_bg } })
-      table.insert(segments, { Foreground = { Color = badge_fg } })
+      -- Render the badge as a colored `█` over the tab's own background:
+      -- the saturated status color lives on the foreground so the bar
+      -- reads as an indicator stripe rather than a filled chip. We pull
+      -- the saturated color from `badge_colors`'s bg slot — that's where
+      -- the orange/blue/green hue is defined; the fg slot is the
+      -- text-on-saturated contrast color, not what we want here.
+      local badge_color, _ = attention.badge_colors(palette, badge.status)
+      table.insert(segments, { Background = { Color = bg } })
+      table.insert(segments, { Foreground = { Color = badge_color } })
       table.insert(segments, { Attribute = { Intensity = 'Bold' } })
-      table.insert(segments, { Text = ' ' .. badge.marker .. ' ' })
+      table.insert(segments, { Text = badge.marker })
     end
     if logger then
       local tab_id = tab.tab_id

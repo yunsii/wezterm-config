@@ -253,47 +253,28 @@ function M.render_status_segment(palette, opts)
   return wezterm.format(parts)
 end
 
-function M.tab_badge(tab_info, panes)
+function M.tab_badge(tab_info)
   local active = tab_info and tab_info.active_pane
   if not active or active.pane_id == nil then
     return nil
   end
-  local active_pane_id_str = tostring(active.pane_id)
-  -- Build the set of WezTerm pane ids that belong to this tab. A tab can
-  -- hold multiple WezTerm panes (e.g. editor + agent split), and an
-  -- agent running on a non-active pane should still surface on the tab
-  -- badge — otherwise focusing the editor pane silently hides the
-  -- agent's waiting/done status from the tab strip. Falling back to the
-  -- active pane alone preserves behavior when the caller can't supply
-  -- the pane list.
-  local pane_ids = {}
-  if type(panes) == 'table' and #panes > 0 then
-    for _, p in ipairs(panes) do
-      if p and p.pane_id ~= nil then
-        pane_ids[tostring(p.pane_id)] = true
-      end
-    end
-  else
-    pane_ids[active_pane_id_str] = true
-  end
+  local pane_id_str = tostring(active.pane_id)
   local has_waiting, has_running, has_done = false, false, false
   local now = now_ms()
-  -- Focus-based suppression only applies to the active pane: when the
-  -- tab is active *and* the entry sits on the active pane *and* tmux
-  -- focus matches, drop only the `done` badge — the user is looking at
-  -- that exact pane, so the green "result waiting" mark would be noise.
-  -- Entries on inactive panes within the same tab are never suppressed,
-  -- because the user is by definition not looking at them. `waiting`
-  -- and `running` are never suppressed: `waiting` is an action item
-  -- (glancing at the prompt is not the same as answering it), and
-  -- `running` keeps the parallel-task view across tabs truthful.
+  -- This repo's convention is "tmux owns splits, WezTerm tabs hold one
+  -- pane each", so all entries on a given tab share the same
+  -- wezterm_pane_id and a single active-pane filter is sufficient.
+  -- When the tab is the active one and the tmux-pane focus matches the
+  -- entry, suppress only the `done` badge — the user is looking at that
+  -- exact pane, so the green "result waiting" mark would be noise.
+  -- `waiting` stays visible even under focus because it is an action
+  -- item (glancing at the prompt is not the same as answering it) and
+  -- `running` stays visible so the parallel-task view across tabs is
+  -- truthful.
   local tab_is_active = tab_info.is_active == true
   for _, entry in pairs(state_cache.entries or {}) do
-    local entry_pane = tostring(entry.wezterm_pane_id or '')
-    if entry_is_live(entry, now) and pane_ids[entry_pane] then
-      local on_active_pane = entry_pane == active_pane_id_str
-      local suppress_for_focus = tab_is_active and on_active_pane
-        and M.is_entry_focused(entry, active_pane_id_str)
+    if entry_is_live(entry, now) and tostring(entry.wezterm_pane_id or '') == pane_id_str then
+      local suppress_for_focus = tab_is_active and M.is_entry_focused(entry, pane_id_str)
       if entry.status == M.STATUS_WAITING then
         has_waiting = true
       elseif entry.status == M.STATUS_RUNNING then
@@ -304,16 +285,20 @@ function M.tab_badge(tab_info, panes)
     end
   end
   -- Priority: waiting (needs action) > running (live) > done (informational).
-  -- Markers mirror the right-status counter and the picker chips so the
-  -- whole attention surface speaks one vocabulary: 🚨 waiting / 🔄 running
-  -- / ✅ done. Emoji-presentation code points avoid the VS16 width drift
-  -- that bit the earlier ⚠/✓/⟳ pass.
+  -- The tab badge intentionally drops the emoji vocabulary used by the
+  -- right-status counter and the picker chips: at a tab-strip density the
+  -- emoji is informationally redundant (color already encodes status) and
+  -- the 2-cell width plus VS16/font-baseline drift made it feel "off".
+  -- Render a single `█` block in the status color instead — color does
+  -- the work, the glyph is just a 1-cell carrier so the eye has something
+  -- to land on. The right-status and picker keep emoji because their
+  -- adjacent text labels need the visual anchor.
   if has_waiting then
-    return { status = M.STATUS_WAITING, marker = '🚨' }
+    return { status = M.STATUS_WAITING, marker = '█' }
   elseif has_running then
-    return { status = M.STATUS_RUNNING, marker = '🔄' }
+    return { status = M.STATUS_RUNNING, marker = '█' }
   elseif has_done then
-    return { status = M.STATUS_DONE, marker = '✅' }
+    return { status = M.STATUS_DONE, marker = '█' }
   end
   return nil
 end
