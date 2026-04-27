@@ -140,6 +140,12 @@ attention_picker_emit_frame() {
   # at full speed". The latency badge is the diagnostic readout the user
   # is actively comparing across runs — drop both once the Go picker is
   # confirmed and this script is removed.
+  #
+  # The blank divider row must be explicitly cleared: when a previous
+  # frame had a smaller item count its footer landed where this frame's
+  # divider lives, and the trailing `\033[J` only wipes lines BELOW the
+  # new footer. Without this `\033[K` the old footer ghosts through.
+  frame+=$'\033['"${row};1H${clear_eol}"
   row=$((row + 1))
   frame+=$'\033['"${row};1H"$'\033[2m'"Enter jump | Up/Down move | type filter | Tab status | Esc clear/close  ·  powered by "$'\033[22;1;38;5;208m'"bash"$reset
   if [[ "$elapsed_ms" =~ ^[0-9]+$ ]] && (( elapsed_ms > 0 )); then

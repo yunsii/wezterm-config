@@ -326,6 +326,12 @@ func renderAttentionFrame(rows []attentionRow, selected int, ts perfTimings, fil
 	// signals "fast path active". The latency badge is the diagnostic
 	// readout the user is actively comparing across runs — drop both
 	// once the bash picker is removed.
+	//
+	// The blank divider row must be explicitly cleared: when a previous
+	// frame had a smaller item count its footer landed where this frame's
+	// divider lives, and the trailing `\x1b[J` only wipes lines BELOW the
+	// new footer. Without this `\x1b[K` the old footer ghosts through.
+	fmt.Fprintf(&b, "\x1b[%d;1H%s", row, clearEOL)
 	row++
 	fmt.Fprintf(&b, "\x1b[%d;1H", row)
 	b.WriteString("\x1b[2mEnter jump | Up/Down move | type filter | Tab status | Esc clear/close  ·  powered by ")
