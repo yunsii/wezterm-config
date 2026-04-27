@@ -15,10 +15,11 @@ import (
 )
 
 type attentionRow struct {
-	status string // "running" | "waiting" | "done" | "__sentinel__"
-	body   string
-	age    string
-	id     string
+	status     string // "running" | "waiting" | "done" | "recent" | "__sentinel__"
+	body       string
+	age        string
+	id         string
+	lastStatus string // for "recent" rows: "running" | "waiting" | "done"; empty otherwise
 }
 
 type attentionPicker struct{}
@@ -201,16 +202,20 @@ func loadAttentionRows(path string) ([]attentionRow, error) {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 4)
+		parts := strings.SplitN(line, "\t", 5)
 		if len(parts) < 4 {
 			continue
 		}
-		rows = append(rows, attentionRow{
+		row := attentionRow{
 			status: parts[0],
 			body:   parts[1],
 			age:    parts[2],
 			id:     parts[3],
-		})
+		}
+		if len(parts) >= 5 {
+			row.lastStatus = parts[4]
+		}
+		rows = append(rows, row)
 	}
 	return rows, nil
 }
@@ -314,6 +319,12 @@ func renderAttentionFrame(rows []attentionRow, selected int, ts perfTimings, fil
 			b.WriteString(")")
 			b.WriteString(reset)
 		}
+		// Recent rows carry the prior live status as a dim suffix so the
+		// user can tell at a glance what the entry was doing when it was
+		// archived (e.g. an unfinished waiting prompt vs a clean done).
+		if r.status == "recent" && r.lastStatus != "" {
+			fmt.Fprintf(&b, "  \x1b[2m(%s, archived)%s", r.lastStatus, reset)
+		}
 		b.WriteString(clearEOL)
 		row++
 	}
@@ -355,6 +366,8 @@ func coloredBadge(status string) string {
 		return "\x1b[1;38;5;208m⚠ WAIT\x1b[0m"
 	case "done":
 		return "\x1b[38;5;108m✓ DONE\x1b[0m"
+	case "recent":
+		return "\x1b[2;38;5;245m💬 RCNT\x1b[0m"
 	case "__sentinel__":
 		return "\x1b[1;38;5;160m✗ CLR \x1b[0m"
 	}
@@ -368,9 +381,24 @@ func dispatchAttention(r attentionRow, jumpScript string) {
 	_, _ = os.Stdout.WriteString("\x1b[0m\x1b[?25h")
 
 	var cmd string
-	if r.id == "__clear_all__" {
+	switch {
+	case r.id == "__clear_all__":
 		cmd = fmt.Sprintf("bash %s --clear-all", shellEscape(jumpScript))
-	} else {
+	case strings.HasPrefix(r.id, "recent::"):
+		// Encoded by tmux-attention-menu.sh as "recent::<sid>::<archived_ts>".
+		// Split into the two pieces so the jump script can disambiguate
+		// multiple recent rows that share a session_id (same agent
+		// archived from different panes).
+		rest := strings.TrimPrefix(r.id, "recent::")
+		sid, archived, _ := strings.Cut(rest, "::")
+		if archived == "" {
+			cmd = fmt.Sprintf("bash %s --recent --session %s",
+				shellEscape(jumpScript), shellEscape(sid))
+		} else {
+			cmd = fmt.Sprintf("bash %s --recent --session %s --archived-ts %s",
+				shellEscape(jumpScript), shellEscape(sid), shellEscape(archived))
+		}
+	default:
 		cmd = fmt.Sprintf("bash %s --session %s", shellEscape(jumpScript), shellEscape(r.id))
 	}
 	// `tmux run-shell -b` returns immediately; the popup tears down

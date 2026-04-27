@@ -80,12 +80,14 @@ all_status=()
 all_body=()
 all_age=()
 all_ids=()
-while IFS=$'\t' read -r s b a id; do
+all_last_status=()
+while IFS=$'\t' read -r s b a id ls; do
   [[ -n "$s" ]] || continue
   all_status+=("$s")
   all_body+=("$b")
   all_age+=("$a")
   all_ids+=("$id")
+  all_last_status+=("${ls:-}")
 done < "$prefetch_file"
 
 backing_total="${#all_ids[@]}"
@@ -106,6 +108,7 @@ row_status=()
 row_body=()
 row_age=()
 row_ids=()
+row_last_status=()
 selected_index=0
 
 apply_filter() {
@@ -113,6 +116,7 @@ apply_filter() {
   row_body=()
   row_age=()
   row_ids=()
+  row_last_status=()
   local i s b lower_b lower_f
   local filter_active=0
   [[ -n "$filter_text" || "$status_filter" != "all" ]] && filter_active=1
@@ -131,6 +135,7 @@ apply_filter() {
       row_body+=("$b")
       row_age+=("${all_age[$i]}")
       row_ids+=("${all_ids[$i]}")
+      row_last_status+=("${all_last_status[$i]}")
       continue
     fi
     if [[ "$status_filter" != "all" && "$status_filter" != "$s" ]]; then
@@ -144,6 +149,7 @@ apply_filter() {
     row_body+=("$b")
     row_age+=("${all_age[$i]}")
     row_ids+=("${all_ids[$i]}")
+    row_last_status+=("${all_last_status[$i]}")
   done
   # Clamp selection inside the filtered range.
   local visible="${#row_ids[@]}"
@@ -282,6 +288,21 @@ dispatch_selection() {
   if [[ "$id" == "__clear_all__" ]]; then
     runtime_log_info attention "alt-slash clear-all" "trace=$trace_id"
     cmd="WEZTERM_RUNTIME_TRACE_ID=$(printf %q "$trace_id") bash $(printf %q "$script_dir/attention-jump.sh") --clear-all"
+  elif [[ "$id" == recent::* ]]; then
+    # Encoded by tmux-attention-menu.sh as "recent::<sid>::<archived_ts>".
+    # Split into the two pieces so the jump script can disambiguate
+    # multiple recent rows that share a session_id.
+    local rest sid archived
+    rest="${id#recent::}"
+    sid="${rest%%::*}"
+    archived="${rest#*::}"
+    [[ "$archived" == "$rest" ]] && archived=""
+    runtime_log_info attention "alt-slash recent jump" "trace=$trace_id" "session_id=$sid" "archived_ts=$archived"
+    if [[ -n "$archived" ]]; then
+      cmd="WEZTERM_RUNTIME_TRACE_ID=$(printf %q "$trace_id") bash $(printf %q "$script_dir/attention-jump.sh") --recent --session $(printf %q "$sid") --archived-ts $(printf %q "$archived")"
+    else
+      cmd="WEZTERM_RUNTIME_TRACE_ID=$(printf %q "$trace_id") bash $(printf %q "$script_dir/attention-jump.sh") --recent --session $(printf %q "$sid")"
+    fi
   else
     runtime_log_info attention "alt-slash jump" "trace=$trace_id" "session_id=$id"
     cmd="WEZTERM_RUNTIME_TRACE_ID=$(printf %q "$trace_id") bash $(printf %q "$script_dir/attention-jump.sh") --session $(printf %q "$id")"

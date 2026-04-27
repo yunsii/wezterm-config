@@ -9,8 +9,10 @@
 #
 # Caller contract: populate these arrays in the calling shell scope BEFORE
 # invoking `attention_picker_emit_frame`:
-#   row_status row_body row_age
-# All three arrays must have the same length (sentinel goes last).
+#   row_status row_body row_age row_last_status
+# All four arrays must have the same length (sentinel goes last).
+# row_last_status is only populated for status="recent" rows (the last
+# live status the entry held before being archived); empty otherwise.
 #
 # Performance notes:
 # - Frame is built as one bash string; the caller flushes it via a single
@@ -106,6 +108,7 @@ attention_picker_emit_frame() {
     status="${row_status[$top_index]}"
     body="${row_body[$top_index]}"
     age="${row_age[$top_index]}"
+    last_status="${row_last_status[$top_index]:-}"
 
     frame+=$'\033['"${row};1H"
 
@@ -122,11 +125,17 @@ attention_picker_emit_frame() {
       running)      frame+=$'\033[1;38;5;39m⟳ RUN \033[0m' ;;
       waiting)      frame+=$'\033[1;38;5;208m⚠ WAIT\033[0m' ;;
       done)         frame+=$'\033[38;5;108m✓ DONE\033[0m' ;;
+      recent)       frame+=$'\033[2;38;5;245m💬 RCNT\033[0m' ;;
       __sentinel__) frame+=$'\033[1;38;5;160m✗ CLR \033[0m' ;;
       *)            frame+='· ----' ;;
     esac
     frame+="  $body"
     [[ -n "$age" ]] && frame+="  "$'\033[2m'"($age)"$reset
+    # Recent rows carry the prior live status as a dim suffix so the user
+    # can tell at a glance what the entry was doing when archived.
+    if [[ "$status" == "recent" && -n "$last_status" ]]; then
+      frame+="  "$'\033[2m'"(${last_status}, archived)"$reset
+    fi
     frame+="$clear_eol"
 
     row=$((row + 1))

@@ -24,6 +24,11 @@
 # to clean up entries that have aged past the TTL when no hook has fired:
 #   bash .../attention-jump.sh --prune [--ttl <ms>]
 #
+# Invoked by the Alt+/ picker when the user selects a recent (archived)
+# entry. Probes pane existence first; if alive, jumps as usual; if the
+# tmux pane is gone, removes the row from .recent[] and toasts:
+#   bash .../attention-jump.sh --recent --session <id> --archived-ts <ms>
+#
 # Resolution (slow path):
 #   1. Prune stale entries (30 min TTL).
 #   2. Pick target — by explicit session id, or the next entry matching
@@ -83,6 +88,8 @@ forget_delay=0
 forget_if_ts=''
 prune_only=0
 prune_ttl=1800000
+recent_jump=0
+recent_archived_ts=''
 
 case "${1:-next-waiting}" in
   next-waiting) want_status='waiting' ;;
@@ -121,12 +128,27 @@ case "${1:-next-waiting}" in
       esac
     done
     ;;
+  --recent)
+    recent_jump=1
+    shift
+    while (( $# )); do
+      case "$1" in
+        --session)      explicit_session="${2:-}";   shift 2 ;;
+        --archived-ts)  recent_archived_ts="${2:-}"; shift 2 ;;
+        *) printf 'unknown --recent arg: %s\n' "$1" >&2; exit 1 ;;
+      esac
+    done
+    if [[ -z "$explicit_session" ]]; then
+      printf 'usage: %s --recent --session <id> [--archived-ts <ms>]\n' "$0" >&2
+      exit 1
+    fi
+    ;;
   -h|--help)
-    sed -n '3,38p' "$0"
+    sed -n '3,42p' "$0"
     exit 0
     ;;
   *)
-    printf 'usage: %s next-waiting|next-done|--session <id>|--forget <id> [--delay N] [--only-if-ts TS]|--prune [--ttl MS]|--clear-all|--direct ...\n' "$0" >&2
+    printf 'usage: %s next-waiting|next-done|--session <id>|--forget <id> [--delay N] [--only-if-ts TS]|--prune [--ttl MS]|--clear-all|--recent --session <id> [--archived-ts MS]|--direct ...\n' "$0" >&2
     exit 1
     ;;
 esac
@@ -177,6 +199,62 @@ if (( forget )); then
     fi
   fi
   attention_state_remove "$explicit_session" 2>/dev/null || true
+  exit 0
+fi
+
+if (( recent_jump )); then
+  state_json="$(attention_state_read)"
+  # Pick the matching recent entry. When --archived-ts is supplied the
+  # picker has disambiguated multiple recent rows for the same session
+  # (same agent on different panes); without it, fall back to the most-
+  # recently archived row for the session.
+  if [[ -n "$recent_archived_ts" ]]; then
+    target_json="$(jq -c --arg sid "$explicit_session" --argjson ats "$recent_archived_ts" \
+      '(.recent // []) | map(select(.session_id == $sid and (.archived_ts // 0) == $ats)) | .[0] // empty' \
+      <<<"$state_json" 2>/dev/null || true)"
+  else
+    target_json="$(jq -c --arg sid "$explicit_session" \
+      '(.recent // []) | map(select(.session_id == $sid)) | sort_by(-(.archived_ts // 0)) | .[0] // empty' \
+      <<<"$state_json" 2>/dev/null || true)"
+  fi
+  if [[ -z "$target_json" || "$target_json" == "null" ]]; then
+    notify_tmux "agent-attention: recent entry $explicit_session not found" '' ''
+    exit 0
+  fi
+  read_field() { printf '%s' "$target_json" | jq -r --arg k "$1" '.[$k] // empty'; }
+  target_wezterm_pane="$(read_field wezterm_pane_id)"
+  target_tmux_socket="$(read_field tmux_socket)"
+  target_tmux_session="$(read_field tmux_session)"
+  target_tmux_window="$(read_field tmux_window)"
+  target_tmux_pane="$(read_field tmux_pane)"
+  target_archived_ts="$(read_field archived_ts)"
+
+  # Pane-existence probe. Both checks are scoped to the recorded socket
+  # so we never accidentally jump to a different agent pane that reused
+  # the same `%N` id under a different tmux server.
+  pane_alive=0
+  if [[ -n "$target_tmux_socket" && -n "$target_tmux_session" && -n "$target_tmux_pane" ]]; then
+    if tmux -S "$target_tmux_socket" has-session -t "$target_tmux_session" 2>/dev/null; then
+      if tmux -S "$target_tmux_socket" list-panes -s -t "$target_tmux_session" -F '#{pane_id}' 2>/dev/null \
+           | grep -Fxq "$target_tmux_pane"; then
+        pane_alive=1
+      fi
+    fi
+  fi
+
+  if (( ! pane_alive )); then
+    attention_state_recent_remove "$explicit_session" "${target_archived_ts:-0}" 2>/dev/null || true
+    notify_tmux 'agent-attention: pane no longer exists, removed from recent' '' ''
+    exit 0
+  fi
+
+  if [[ -n "$target_tmux_window" ]]; then
+    tmux -S "$target_tmux_socket" select-window -t "$target_tmux_window" 2>/dev/null || true
+    tmux -S "$target_tmux_socket" select-pane -t "$target_tmux_pane" 2>/dev/null || true
+  fi
+  if [[ -n "$target_wezterm_pane" ]] && command -v wezterm.exe >/dev/null 2>&1; then
+    wezterm.exe cli activate-pane --pane-id "$target_wezterm_pane" >/dev/null 2>&1 || true
+  fi
   exit 0
 fi
 

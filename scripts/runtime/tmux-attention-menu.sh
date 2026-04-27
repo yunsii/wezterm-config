@@ -69,6 +69,28 @@ trace_id="attention-$EPOCHSECONDS-$$-$RANDOM"
 state_json="$(attention_state_read)"
 bench_mark state_read
 
+# Live-pane set per tmux socket, built only when .recent[] is non-empty
+# so the typical "no recent yet" hot path pays nothing extra. Recent
+# rows whose recorded (socket, pane) is no longer alive get filtered out
+# of display below — jump-time has its own redundant probe to catch the
+# race where the pane dies between menu render and Enter, but doing it
+# here too keeps the picker from showing rows that can't be jumped.
+alive_panes_json='{}'
+recent_sockets="$(jq -r '[(.recent // [])[] | (.tmux_socket // "") | select(length > 0)] | unique | .[]' <<<"$state_json" 2>/dev/null || printf '')"
+if [[ -n "$recent_sockets" ]]; then
+  alive_pieces=()
+  while IFS= read -r sock; do
+    [[ -z "$sock" ]] && continue
+    panes_raw="$(tmux -S "$sock" list-panes -a -F '#{pane_id}' 2>/dev/null || printf '')"
+    alive_pieces+=("$(jq -n --arg s "$sock" --arg p "$panes_raw" \
+      '{($s): ($p | split("\n") | map(select(length > 0)))}')")
+  done <<<"$recent_sockets"
+  if (( ${#alive_pieces[@]} > 0 )); then
+    alive_panes_json="$(printf '%s\n' "${alive_pieces[@]}" | jq -s 'add')"
+  fi
+fi
+bench_mark alive_panes
+
 # `now_ms` and the cheap-empty-state shortcut both use bash builtins —
 # zero forks. The previous explicit `jq -r '.entries | length'` count
 # check (~5ms cold jq spawn per call) is redundant: an empty .entries
@@ -113,13 +135,22 @@ fi
 bench_mark live_map
 
 # Build the per-row tuples once. Sort order matches the right-status
-# counter in attention.lua (running → waiting → done) so the popup mirrors
-# the badge order on the status bar at a glance.
+# counter (waiting → done → running), with archived "recent" rows appended
+# last so the popup mirrors the badge order on the status bar at a glance
+# while still surfacing previously-active sessions for jump-back.
 #
 # Row body and reason are sanitized so embedded \t / \n / \r cannot break
 # the TSV split below (reason is user-facing string from the agent).
+#
+# TSV layout per row: status \t body \t age \t id \t last_status
+#   - status:       "running" | "waiting" | "done" | "recent" | "__sentinel__"
+#   - id:           session_id for active; "recent::<sid>::<archived_ts>"
+#                   for recent; "__clear_all__" for the sentinel
+#   - last_status:  populated only for "recent" rows (the status the
+#                   entry held when it was archived); empty otherwise
 rows_tsv="$(jq -r \
   --argjson live "$live_map" \
+  --argjson alive "$alive_panes_json" \
   --argjson now "$now_ms" '
   def fmt_age($ms):
     (($ms / 1000) | floor) as $s
@@ -128,44 +159,67 @@ rows_tsv="$(jq -r \
       else "\((($s / 3600) | floor))h"
       end;
   def status_rank($s):
-    if $s == "running" then 0
-    elif $s == "waiting" then 1
-    else 2 end;
+    if $s == "waiting" then 0
+    elif $s == "done" then 1
+    elif $s == "running" then 2
+    else 3 end;
   def strip_tmux_prefix($v):
     ($v // "") | tostring | sub("^[@%]"; "");
   def nonempty($v):
     ($v // "") | tostring | length > 0;
   def sanitize($s):
     ($s // "") | tostring | gsub("[\t\n\r]"; " ");
+  def label_prefix($e; $L):
+    (if nonempty($L.workspace) then ($L.workspace | tostring) else "?" end) as $ws
+    | (if (($L.tab_index // null) != null) then
+         (if nonempty($L.tab_title)
+            then "\($L.tab_index)_\($L.tab_title)"
+            else "\($L.tab_index | tostring)" end)
+       else "?" end) as $tab
+    | (if nonempty($e.tmux_window) then
+         (if nonempty($e.tmux_pane)
+            then "\(strip_tmux_prefix($e.tmux_window))_\(strip_tmux_prefix($e.tmux_pane))"
+            else strip_tmux_prefix($e.tmux_window) end)
+       else "?" end) as $tmuxseg
+    | (if nonempty($e.git_branch) then ($e.git_branch | tostring) else "?" end) as $branch
+    | (if ($ws == "?" and $tab == "?" and $tmuxseg == "?" and $branch == "?")
+         then null
+         else "\($ws)/\($tab)/\($tmuxseg)/\($branch)" end);
 
-  .entries
-  | to_entries | map(.value)
-  | sort_by([status_rank(.status), (.ts // 0)])
-  | map(
-      . as $e
-      | ($live[($e.wezterm_pane_id // "" | tostring)] // {}) as $L
-      | (($now - (($e.ts // $now) | tonumber))) as $age_ms
-      | (fmt_age($age_ms)) as $age_text_base
-      | (if nonempty($e.wezterm_pane_id) then $age_text_base
-         else "\($age_text_base), no pane" end) as $age_text
-      | (if nonempty($L.workspace) then ($L.workspace | tostring) else "?" end) as $ws
-      | (if (($L.tab_index // null) != null) then
-           (if nonempty($L.tab_title)
-              then "\($L.tab_index)_\($L.tab_title)"
-              else "\($L.tab_index | tostring)" end)
-         else "?" end) as $tab
-      | (if nonempty($e.tmux_window) then
-           (if nonempty($e.tmux_pane)
-              then "\(strip_tmux_prefix($e.tmux_window))_\(strip_tmux_prefix($e.tmux_pane))"
-              else strip_tmux_prefix($e.tmux_window) end)
-         else "?" end) as $tmuxseg
-      | (if nonempty($e.git_branch) then ($e.git_branch | tostring) else "?" end) as $branch
-      | (if ($ws == "?" and $tab == "?" and $tmuxseg == "?" and $branch == "?")
-           then null
-           else "\($ws)/\($tab)/\($tmuxseg)/\($branch)" end) as $prefix
-      | (if nonempty($e.reason) then ($e.reason | tostring) else $e.status end) as $reason
-      | (if $prefix == null then $reason else "\($prefix)  \($reason)" end) as $body
-      | "\($e.status)\t\(sanitize($body))\t\($age_text)\t\($e.session_id)"
+  ((.entries // {}) | keys) as $active_sids
+  | (
+      ((.entries // {}) | to_entries | map(.value)
+       | sort_by([status_rank(.status), (.ts // 0)])
+       | map(
+           . as $e
+           | ($live[($e.wezterm_pane_id // "" | tostring)] // {}) as $L
+           | (($now - (($e.ts // $now) | tonumber))) as $age_ms
+           | (fmt_age($age_ms)) as $age_text_base
+           | (if nonempty($e.wezterm_pane_id) then $age_text_base
+              else "\($age_text_base), no pane" end) as $age_text
+           | (label_prefix($e; $L)) as $prefix
+           | (if nonempty($e.reason) then ($e.reason | tostring) else $e.status end) as $reason
+           | (if $prefix == null then $reason else "\($prefix)  \($reason)" end) as $body
+           | "\($e.status)\t\(sanitize($body))\t\($age_text)\t\($e.session_id)\t"
+         ))
+      +
+      ((.recent // [])
+       | map(select((.session_id // "") as $sid | ($active_sids | index($sid)) == null))
+       | map(select(
+           (.tmux_socket // "") as $s | (.tmux_pane // "") as $p
+           | ($s == "" or $p == "" or (($alive[$s] // []) | index($p)) != null)
+         ))
+       | sort_by(-(.archived_ts // 0))
+       | map(
+           . as $r
+           | ($live[($r.wezterm_pane_id // "" | tostring)] // {}) as $L
+           | (($now - (($r.archived_ts // $now) | tonumber))) as $age_ms
+           | (fmt_age($age_ms)) as $age_text
+           | (label_prefix($r; $L)) as $prefix
+           | (if nonempty($r.last_reason) then ($r.last_reason | tostring) else ($r.last_status // "recent") end) as $reason
+           | (if $prefix == null then $reason else "\($prefix)  \($reason)" end) as $body
+           | "recent\t\(sanitize($body))\t\($age_text)\trecent::\($r.session_id)::\($r.archived_ts // 0)\t\($r.last_status // "")"
+         ))
     )
   | .[]
 ' <<<"$state_json" 2>/dev/null || printf '')"
@@ -185,12 +239,14 @@ prefetch_file="$(mktemp -t wezterm-attention-picker.XXXXXX)"
 row_status=()
 row_body=()
 row_age=()
-while IFS=$'\t' read -r s b a id; do
+row_last_status=()
+while IFS=$'\t' read -r s b a id ls; do
   [[ -n "$s" ]] || continue
   row_status+=("$s")
   row_body+=("$b")
   row_age+=("$a")
-  printf '%s\t%s\t%s\t%s\n' "$s" "$b" "$a" "$id" >> "$prefetch_file"
+  row_last_status+=("$ls")
+  printf '%s\t%s\t%s\t%s\t%s\n' "$s" "$b" "$a" "$id" "$ls" >> "$prefetch_file"
 done <<<"$rows_tsv"
 
 item_count="${#row_status[@]}"
@@ -206,7 +262,8 @@ fi
 row_status+=("__sentinel__")
 row_body+=("clear all · ${item_count} entries")
 row_age+=("")
-printf '%s\t%s\t%s\t%s\n' '__sentinel__' "clear all · ${item_count} entries" '' '__clear_all__' >> "$prefetch_file"
+row_last_status+=("")
+printf '%s\t%s\t%s\t%s\t%s\n' '__sentinel__' "clear all · ${item_count} entries" '' '__clear_all__' '' >> "$prefetch_file"
 total_rows=$((item_count + 1))
 bench_mark tsv_write
 
