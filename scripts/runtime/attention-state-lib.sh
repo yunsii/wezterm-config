@@ -126,7 +126,7 @@ def archive_into_recent($to_archive; $now; $cap; $ttl):
      })) as $new_recents
   | .recent = (
       ($new_recents + (.recent // []))
-      | group_by([.session_id, .tmux_socket, .tmux_session, .tmux_pane])
+      | group_by([.tmux_socket, .tmux_session, .tmux_pane])
       | map(max_by(.archived_ts))
       | sort_by(-.archived_ts)
       | map(select(.archived_ts >= ($now - $ttl)))
