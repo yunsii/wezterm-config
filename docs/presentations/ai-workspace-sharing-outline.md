@@ -45,8 +45,8 @@ WezDeck 的存在不是把这些做成"几个快捷键 + 几个脚本"，而是*
 
 每个 agent CLI（通过 6 个 Claude Code hook）把自己的 turn 状态实时写到一个共享 JSON 文件，WezTerm 的 Lua tick 读它、渲染：
 
-- **Tab 标签**带 ●/◐/○ 三色徽章（waiting / running / done）
-- **右栏永久占位的三段计数**：`⟳ N running   ⚠ N waiting   ✓ N done`
+- **Tab 标签**带 🚨/🔄/✅ 三色徽章（waiting / running / done）
+- **右栏永久占位的三段计数**：`🚨 N waiting   ✅ N done   🔄 N running`
 - **`Alt+,` / `Alt+.` / `Alt+/`** 三个键分别跳到下一个 waiting / done / 用 popup 看全部
 
 整条链路：

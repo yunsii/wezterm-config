@@ -142,12 +142,25 @@ bench_mark live_map
 # Row body and reason are sanitized so embedded \t / \n / \r cannot break
 # the TSV split below (reason is user-facing string from the agent).
 #
-# TSV layout per row: status \t body \t age \t id \t last_status
+# TSV layout per row:
+#   status \t body \t age \t id \t
+#   wezterm_pane_id \t tmux_socket \t tmux_window \t tmux_pane \t last_status
+#
 #   - status:       "running" | "waiting" | "done" | "recent" | "__sentinel__"
 #   - id:           session_id for active; "recent::<sid>::<archived_ts>"
 #                   for recent; "__clear_all__" for the sentinel
+#   - wezterm_pane_id, tmux_socket, tmux_window, tmux_pane: coordinates
+#     the picker uses to build the OSC attention_jump payload on Enter,
+#     so the popup never has to re-read state.json. Empty for the
+#     __sentinel__ row.
 #   - last_status:  populated only for "recent" rows (the status the
-#                   entry held when it was archived); empty otherwise
+#                   entry held when it was archived); empty otherwise.
+#                   Lives at the END of the row so that for active rows
+#                   it is a trailing empty field — bash `read` with
+#                   `IFS=$'\t'` treats consecutive tabs as one separator
+#                   (tab is whitespace IFS), so an empty MIDDLE field
+#                   silently shifts every following field left by one.
+#                   A trailing empty is preserved correctly.
 rows_tsv="$(jq -r \
   --argjson live "$live_map" \
   --argjson alive "$alive_panes_json" \
@@ -200,7 +213,7 @@ rows_tsv="$(jq -r \
            | (label_prefix($e; $L)) as $prefix
            | (if nonempty($e.reason) then ($e.reason | tostring) else $e.status end) as $reason
            | (if $prefix == null then $reason else "\($prefix)  \($reason)" end) as $body
-           | "\($e.status)\t\(sanitize($body))\t\($age_text)\t\($e.session_id)\t"
+           | "\($e.status)\t\(sanitize($body))\t\($age_text)\t\($e.session_id)\t\($e.wezterm_pane_id // "")\t\($e.tmux_socket // "")\t\($e.tmux_window // "")\t\($e.tmux_pane // "")\t"
          ))
       +
       ((.recent // [])
@@ -218,7 +231,7 @@ rows_tsv="$(jq -r \
            | (label_prefix($r; $L)) as $prefix
            | (if nonempty($r.last_reason) then ($r.last_reason | tostring) else ($r.last_status // "recent") end) as $reason
            | (if $prefix == null then $reason else "\($prefix)  \($reason)" end) as $body
-           | "recent\t\(sanitize($body))\t\($age_text)\trecent::\($r.session_id)::\($r.archived_ts // 0)\t\($r.last_status // "")"
+           | "recent\t\(sanitize($body))\t\($age_text)\trecent::\($r.session_id)::\($r.archived_ts // 0)\t\($r.wezterm_pane_id // "")\t\($r.tmux_socket // "")\t\($r.tmux_window // "")\t\($r.tmux_pane // "")\t\($r.last_status // "")"
          ))
     )
   | .[]
@@ -240,13 +253,14 @@ row_status=()
 row_body=()
 row_age=()
 row_last_status=()
-while IFS=$'\t' read -r s b a id ls; do
+while IFS=$'\t' read -r s b a id wp sock win pane ls; do
   [[ -n "$s" ]] || continue
   row_status+=("$s")
   row_body+=("$b")
   row_age+=("$a")
   row_last_status+=("$ls")
-  printf '%s\t%s\t%s\t%s\t%s\n' "$s" "$b" "$a" "$id" "$ls" >> "$prefetch_file"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$s" "$b" "$a" "$id" "$wp" "$sock" "$win" "$pane" "$ls" >> "$prefetch_file"
 done <<<"$rows_tsv"
 
 item_count="${#row_status[@]}"
@@ -263,7 +277,7 @@ row_status+=("__sentinel__")
 row_body+=("clear all · ${item_count} entries")
 row_age+=("")
 row_last_status+=("")
-printf '%s\t%s\t%s\t%s\t%s\n' '__sentinel__' "clear all · ${item_count} entries" '' '__clear_all__' '' >> "$prefetch_file"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' '__sentinel__' "clear all · ${item_count} entries" '' '__clear_all__' '' '' '' '' '' >> "$prefetch_file"
 total_rows=$((item_count + 1))
 bench_mark tsv_write
 

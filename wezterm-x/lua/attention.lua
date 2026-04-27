@@ -253,25 +253,47 @@ function M.render_status_segment(palette, opts)
   return wezterm.format(parts)
 end
 
-function M.tab_badge(tab_info)
+function M.tab_badge(tab_info, panes)
   local active = tab_info and tab_info.active_pane
   if not active or active.pane_id == nil then
     return nil
   end
-  local pane_id_str = tostring(active.pane_id)
+  local active_pane_id_str = tostring(active.pane_id)
+  -- Build the set of WezTerm pane ids that belong to this tab. A tab can
+  -- hold multiple WezTerm panes (e.g. editor + agent split), and an
+  -- agent running on a non-active pane should still surface on the tab
+  -- badge — otherwise focusing the editor pane silently hides the
+  -- agent's waiting/done status from the tab strip. Falling back to the
+  -- active pane alone preserves behavior when the caller can't supply
+  -- the pane list.
+  local pane_ids = {}
+  if type(panes) == 'table' and #panes > 0 then
+    for _, p in ipairs(panes) do
+      if p and p.pane_id ~= nil then
+        pane_ids[tostring(p.pane_id)] = true
+      end
+    end
+  else
+    pane_ids[active_pane_id_str] = true
+  end
   local has_waiting, has_running, has_done = false, false, false
   local now = now_ms()
-  -- When the tab is the active one in its window and the tmux-pane
-  -- focus matches the entry, suppress only the `done` badge — the user
-  -- is looking at that exact pane, so the green "result waiting" mark
-  -- would be noise. `waiting` stays visible even under focus because it
-  -- is an action item (glancing at the prompt is not the same as
-  -- answering it) and `running` stays visible so the parallel-task view
-  -- across tabs is truthful.
+  -- Focus-based suppression only applies to the active pane: when the
+  -- tab is active *and* the entry sits on the active pane *and* tmux
+  -- focus matches, drop only the `done` badge — the user is looking at
+  -- that exact pane, so the green "result waiting" mark would be noise.
+  -- Entries on inactive panes within the same tab are never suppressed,
+  -- because the user is by definition not looking at them. `waiting`
+  -- and `running` are never suppressed: `waiting` is an action item
+  -- (glancing at the prompt is not the same as answering it), and
+  -- `running` keeps the parallel-task view across tabs truthful.
   local tab_is_active = tab_info.is_active == true
   for _, entry in pairs(state_cache.entries or {}) do
-    if entry_is_live(entry, now) and tostring(entry.wezterm_pane_id or '') == pane_id_str then
-      local suppress_for_focus = tab_is_active and M.is_entry_focused(entry, pane_id_str)
+    local entry_pane = tostring(entry.wezterm_pane_id or '')
+    if entry_is_live(entry, now) and pane_ids[entry_pane] then
+      local on_active_pane = entry_pane == active_pane_id_str
+      local suppress_for_focus = tab_is_active and on_active_pane
+        and M.is_entry_focused(entry, active_pane_id_str)
       if entry.status == M.STATUS_WAITING then
         has_waiting = true
       elseif entry.status == M.STATUS_RUNNING then
@@ -282,14 +304,16 @@ function M.tab_badge(tab_info)
     end
   end
   -- Priority: waiting (needs action) > running (live) > done (informational).
-  -- Shapes progress from filled to hollow so the badge remains scannable
-  -- without leaning only on color: ● waiting, ◐ running, ○ done.
+  -- Markers mirror the right-status counter and the picker chips so the
+  -- whole attention surface speaks one vocabulary: 🚨 waiting / 🔄 running
+  -- / ✅ done. Emoji-presentation code points avoid the VS16 width drift
+  -- that bit the earlier ⚠/✓/⟳ pass.
   if has_waiting then
-    return { status = M.STATUS_WAITING, marker = '●' }
+    return { status = M.STATUS_WAITING, marker = '🚨' }
   elseif has_running then
-    return { status = M.STATUS_RUNNING, marker = '◐' }
+    return { status = M.STATUS_RUNNING, marker = '🔄' }
   elseif has_done then
-    return { status = M.STATUS_DONE, marker = '○' }
+    return { status = M.STATUS_DONE, marker = '✅' }
   end
   return nil
 end
@@ -536,6 +560,48 @@ function M.activate_in_gui(pane_id_value, window, source_pane)
   return false
 end
 
+-- Parse the picker's jump-trigger payload (the value field of
+-- jump-trigger.json). Payload schema is pipe-delimited so tmux socket
+-- paths and `=` characters survive intact:
+--   v1|jump|<sid>|<wp>|<sock>|<win>|<pane>
+--   v1|recent|<sid>|<archived_ts>|<wp>|<sock>|<win>|<pane>
+-- Returns a table { kind = "jump"|"recent", session_id, wezterm_pane,
+-- tmux_socket, tmux_window, tmux_pane, archived_ts? } or nil on bad input.
+function M.parse_jump_payload(value)
+  if type(value) ~= 'string' or value == '' then
+    return nil
+  end
+  local parts = {}
+  for piece in (value .. '|'):gmatch('([^|]*)|') do
+    table.insert(parts, piece)
+  end
+  if #parts == 0 or parts[1] ~= 'v1' then
+    return nil
+  end
+  local kind = parts[2]
+  if kind == 'jump' and #parts >= 7 then
+    return {
+      kind = 'jump',
+      session_id   = parts[3],
+      wezterm_pane = parts[4],
+      tmux_socket  = parts[5],
+      tmux_window  = parts[6],
+      tmux_pane    = parts[7],
+    }
+  elseif kind == 'recent' and #parts >= 8 then
+    return {
+      kind = 'recent',
+      session_id   = parts[3],
+      archived_ts  = parts[4],
+      wezterm_pane = parts[5],
+      tmux_socket  = parts[6],
+      tmux_window  = parts[7],
+      tmux_pane    = parts[8],
+    }
+  end
+  return nil
+end
+
 -- Pick next entry matching `kind` ('waiting' or 'done'). Prefers entries
 -- whose wezterm_pane_id differs from `current_pane_id` so repeated presses
 -- cycle. Returns the entry or nil.
@@ -555,6 +621,50 @@ function M.pick_next(kind, current_pane_id)
     end
   end
   return pool[1]
+end
+
+-- Consume the jump-trigger file the picker drops on Enter. Returns a
+-- parsed coords table (same shape as parse_jump_payload's output) when
+-- a fresh trigger is available, or nil if absent. Always deletes the
+-- trigger file on a successful read so the dispatch fires once per
+-- press regardless of how many update-status ticks see the file.
+--
+-- File-based trigger picked over OSC SetUserVar because the picker runs
+-- inside `tmux display-popup -E`, whose sub-pty does NOT forward DCS
+-- pass-through (`\x1bPtmux;...\x1b\\`) up to the parent wezterm pane.
+-- The OSC route the attention_tick hook uses works because the hook
+-- writes to its own pane's `/dev/tty`, not a popup pty. From a popup
+-- there is no reachable wezterm-side fd; the file + 250ms tick poll
+-- bypasses the IPC entirely.
+function M.consume_jump_trigger()
+  if not state_path then
+    return nil
+  end
+  local base_dir = state_path:match('^(.*)[/\\][^/\\]+$')
+  if not base_dir then
+    return nil
+  end
+  local trigger_path = base_dir .. '/jump-trigger.json'
+  local f = io.open(trigger_path, 'r')
+  if not f then
+    return nil
+  end
+  local content = f:read('*a')
+  f:close()
+  os.remove(trigger_path)
+  if not content or content == '' then
+    return nil
+  end
+  -- Cheap parse: the payload field carries the v1|... string already
+  -- understood by parse_jump_payload; pluck it out without pulling in a
+  -- JSON parser. Picker writes the file with a fixed shape.
+  local payload = content:match('"payload"%s*:%s*"([^"]*)"')
+  if not payload or payload == '' then
+    return nil
+  end
+  -- Unescape the few JSON escapes our writer can produce.
+  payload = payload:gsub('\\"', '"'):gsub('\\\\', '\\')
+  return M.parse_jump_payload(payload)
 end
 
 -- Periodic shell-side prune. Called from titles.lua's update-status tick

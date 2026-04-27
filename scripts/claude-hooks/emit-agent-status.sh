@@ -7,9 +7,17 @@
 #   emit-agent-status.sh running     # UserPromptSubmit hook (agent turn begins)
 #   emit-agent-status.sh waiting     # Notification hook
 #   emit-agent-status.sh done        # Stop hook
-#   emit-agent-status.sh resolved    # PreToolUse + PostToolUse hooks
-#                                    # (waiting → running on permission approve;
-#                                    #  done → running on Monitor wake-up; else no-op)
+#   emit-agent-status.sh resolved    # PreToolUse + PostToolUse hooks.
+#                                    # PostToolUse: waiting → running when an
+#                                    #   approved tool completes (the only
+#                                    #   signal we get; Claude Code fires no
+#                                    #   hook on the approval keystroke).
+#                                    # PreToolUse: done → running on Monitor
+#                                    #   wake-up only (fires once before the
+#                                    #   permission prompt — see
+#                                    #   docs/agent-attention.md "Limitation:
+#                                    #   no signal for permission approval").
+#                                    # Both: running is a no-op.
 #   emit-agent-status.sh cleared     # explicit remove (drops the entry)
 #   emit-agent-status.sh pane-evict  # SessionStart source=clear hook — drop every
 #                                    # entry on the current (tmux_socket, tmux_pane)
@@ -157,15 +165,35 @@ elif [[ "$status" == "pane-evict" ]]; then
   attention_state_evict_pane "$tmux_socket" "$tmux_pane" "$session_id" \
     2>/dev/null || true
 elif [[ "$status" == "resolved" ]]; then
-  # PostToolUse. A completed tool is evidence the user resolved a prior
-  # permission prompt — flip `waiting` → `running`, and when the entry
-  # is missing (focus-ack forgot the waiting row before this hook fired)
-  # upsert a fresh `running` so the counter still reflects that Claude
-  # is mid-turn. `running` / `done` are no-ops so we do not nudge wezterm
-  # or log on every auto-allowed tool call. We do log a single
-  # `resolved no-op` line so the diagnostics trail still shows the hook
-  # was invoked (separate message text keeps it greppable from the
-  # state-changing emit line below).
+  # Wired to BOTH PreToolUse and PostToolUse. The two hooks fire at
+  # different lifecycle points and cover different transitions; they
+  # share this branch only because the helper handles every case.
+  #
+  #   PreToolUse  fires once when the agent decides to call a tool —
+  #     BEFORE any permission_prompt and BEFORE the tool starts. Claude
+  #     Code does not fire it again when the user approves the prompt.
+  #     Useful transition here is `done → running` for the Monitor
+  #     wake-up case (a streamed event resumed the agent after a prior
+  #     `Stop`). For the common path it lands on `running` and the
+  #     transition helper short-circuits via the fast path.
+  #
+  #   PostToolUse fires AFTER the tool completes. This is the only
+  #     signal we have that an approved permission prompt has actually
+  #     been answered (the tool would not have completed otherwise).
+  #     Useful transitions: `waiting → running` (the approve+execute
+  #     window has finished — entire window is invisible to us), and
+  #     `done → running` as belt-and-suspenders for the Monitor
+  #     wake-up case.
+  #
+  # Missing entry: upsert a fresh `running` (covers focus-ack having
+  # forgot the waiting row before the hook fired). `running` is a
+  # no-op so we do not nudge wezterm or log on every auto-allowed
+  # tool call. A single `resolved no-op` log line lets the diagnostics
+  # trail still show the hook was invoked.
+  #
+  # See docs/agent-attention.md "Limitation: no signal for permission
+  # approval" for why we cannot flip `waiting → running` at approval
+  # time and why this branch never tries to.
   if ! attention_state_transition_to_running \
       "$session_id" \
       "${WEZTERM_PANE:-}" \

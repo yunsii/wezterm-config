@@ -59,6 +59,7 @@ titles.register {
   chrome_debug_status = chrome_debug_status,
   host = host,
   logger = logger,
+  constants = constants,
 }
 
 ui.apply {

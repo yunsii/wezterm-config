@@ -25,6 +25,16 @@ function M.register(opts)
   local chrome_debug_status = opts.chrome_debug_status
   local host = opts.host
   local logger = opts.logger
+  local constants = opts.constants
+  local actions_mod = nil
+  if constants then
+    -- Lazy-load actions only when titles is wired with constants; the
+    -- jump-trigger consumer in update-status needs it to build the
+    -- wsl.exe-wrapped argv for `attention-jump.sh --direct` (the tmux
+    -- side of a picker-driven jump).
+    local ok, mod = pcall(load_module, 'ui/actions')
+    if ok then actions_mod = mod end
+  end
   local workspace_label_cache = {}
   local badge_last_status = {}
   local last_rendered_status = nil
@@ -153,7 +163,7 @@ function M.register(opts)
       fg = palette.tab_hover_fg
     end
 
-    local badge = attention and attention.tab_badge(tab) or nil
+    local badge = attention and attention.tab_badge(tab, pane_infos) or nil
     local segments = {}
     if badge then
       local badge_bg, badge_fg = attention.badge_colors(palette, badge.status)
@@ -269,6 +279,42 @@ function M.register(opts)
       attention.maybe_ack_focused(window, pane)
     end
 
+    -- Picker-driven jump trigger. The picker drops a small JSON file
+    -- with the parsed coords on Enter; we consume + dispatch here on
+    -- the 250ms tick. Same in-process mux activate Alt+,/. use, just
+    -- with a file as the IPC primitive instead of OSC (tmux popup
+    -- DCS pass-through is unreliable, see attention.consume_jump_trigger).
+    if attention and attention.consume_jump_trigger then
+      local coords = attention.consume_jump_trigger()
+      if coords then
+        local activated = attention.activate_in_gui(coords.wezterm_pane, window, pane)
+        if actions_mod and actions_mod.attention_jump_args and constants then
+          local trailing = {
+            '--direct',
+            '--tmux-socket', coords.tmux_socket,
+            '--tmux-window', coords.tmux_window,
+          }
+          if coords.tmux_pane and coords.tmux_pane ~= '' then
+            table.insert(trailing, '--tmux-pane')
+            table.insert(trailing, coords.tmux_pane)
+          end
+          local args = actions_mod.attention_jump_args(constants, pane, trailing, logger, nil)
+          if args then
+            pcall(wezterm.background_child_process, args)
+          end
+        end
+        if logger then
+          logger.info('attention', 'trigger jump dispatched', {
+            kind         = coords.kind,
+            session_id   = coords.session_id,
+            archived_ts  = coords.archived_ts,
+            wezterm_pane = coords.wezterm_pane,
+            activated    = activated,
+          })
+        end
+      end
+    end
+
     refresh_right_status(window, pane)
     log_rendered_status(window)
   end)
@@ -284,30 +330,40 @@ function M.register(opts)
   -- (subject to WSL/Windows clock skew, so treat sub-100ms values as
   -- noise; the signal is when it spikes into seconds).
   wezterm.on('user-var-changed', function(window, pane, name, value)
-    if not attention or name ~= attention.USER_VAR_TICK then
+    if not attention then
       return
     end
-    if attention.reload_state then
-      attention.reload_state()
-    end
-    refresh_right_status(window, pane)
-    log_rendered_status(window)
-    if logger then
-      local latency_ms = nil
-      local tick_ms = tonumber(value)
-      if tick_ms then
-        local ok, now_str = pcall(function()
-          return wezterm.time.now():format '%s%3f'
-        end)
-        if ok and type(now_str) == 'string' and now_str:match '^%d+$' then
-          latency_ms = tonumber(now_str) - tick_ms
-        end
+    if name == attention.USER_VAR_TICK then
+      if attention.reload_state then
+        attention.reload_state()
       end
-      logger.info('attention', 'tick received', {
-        pane_id = pane and pane.pane_id and pane:pane_id() or nil,
-        value = value,
-        latency_ms = latency_ms,
-      })
+      refresh_right_status(window, pane)
+      log_rendered_status(window)
+      if logger then
+        local latency_ms = nil
+        local tick_ms = tonumber(value)
+        if tick_ms then
+          local ok, now_str = pcall(function()
+            return wezterm.time.now():format '%s%3f'
+          end)
+          if ok and type(now_str) == 'string' and now_str:match '^%d+$' then
+            latency_ms = tonumber(now_str) - tick_ms
+          end
+        end
+        logger.info('attention', 'tick received', {
+          pane_id = pane and pane.pane_id and pane:pane_id() or nil,
+          value = value,
+          latency_ms = latency_ms,
+        })
+      end
+      return
+    end
+    -- Picker-driven jumps used to come through here as
+    -- `attention_jump` user-vars, but tmux's `display-popup -E` does
+    -- not forward DCS pass-through from the popup pty to the parent
+    -- client tty, so the OSC route silently dropped its payloads. The
+    -- live path is now a file trigger consumed by `update-status`
+    -- above (see attention.consume_jump_trigger).
     end
   end)
 end

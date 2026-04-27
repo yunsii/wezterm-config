@@ -92,6 +92,15 @@ recent_jump=0
 recent_archived_ts=''
 
 case "${1:-next-waiting}" in
+  --print-trigger-path)
+    # Picker calls this to learn where to write its jump-trigger.json.
+    # Centralising the path here means picker doesn't need to redo the
+    # WSL/Windows path detection in attention-state-lib.
+    . "$script_dir/attention-state-lib.sh"
+    state_path="$(attention_state_path)"
+    printf '%s/jump-trigger.json' "${state_path%/*}"
+    exit 0
+    ;;
   next-waiting) want_status='waiting' ;;
   next-done)    want_status='done' ;;
   --session)

@@ -41,7 +41,7 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 
 The agent-attention pipeline (state file, hook install, transitions, rendering, the `Alt+,` / `Alt+.` / `Alt+/` keyboard entry points, focus-based auto-ack, Codex integration) lives in [`agent-attention.md`](./agent-attention.md).
 
-In tmux UI terms what shows up here is: a per-tab badge (`●` waiting / `◐` running / `○` done) and the right-status `🚨 N waiting  ✅ N done  🔄 N running` counter, both rendered by `wezterm-x/lua/attention.lua` from the shared state file. The counter slot is reserved even at zero so the bar width stays stable.
+In tmux UI terms what shows up here is: a per-tab badge (`🚨` waiting / `🔄` running / `✅` done) and the right-status `🚨 N waiting  ✅ N done  🔄 N running` counter, both rendered by `wezterm-x/lua/attention.lua` from the shared state file. The tab badge, the right-status counter, and the `Alt+/` picker chips share one emoji vocabulary so the same glyph means the same status everywhere. The counter slot is reserved even at zero so the bar width stays stable.
 
 ## Status Lines
 

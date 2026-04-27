@@ -81,12 +81,26 @@ all_body=()
 all_age=()
 all_ids=()
 all_last_status=()
-while IFS=$'\t' read -r s b a id ls; do
+all_wezterm_pane=()
+all_tmux_socket=()
+all_tmux_window=()
+all_tmux_pane=()
+# Column order: status, body, age, id, wp, sock, win, pane, last_status.
+# last_status MUST stay last — bash `read -r` with `IFS=$'\t'` collapses
+# consecutive tabs (tab is whitespace IFS), so an empty MIDDLE field
+# would silently shift every subsequent field. Trailing empty fields are
+# preserved correctly, which is why active rows put their empty
+# last_status at the end of the line.
+while IFS=$'\t' read -r s b a id wp sock win pane ls; do
   [[ -n "$s" ]] || continue
   all_status+=("$s")
   all_body+=("$b")
   all_age+=("$a")
   all_ids+=("$id")
+  all_wezterm_pane+=("${wp:-}")
+  all_tmux_socket+=("${sock:-}")
+  all_tmux_window+=("${win:-}")
+  all_tmux_pane+=("${pane:-}")
   all_last_status+=("${ls:-}")
 done < "$prefetch_file"
 
@@ -109,6 +123,10 @@ row_body=()
 row_age=()
 row_ids=()
 row_last_status=()
+row_wezterm_pane=()
+row_tmux_socket=()
+row_tmux_window=()
+row_tmux_pane=()
 selected_index=0
 
 apply_filter() {
@@ -117,6 +135,10 @@ apply_filter() {
   row_age=()
   row_ids=()
   row_last_status=()
+  row_wezterm_pane=()
+  row_tmux_socket=()
+  row_tmux_window=()
+  row_tmux_pane=()
   local i s b lower_b lower_f
   local filter_active=0
   [[ -n "$filter_text" || "$status_filter" != "all" ]] && filter_active=1
@@ -136,6 +158,10 @@ apply_filter() {
       row_age+=("${all_age[$i]}")
       row_ids+=("${all_ids[$i]}")
       row_last_status+=("${all_last_status[$i]}")
+      row_wezterm_pane+=("${all_wezterm_pane[$i]}")
+      row_tmux_socket+=("${all_tmux_socket[$i]}")
+      row_tmux_window+=("${all_tmux_window[$i]}")
+      row_tmux_pane+=("${all_tmux_pane[$i]}")
       continue
     fi
     if [[ "$status_filter" != "all" && "$status_filter" != "$s" ]]; then
@@ -150,6 +176,10 @@ apply_filter() {
     row_age+=("${all_age[$i]}")
     row_ids+=("${all_ids[$i]}")
     row_last_status+=("${all_last_status[$i]}")
+    row_wezterm_pane+=("${all_wezterm_pane[$i]}")
+    row_tmux_socket+=("${all_tmux_socket[$i]}")
+    row_tmux_window+=("${all_tmux_window[$i]}")
+    row_tmux_pane+=("${all_tmux_pane[$i]}")
   done
   # Clamp selection inside the filtered range.
   local visible="${#row_ids[@]}"
@@ -280,35 +310,87 @@ cycle_status_filter() {
   apply_filter
 }
 
+write_attention_jump_trigger() {
+  # Drop a JSON trigger file the wezterm-side update-status tick consumes.
+  # File-based IPC is more reliable than OSC from a tmux popup pty (see
+  # attention.consume_jump_trigger comment).
+  local payload="$1" trigger_path tmp ts esc
+  trigger_path="$(bash "$script_dir/attention-jump.sh" --print-trigger-path 2>/dev/null || true)"
+  if [[ -z "$trigger_path" ]]; then
+    runtime_log_warn attention "trigger path unresolved" "trace=$trace_id"
+    return 1
+  fi
+  ts="$(date +%s%3N 2>/dev/null || printf 0)"
+  tmp="${trigger_path}.tmp.$$"
+  esc="${payload//\\/\\\\}"
+  esc="${esc//\"/\\\"}"
+  printf '{"version":1,"payload":"%s","ts":%s}\n' "$esc" "$ts" > "$tmp" 2>/dev/null || return 1
+  mv "$tmp" "$trigger_path" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
 dispatch_selection() {
   local total="${#row_ids[@]}"
   (( total == 0 )) && return 1
   local id="${row_ids[$selected_index]}"
-  local cmd
+  local sock="${row_tmux_socket[$selected_index]}"
+  local win="${row_tmux_window[$selected_index]}"
+  local pane="${row_tmux_pane[$selected_index]}"
+  local wp="${row_wezterm_pane[$selected_index]}"
+
   if [[ "$id" == "__clear_all__" ]]; then
+    # No GUI focus — keep the legacy `tmux run-shell -b ... --clear-all`.
     runtime_log_info attention "alt-slash clear-all" "trace=$trace_id"
-    cmd="WEZTERM_RUNTIME_TRACE_ID=$(printf %q "$trace_id") bash $(printf %q "$script_dir/attention-jump.sh") --clear-all"
-  elif [[ "$id" == recent::* ]]; then
-    # Encoded by tmux-attention-menu.sh as "recent::<sid>::<archived_ts>".
-    # Split into the two pieces so the jump script can disambiguate
-    # multiple recent rows that share a session_id.
+    local cmd="WEZTERM_RUNTIME_TRACE_ID=$(printf %q "$trace_id") bash $(printf %q "$script_dir/attention-jump.sh") --clear-all"
+    tmux run-shell -b "$cmd" 2>/dev/null || true
+    return 0
+  fi
+
+  # Active and recent jumps go via OSC 1337 SetUserVar=attention_jump=<payload>.
+  # titles.lua's user-var-changed handler picks it up and performs the
+  # in-process mux activate (Alt+,/. parity), then spawns
+  # `attention-jump.sh --direct` for tmux. This sidesteps wezterm.exe cli,
+  # which can't reliably reach the running gui from a popup pty.
+  if [[ -z "$sock" || -z "$win" ]]; then
+    runtime_log_warn attention "jump dispatch missing tmux coords, fallback --session" "trace=$trace_id" "id=$id"
+    local cmd="WEZTERM_RUNTIME_TRACE_ID=$(printf %q "$trace_id") bash $(printf %q "$script_dir/attention-jump.sh") --session $(printf %q "$id")"
+    tmux run-shell -b "$cmd" 2>/dev/null || true
+    return 0
+  fi
+
+  local payload
+  if [[ "$id" == recent::* ]]; then
     local rest sid archived
     rest="${id#recent::}"
     sid="${rest%%::*}"
     archived="${rest#*::}"
     [[ "$archived" == "$rest" ]] && archived=""
-    runtime_log_info attention "alt-slash recent jump" "trace=$trace_id" "session_id=$sid" "archived_ts=$archived"
-    if [[ -n "$archived" ]]; then
-      cmd="WEZTERM_RUNTIME_TRACE_ID=$(printf %q "$trace_id") bash $(printf %q "$script_dir/attention-jump.sh") --recent --session $(printf %q "$sid") --archived-ts $(printf %q "$archived")"
-    else
-      cmd="WEZTERM_RUNTIME_TRACE_ID=$(printf %q "$trace_id") bash $(printf %q "$script_dir/attention-jump.sh") --recent --session $(printf %q "$sid")"
+    # Re-resolve wezterm pane id from the target session env (stored value
+    # is whatever was live at archive time and may be stale post-restart).
+    local sess_name=""
+    sess_name="$(tmux -S "$sock" display-message -p -t "$win" '#S' 2>/dev/null || true)"
+    if [[ -n "$sess_name" ]]; then
+      local env_line
+      env_line="$(tmux -S "$sock" show-environment -t "$sess_name" WEZTERM_PANE 2>/dev/null || true)"
+      if [[ "$env_line" =~ ^WEZTERM_PANE=(.+)$ ]]; then
+        wp="${BASH_REMATCH[1]}"
+      fi
     fi
+    runtime_log_info attention "alt-slash trigger recent jump" \
+      "trace=$trace_id" "session_id=$sid" "archived_ts=$archived" "wezterm_pane=$wp"
+    payload="v1|recent|${sid}|${archived}|${wp}|${sock}|${win}|${pane}"
   else
-    runtime_log_info attention "alt-slash jump" "trace=$trace_id" "session_id=$id"
-    cmd="WEZTERM_RUNTIME_TRACE_ID=$(printf %q "$trace_id") bash $(printf %q "$script_dir/attention-jump.sh") --session $(printf %q "$id")"
+    runtime_log_info attention "alt-slash trigger jump" \
+      "trace=$trace_id" "session_id=$id" "wezterm_pane=$wp"
+    payload="v1|jump|${id}|${wp}|${sock}|${win}|${pane}"
   fi
-  # `tmux run-shell -b` returns immediately, so the popup tears down before
-  # attention-jump.sh starts the wezterm-cli activate-pane round-trip.
+  if write_attention_jump_trigger "$payload"; then
+    return 0
+  fi
+  # Last-resort fallback if the trigger write fails (read-only state dir,
+  # disk full, etc.) — keep the legacy --session dispatch so the user
+  # still gets some attempt.
+  local cmd="WEZTERM_RUNTIME_TRACE_ID=$(printf %q "$trace_id") bash $(printf %q "$script_dir/attention-jump.sh") --session $(printf %q "$id")"
   tmux run-shell -b "$cmd" 2>/dev/null || true
   return 0
 }

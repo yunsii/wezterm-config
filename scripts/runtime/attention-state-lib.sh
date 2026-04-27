@@ -292,30 +292,47 @@ attention_state_recent_remove() {
 }
 
 # Conditional transition to `running`.
-# Used by the PostToolUse hook to acknowledge that a permission prompt
-# was resolved (the tool ran and completed, which is evidence the user
-# allowed it). Behaviour by current status:
-#   waiting → flip to running in place (ts/reason refreshed, tmux coords
-#             preserved)
-#   done    → flip to running in place (an async event — typically a
-#             Monitor subscription delivering a streamed event after the
-#             prior turn's Stop — woke the agent and a tool call landed,
-#             which means Claude is mid-turn again. Stop has no way to
-#             re-fire running on wake-up; this branch is how the counter
-#             reflects reality.)
+# Called from the `resolved` branch in emit-agent-status.sh, which is
+# wired to both PreToolUse and PostToolUse. The two hooks fire at
+# different lifecycle points and target different source statuses:
+#
+#   PreToolUse  fires once before the tool starts (and before any
+#               permission_prompt). It does NOT fire when the user
+#               approves a permission prompt — Claude Code exposes no
+#               hook for that — so PreToolUse can only flip done →
+#               running (Monitor wake-up).
+#   PostToolUse fires after the tool completes. This is the only
+#               signal that an approved permission prompt has been
+#               answered, so it is the only event that can flip
+#               waiting → running.
+#
+# Behaviour by current status (irrespective of which hook called):
+#   waiting → flip to running in place (ts/reason refreshed, tmux
+#             coords preserved). Only PostToolUse reaches this branch;
+#             PreToolUse fires before the prompt and lands on running.
+#   done    → flip to running in place (Monitor wake-up: a streamed
+#             event resumed the agent after a prior Stop; Claude is
+#             mid-turn again). Both PreToolUse and PostToolUse can
+#             reach this branch — PreToolUse usually wins the race.
 #   missing → upsert a fresh running entry using the caller-supplied
 #             metadata. This covers the focus-ack path: when the user
-#             focused the pane, maybe_ack_focused forgets the waiting
-#             entry within one tick, so by the time PostToolUse fires
-#             there is nothing to flip — but "running" still has to be
-#             reflected on the counter, so we recreate the entry.
+#             focused the pane, maybe_ack_focused forgets the entry
+#             within one tick, so by the time the next hook fires
+#             there is nothing to flip — but "running" still has to
+#             be reflected on the counter, so we recreate the entry.
 #   running → no-op (already reflected; do not spam OSC on every tool
-#             call)
+#             call). PreToolUse hits this on every auto-allowed tool
+#             call; PostToolUse hits it whenever PreToolUse already
+#             flipped a done → running before it fired.
 #
 # Returns 0 if the state file changed, 1 on no-op. Callers use the
-# return code to skip the OSC tick / log emit on no-op so PostToolUse
-# (which fires on every tool call, auto-allowed or not) does not flood
-# wezterm with spurious reload nudges.
+# return code to skip the OSC tick / log emit on no-op so PreToolUse /
+# PostToolUse (which fire on every tool call, auto-allowed or not) do
+# not flood wezterm with spurious reload nudges.
+#
+# See docs/agent-attention.md "Limitation: no signal for permission
+# approval" for why we cannot do better than PostToolUse for the
+# approve → tool-completion window.
 attention_state_transition_to_running() {
   local session_id="$1" wezterm_pane="$2" tmux_socket="$3" tmux_session="$4"
   local tmux_window="$5" tmux_pane="$6" git_branch="${7:-}"

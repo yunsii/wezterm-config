@@ -12,14 +12,19 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type attentionRow struct {
-	status     string // "running" | "waiting" | "done" | "recent" | "__sentinel__"
-	body       string
-	age        string
-	id         string
-	lastStatus string // for "recent" rows: "running" | "waiting" | "done"; empty otherwise
+	status      string // "running" | "waiting" | "done" | "recent" | "__sentinel__"
+	body        string
+	age         string
+	id          string
+	lastStatus  string // for "recent" rows: "running" | "waiting" | "done"; empty otherwise
+	weztermPane string
+	tmuxSocket  string
+	tmuxWindow  string
+	tmuxPane    string
 }
 
 type attentionPicker struct{}
@@ -202,7 +207,7 @@ func loadAttentionRows(path string) ([]attentionRow, error) {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 5)
+		parts := strings.SplitN(line, "\t", 9)
 		if len(parts) < 4 {
 			continue
 		}
@@ -212,8 +217,30 @@ func loadAttentionRows(path string) ([]attentionRow, error) {
 			age:    parts[2],
 			id:     parts[3],
 		}
+		// TSV column order matches tmux-attention-menu.sh:
+		//   parts[4] = wezterm_pane_id
+		//   parts[5] = tmux_socket
+		//   parts[6] = tmux_window
+		//   parts[7] = tmux_pane
+		//   parts[8] = last_status
+		// last_status sits LAST so the active-row case (where it is empty)
+		// produces a trailing empty field rather than an empty MIDDLE field
+		// — the latter is silently collapsed by bash `read -r` with the
+		// whitespace IFS \t, which would shift every following field.
 		if len(parts) >= 5 {
-			row.lastStatus = parts[4]
+			row.weztermPane = parts[4]
+		}
+		if len(parts) >= 6 {
+			row.tmuxSocket = parts[5]
+		}
+		if len(parts) >= 7 {
+			row.tmuxWindow = parts[6]
+		}
+		if len(parts) >= 8 {
+			row.tmuxPane = parts[7]
+		}
+		if len(parts) >= 9 {
+			row.lastStatus = parts[8]
 		}
 		rows = append(rows, row)
 	}
@@ -383,36 +410,164 @@ func coloredBadge(status string) string {
 }
 
 func dispatchAttention(r attentionRow, jumpScript string) {
-	// Restore termios + show cursor BEFORE shelling out to tmux so the
-	// popup pty cleans up cleanly even if tmux's run-shell has any
-	// observable side effect on the parent fd state.
+	// Restore termios + show cursor BEFORE the dispatch side-effect so the
+	// popup pty cleans up cleanly even if anything below has any observable
+	// effect on the parent fd state.
 	_, _ = os.Stdout.WriteString("\x1b[0m\x1b[?25h")
 
-	var cmd string
-	switch {
-	case r.id == "__clear_all__":
-		cmd = fmt.Sprintf("bash %s --clear-all", shellEscape(jumpScript))
-	case strings.HasPrefix(r.id, "recent::"):
-		// Encoded by tmux-attention-menu.sh as "recent::<sid>::<archived_ts>".
-		// Split into the two pieces so the jump script can disambiguate
-		// multiple recent rows that share a session_id (same agent
-		// archived from different panes).
+	if r.id == "__clear_all__" {
+		// clear-all has no GUI focus to perform — keep the legacy
+		// `tmux run-shell -b bash ... --clear-all` dispatch.
+		emitPerfEvent("attention", "alt-slash clear-all", map[string]string{
+			"row_status": r.status, "row_id": r.id,
+		})
+		cmd := fmt.Sprintf("bash %s --clear-all", shellEscape(jumpScript))
+		_ = exec.Command("tmux", "run-shell", "-b", cmd).Run()
+		return
+	}
+
+	// Active and recent jumps go via OSC 1337 SetUserVar=attention_jump=<payload>.
+	// titles.lua's user-var-changed handler in WezTerm receives the payload,
+	// performs the in-process mux activate (same path Alt+,/. use), and
+	// spawns `attention-jump.sh --direct` for the tmux side. This keeps the
+	// hot path off `wezterm.exe cli activate-pane`, which can't reliably
+	// reach the running gui process from a popup pty across the WSL boundary
+	// (gui-sock-* discovery sometimes picks a stale pid).
+	payload := buildAttentionJumpPayload(r)
+	if payload == "" {
+		emitPerfEvent("attention", "alt-slash dispatch missing coords, fallback --session", map[string]string{
+			"row_status":   r.status,
+			"row_id":       r.id,
+			"wezterm_pane": r.weztermPane,
+			"tmux_socket":  r.tmuxSocket,
+			"tmux_window":  r.tmuxWindow,
+			"tmux_pane":    r.tmuxPane,
+		})
+		cmd := fmt.Sprintf("bash %s --session %s", shellEscape(jumpScript), shellEscape(r.id))
+		_ = exec.Command("tmux", "run-shell", "-b", cmd).Run()
+		return
+	}
+	emitPerfEvent("attention", "alt-slash trigger dispatch", map[string]string{
+		"row_status":   r.status,
+		"row_id":       r.id,
+		"payload_len":  fmt.Sprintf("%d", len(payload)),
+		"wezterm_pane": r.weztermPane,
+		"tmux_socket":  r.tmuxSocket,
+		"tmux_window":  r.tmuxWindow,
+		"tmux_pane":    r.tmuxPane,
+	})
+	if !writeAttentionJumpTrigger(payload, jumpScript) {
+		// Trigger write failed for some reason — fall through to the
+		// legacy `--session` dispatch so the user gets some attempt.
+		cmd := fmt.Sprintf("bash %s --session %s", shellEscape(jumpScript), shellEscape(r.id))
+		_ = exec.Command("tmux", "run-shell", "-b", cmd).Run()
+	}
+}
+
+// buildAttentionJumpPayload assembles the v1|... payload for the OSC user
+// var. Returns "" when the row lacks coordinates the Lua handler needs.
+// For recent rows the picker re-resolves the WezTerm pane id from the
+// target tmux session env (`tmux show-environment WEZTERM_PANE`) before
+// committing to the payload, since the stored value is whatever was live
+// at archive time and WezTerm restarts give it a fresh id while tmux
+// survives.
+func buildAttentionJumpPayload(r attentionRow) string {
+	if r.tmuxSocket == "" || r.tmuxWindow == "" {
+		return ""
+	}
+	if strings.HasPrefix(r.id, "recent::") {
 		rest := strings.TrimPrefix(r.id, "recent::")
 		sid, archived, _ := strings.Cut(rest, "::")
-		if archived == "" {
-			cmd = fmt.Sprintf("bash %s --recent --session %s",
-				shellEscape(jumpScript), shellEscape(sid))
-		} else {
-			cmd = fmt.Sprintf("bash %s --recent --session %s --archived-ts %s",
-				shellEscape(jumpScript), shellEscape(sid), shellEscape(archived))
+		if sid == "" {
+			return ""
 		}
-	default:
-		cmd = fmt.Sprintf("bash %s --session %s", shellEscape(jumpScript), shellEscape(r.id))
+		wp := r.weztermPane
+		if live := lookupLiveWezTermPane(r.tmuxSocket, sessionNameFromCoords(r)); live != "" {
+			wp = live
+		}
+		return fmt.Sprintf("v1|recent|%s|%s|%s|%s|%s|%s",
+			sid, archived, wp, r.tmuxSocket, r.tmuxWindow, r.tmuxPane)
 	}
-	// `tmux run-shell -b` returns immediately; the popup tears down
-	// before attention-jump.sh starts the WezTerm cli round-trip, so
-	// the user perceives the jump as instant.
-	_ = exec.Command("tmux", "run-shell", "-b", cmd).Run()
+	return fmt.Sprintf("v1|jump|%s|%s|%s|%s|%s",
+		r.id, r.weztermPane, r.tmuxSocket, r.tmuxWindow, r.tmuxPane)
+}
+
+// sessionNameFromCoords resolves the tmux session NAME for the row's
+// coordinates by asking `tmux -S <socket> display-message` keyed off the
+// window id. The prefetch TSV carries socket / window / pane but not
+// session_name, and `tmux show-environment` needs the name (`-t @5` is
+// not a valid target for show-environment).
+func sessionNameFromCoords(r attentionRow) string {
+	if r.tmuxSocket == "" || r.tmuxWindow == "" {
+		return ""
+	}
+	out, err := exec.Command("tmux", "-S", r.tmuxSocket,
+		"display-message", "-p", "-t", r.tmuxWindow, "#S").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func lookupLiveWezTermPane(socket, session string) string {
+	if socket == "" || session == "" {
+		return ""
+	}
+	out, err := exec.Command("tmux", "-S", socket,
+		"show-environment", "-t", session, "WEZTERM_PANE").Output()
+	if err != nil {
+		return ""
+	}
+	line := strings.TrimSpace(string(out))
+	if !strings.HasPrefix(line, "WEZTERM_PANE=") {
+		return ""
+	}
+	return strings.TrimPrefix(line, "WEZTERM_PANE=")
+}
+
+// writeAttentionJumpTrigger drops a small JSON file with the jump payload
+// into a known location; titles.lua's `update-status` handler (250ms tick)
+// reads + deletes + dispatches. We use a file instead of an OSC user-var
+// because the OSC route is unreliable from a tmux popup pty: DCS
+// pass-through is forwarded to the parent wezterm pane only when bytes
+// originate from a regular tmux pane's `/dev/tty` (the path the
+// attention_tick hook uses), not from a `display-popup -E` sub-pty.
+//
+// `attentionTriggerPath` is computed via `attention-jump.sh --print-trigger-path`,
+// piggybacking on the same wezterm-runtime path resolution the rest of
+// the agent-attention pipeline already uses, so picker doesn't have to
+// re-implement WSL/Windows path detection.
+func writeAttentionJumpTrigger(payload, jumpScript string) bool {
+	out, err := exec.Command("bash", jumpScript, "--print-trigger-path").Output()
+	if err != nil {
+		emitPerfEvent("attention", "trigger path resolve failed", map[string]string{"err": err.Error()})
+		return false
+	}
+	path := strings.TrimSpace(string(out))
+	if path == "" {
+		emitPerfEvent("attention", "trigger path empty", nil)
+		return false
+	}
+	tmp := path + ".tmp"
+	body := fmt.Sprintf("{\"version\":1,\"payload\":%q,\"ts\":%d}\n", payload, nowMs())
+	if err := os.WriteFile(tmp, []byte(body), 0o644); err != nil {
+		emitPerfEvent("attention", "trigger write failed", map[string]string{
+			"path": tmp, "err": err.Error(),
+		})
+		return false
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		emitPerfEvent("attention", "trigger rename failed", map[string]string{
+			"from": tmp, "to": path, "err": err.Error(),
+		})
+		return false
+	}
+	return true
+}
+
+func nowMs() int64 {
+	return time.Now().UnixMilli()
 }
 
 func init() { register(attentionPicker{}) }
