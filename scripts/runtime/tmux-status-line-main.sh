@@ -114,7 +114,7 @@ load_git_snapshot() {
       git_changes_label+=",=0"
     fi
   else
-    git_changes_label+=",x0"
+    git_changes_label+=",*0"
   fi
   git_changes_label+=")"
 }

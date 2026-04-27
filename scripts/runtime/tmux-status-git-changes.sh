@@ -59,7 +59,7 @@ if [[ -n "$upstream_ref" ]]; then
     git_changes+=",=0"
   fi
 else
-  git_changes+=",x0"
+  git_changes+=",*0"
 fi
 git_changes+=")"
 
