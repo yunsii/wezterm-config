@@ -113,11 +113,24 @@ local function read_file(path)
   return content
 end
 
-function M.reload_state()
-  -- Clear the per-tick tmux-focus lookup cache so the next tick re-reads
-  -- the focus files. State reloads happen at most once per tick (either
-  -- on user-var-changed or at update-status cadence).
+-- Per-tick cache hygiene that is cheap to redo every update-status
+-- regardless of whether state.json itself has changed. Split out from
+-- reload_state because the state read is now event-driven (only fires
+-- on attention.tick), but the tmux-focus file can change without any
+-- attention.* event — `tmux-focus-emit.sh` writes it on every pane
+-- switch — so its cache must reset on the wezterm tick cadence.
+function M.reset_per_tick_cache()
   tmux_focus_cache = {}
+end
+
+-- Heavy re-read of state.json + reapplication of optimistic hides.
+-- Called from the attention.tick event handler, NOT from update-status,
+-- so the 4Hz disk read disappears in steady state. Producers that
+-- mutate state.json must publish attention.tick (hooks via OSC,
+-- attention-jump.sh writes via the event bus) so this reload fires
+-- when the file actually changed.
+function M.reload_state()
+  M.reset_per_tick_cache()
   if not state_path then
     state_cache = { entries = {} }
     return state_cache

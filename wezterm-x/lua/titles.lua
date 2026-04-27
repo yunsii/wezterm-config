@@ -44,6 +44,13 @@ function M.register(opts)
     and constants.wezterm_event_bus.event_dir
     or nil
   event_bus.configure { event_dir = event_dir, logger = logger }
+  -- One-time initial reload so the right-status counter has something
+  -- to render before the first `attention.tick` event arrives. After
+  -- this, state_cache is only refreshed inside the attention.tick
+  -- handler — the previous "reload every 250 ms tick" pattern is gone.
+  if attention and attention.reload_state then
+    attention.reload_state()
+  end
   local workspace_label_cache = {}
   local badge_last_status = {}
   local last_rendered_status = nil
@@ -279,13 +286,20 @@ function M.register(opts)
     local workspace = window:active_workspace() or 'default'
     window:set_left_status(format_workspace_label(workspace))
 
-    -- update-status owns the periodic housekeeping: state reload, TTL
-    -- prune scheduling, and focus-based auto-ack. The user-var-changed
-    -- fast path skips these because the hook side already refreshed
-    -- state.json and nothing in the prune / ack pipelines benefits from
-    -- firing more often than once per tick.
-    if attention and attention.reload_state then
-      attention.reload_state()
+    -- update-status owns the periodic housekeeping that genuinely
+    -- needs the wezterm tick cadence:
+    --   - tmux focus cache reset (the focus file changes on tmux pane
+    --     switches, which fire no wezterm event we observe);
+    --   - throttled background TTL prune;
+    --   - focus-based auto-ack of `done` entries on the focused pane;
+    --   - drain of file-transport events.
+    --
+    -- It does NOT reload `state.json` per tick anymore — that's now
+    -- driven by the `attention.tick` event below, so producers writing
+    -- state must publish (attention-jump.sh nudges, hooks via OSC).
+    -- See docs/event-bus.md "Why event-driven, not polling".
+    if attention and attention.reset_per_tick_cache then
+      attention.reset_per_tick_cache()
     end
     if attention and attention.maybe_prune then
       attention.maybe_prune()
