@@ -125,7 +125,7 @@ attention_picker_emit_frame() {
       running)      frame+=$'\033[1;38;5;39m⟳ RUN \033[0m' ;;
       waiting)      frame+=$'\033[1;38;5;208m⚠ WAIT\033[0m' ;;
       done)         frame+=$'\033[38;5;108m✓ DONE\033[0m' ;;
-      recent)       frame+=$'\033[2;38;5;245m💬 RCNT\033[0m' ;;
+      recent)       frame+=$'\033[2;38;5;245m💬RCNT\033[0m' ;;
       __sentinel__) frame+=$'\033[1;38;5;160m✗ CLR \033[0m' ;;
       *)            frame+='· ----' ;;
     esac

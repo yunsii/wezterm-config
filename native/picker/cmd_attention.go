@@ -367,7 +367,10 @@ func coloredBadge(status string) string {
 	case "done":
 		return "\x1b[38;5;108m✓ DONE\x1b[0m"
 	case "recent":
-		return "\x1b[2;38;5;245m💬 RCNT\x1b[0m"
+		// 💬 is 2 cells wide, so drop the space between glyph and text to
+		// keep the badge at the 6-cell width the other markers use; without
+		// this, the body column on recent rows shifts right by one cell.
+		return "\x1b[2;38;5;245m💬RCNT\x1b[0m"
 	case "__sentinel__":
 		return "\x1b[1;38;5;160m✗ CLR \x1b[0m"
 	}
