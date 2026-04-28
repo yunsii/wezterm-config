@@ -69,6 +69,18 @@ function M.parse_key_string(raw)
     end
   end
   table.sort(mods)
+  -- Case-insensitive single-letter keys: declarations like `Ctrl+P` and
+  -- `Ctrl+p` both bind to Ctrl+p (no Shift); to bind Ctrl+Shift+P the
+  -- caller must write `Ctrl+Shift+P` (or `Ctrl+Shift+p`) explicitly.
+  -- Multi-char key names (`Enter`, `F1`, `BSpace`), digits, and
+  -- punctuation are left untouched.
+  if key:match('^%a$') then
+    if seen['SHIFT'] then
+      key = key:upper()
+    else
+      key = key:lower()
+    end
+  end
   return { key = key, mods = table.concat(mods, '|') }
 end
 

@@ -97,8 +97,8 @@ Value shapes (VS Code `keybindings.json` style, Lua-flavored):
 Key string rules:
 
 - Modifiers joined by `+`: `Ctrl`, `Shift`, `Alt` (aliases: `Opt`, `Option`, `Meta`), `Cmd` (aliases: `Super`, `Win`).
-- The last `+`-separated token is the main key; case is preserved (`Ctrl+Shift+v` vs `Ctrl+Shift+V`).
-- Chord keys use space-separated segments: `Ctrl+k s` rebinds a `command-chord` leaf, `Ctrl+k g e` rebinds a `worktree-chord` leaf. The chord prefix stays `Ctrl+k` at the tmux side regardless of what you write for the prefix segment — only the final segment is consumed. Chord leaves are regenerated at runtime-sync time (`scripts/runtime/render-tmux-bindings.sh`); rerun `wezterm-runtime-sync` after editing.
+- The last `+`-separated token is the main key. For single-letter keys, declarations are **case-insensitive**: `Ctrl+P` and `Ctrl+p` both bind Ctrl+P with no Shift. To bind Ctrl+Shift+P, write `Ctrl+Shift+P` (or `Ctrl+Shift+p`) explicitly — `Shift` must be in the modifier list. Multi-character key names (`Enter`, `F1`, `BSpace`), digits, and punctuation are left as written.
+- Chord keys use space-separated segments: `Ctrl+k s` rebinds a `command-chord` leaf, `Ctrl+k g e` rebinds a `worktree-chord` leaf. The chord prefix stays `Ctrl+k` at the tmux side regardless of what you write for the prefix segment — only the final segment is consumed. The leaf segment follows the same case-insensitive rule as the wezterm-layer parser: `Ctrl+k v` and `Ctrl+k V` both bind the leaf `v`, while `Ctrl+k Shift+v` and `Ctrl+k Shift+V` both bind the leaf `V` (which IS Shift+v in tmux's native key syntax — tmux encodes Shift on letters by uppercasing). Chord leaves are regenerated at runtime-sync time (`scripts/runtime/render-tmux-bindings.sh`); rerun `wezterm-runtime-sync` after editing.
 
 Discoverability:
 
