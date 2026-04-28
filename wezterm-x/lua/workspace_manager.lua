@@ -53,6 +53,19 @@ function M.new(opts)
     return capped
   end
 
+  -- Whether the workspace needs the overflow placeholder tab. Only true
+  -- when there are MORE configured items than the visible cap; for a
+  -- workspace with one or two items (e.g. `config`), the overflow tab
+  -- would be a permanent empty placeholder with no sessions to project.
+  local function workspace_needs_overflow(workspace_name, items)
+    if not tab_visibility or not tab_visibility.is_enabled(workspace_name) then
+      return false
+    end
+    local cfg = tab_visibility.config and tab_visibility.config() or {}
+    local cap = tonumber(cfg.visible_count) or 5
+    return type(items) == 'table' and #items > cap
+  end
+
   -- Forward declarations. `runtime` and `tabs` are initialized below
   -- (after with_trace_id is defined), but several closure bodies above
   -- need to reference them lexically; without these `local` lines,
@@ -253,17 +266,36 @@ function M.new(opts)
       -- list so existing tabs that got spawned before the cap turned on
       -- survive the reconcile.
       tabs.sync_workspace_tabs(name, trace_id, items, raw_items)
-      -- Self-heal: re-spawn the overflow placeholder if it's missing
-      -- (user closed it, refresh-session dropped it, title got reset
-      -- and prune killed it, etc.). Cheap — `find_overflow_tab` is a
-      -- single `tabs_with_info` walk.
+      -- Self-heal the overflow placeholder. Two directions:
+      --   - missing + needed → respawn (user closed it, refresh-session
+      --     dropped it, etc.).
+      --   - present + not needed → kill (workspace items dropped below
+      --     the cap, OR enabled_workspaces gate was just removed and the
+      --     workspace fits — config / mock-deck single-tab shouldn't
+      --     carry a permanent empty `…`).
+      -- find_overflow_tab is a single tabs_with_info walk; the
+      -- needs_overflow check is O(1).
       if tab_visibility and tab_visibility.is_enabled(name) then
         local target_window = tabs.workspace_windows(name)[1]
-        if target_window and not tabs.find_overflow_tab(target_window) then
-          logger.info('workspace', 'overflow tab missing — respawning', with_trace_id(trace_id, {
-            workspace = name,
-          }))
-          tabs.spawn_overflow_tab(target_window, tab_visibility.workspace_slug(name), trace_id)
+        if target_window then
+          local needs = workspace_needs_overflow(name, raw_items)
+          local present = tabs.find_overflow_tab(target_window)
+          if needs and not present then
+            logger.info('workspace', 'overflow tab missing — respawning', with_trace_id(trace_id, {
+              workspace = name,
+            }))
+            tabs.spawn_overflow_tab(target_window, tab_visibility.workspace_slug(name), trace_id)
+          elseif present and not needs then
+            logger.info('workspace', 'overflow tab unneeded — closing', with_trace_id(trace_id, {
+              workspace = name,
+              item_count = type(raw_items) == 'table' and #raw_items or 0,
+            }))
+            pcall(function() present:activate() end)
+            pcall(function()
+              local active_pane = present:active_pane()
+              if active_pane and active_pane.kill then pcall(function() active_pane:kill() end) end
+            end)
+          end
         end
       end
       return
@@ -286,11 +318,12 @@ function M.new(opts)
       tabs.spawn_workspace_tab(mux_window, items[i], trace_id)
     end
 
-    -- Cold-open: when this workspace opted into tab_visibility, append
-    -- the overflow placeholder tab so the user sees a `…` slot at the
-    -- end of the bar standing in for sessions beyond the spawn cap.
-    -- Skipped for non-managed workspaces.
-    if tab_visibility and tab_visibility.is_enabled(name) then
+    -- Cold-open: append the overflow placeholder tab only when the
+    -- workspace has more configured items than the visible cap.
+    -- Workspaces that fit (e.g. `config` with one repo) get no
+    -- placeholder — a permanent empty `…` tab with nothing to project
+    -- would be noise.
+    if workspace_needs_overflow(name, raw_items) then
       tabs.spawn_overflow_tab(mux_window, tab_visibility.workspace_slug(name), trace_id)
     end
 

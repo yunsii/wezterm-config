@@ -95,7 +95,6 @@ local module_state = {
   half_life_days = DEFAULTS.half_life_days,
   recompute_interval_ms = DEFAULTS.recompute_interval_ms,
   swap_flash_ms = DEFAULTS.swap_flash_ms,
-  enabled_workspaces = {},  -- set: workspace_name -> true
   spawn_visible_only = false,
   wezterm = nil,
   logger = nil,
@@ -116,18 +115,6 @@ function M.configure(opts)
   module_state.half_life_days = merged.half_life_days
   module_state.recompute_interval_ms = merged.recompute_interval_ms
   module_state.swap_flash_ms = merged.swap_flash_ms
-  module_state.enabled_workspaces = {}
-  if opts.config and type(opts.config.enabled_workspaces) == 'table' then
-    for k, v in pairs(opts.config.enabled_workspaces) do
-      if v then
-        if type(k) == 'number' then
-          module_state.enabled_workspaces[v] = true  -- list form: { 'work', 'config' }
-        else
-          module_state.enabled_workspaces[k] = true  -- map form: { work = true }
-        end
-      end
-    end
-  end
   module_state.spawn_visible_only = (opts.config and opts.config.spawn_visible_only == true) or false
   module_state.configured = true
 end
@@ -141,14 +128,18 @@ function M.spawn_capped(workspace_name)
   return module_state.spawn_visible_only == true
 end
 
--- Returns true when the frequency-driven layout (slot-aware titles,
--- top-N spawn, warm preheat) should apply to this workspace. Existing
--- workspaces stay opt-in: callers must enable via constants.tab_visibility
--- .enabled_workspaces (map form `{ name = true }` or list form `{ "name" }`).
+-- Tab-visibility layout (slot-aware titles, top-N spawn, warm preheat,
+-- Alt+x overflow picker) is the default capability for every named
+-- workspace. The previous opt-in `enabled_workspaces` config was
+-- removed — this returns true unconditionally for any non-empty
+-- workspace name once the module is configured. Kept as a function
+-- (rather than inlined) because callers gate on it as a single
+-- predicate, and tests / future per-workspace overrides can re-add
+-- granularity here without touching the call sites.
 function M.is_enabled(workspace_name)
   if not module_state.configured then return false end
   if not workspace_name or workspace_name == '' then return false end
-  return module_state.enabled_workspaces[workspace_name] == true
+  return true
 end
 
 local function path_sep()

@@ -227,12 +227,6 @@ local base_constants = {
     half_life_days = 7,
     recompute_interval_ms = 5000,
     swap_flash_ms = 800,
-    -- Set of workspace names where the frequency-driven layout (top-N
-    -- visible + warm preheat + slot-aware tab titles) takes effect.
-    -- Empty by default — every existing workspace keeps its current
-    -- behavior. Override per-machine in wezterm-x/local/constants.lua,
-    -- e.g. `tab_visibility = { enabled_workspaces = { work = true } }`.
-    enabled_workspaces = {},
     -- Limit startup spawn to visible_count tabs (cold-start fallback to
     -- the workspaces.lua first-N order). Default false because the
     -- companion `Alt+t` overflow picker — the only way to reach

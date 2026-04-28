@@ -12,9 +12,9 @@ and switches to any other configured session when the user picks one
 in the `Alt+x` picker. Total wezterm tab count stays at `N + 1`
 regardless of how many sessions the user cycles through.
 
-Behavior is **opt-in per workspace** via
-`constants.tab_visibility.enabled_workspaces`; with no opt-in, every
-workspace behaves byte-identical to before.
+Behavior is **always-on for every workspace** — there is no opt-in
+gate. `tab_visibility.is_enabled(name)` returns true for any non-empty
+workspace name once the module is configured.
 
 ## Data flow — focus statistics
 
@@ -101,22 +101,20 @@ managed-session metadata, so its bumps land on free-form session names.
 
 ## Layout — visible tabs + overflow tab
 
-Opt in per workspace from `wezterm-x/local/constants.lua`:
+Layout is the default for every workspace. The remaining knob is
+`spawn_visible_only` in `wezterm-x/local/constants.lua`:
 
 ```lua
 tab_visibility = {
-  enabled_workspaces = { work = true, config = true },
   spawn_visible_only = true,    -- cap startup spawn to visible_count
   -- visible_count = 5,
   -- half_life_days = 7,
 }
 ```
 
-Both map form (`{ work = true }`) and list form (`{ 'work', 'config' }`)
-are accepted. Without `spawn_visible_only`, `enabled_workspaces` is a
-no-op (the layout is a single coherent feature; flagging it on without
-the cap leaves no observable change). The cap is separately gated so
-the user must consciously accept the lifecycle change.
+`spawn_visible_only` controls only the startup-spawn cap (lifecycle
+change); the picker, slot-aware titles, frequency stats, and overflow
+projection are unconditional now.
 
 ### Cold open (`Alt+w` to a workspace with no live window)
 
