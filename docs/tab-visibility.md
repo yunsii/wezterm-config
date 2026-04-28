@@ -9,7 +9,7 @@ are spawned at workspace cold-open (top-N of the user's
 `workspaces.lua` config order). The overflow tab is a single rotating
 slot whose pane projects into a per-workspace browse session by default,
 and switches to any other configured session when the user picks one
-in the `Alt+t` picker. Total wezterm tab count stays at `N + 1`
+in the `Alt+x` picker. Total wezterm tab count stays at `N + 1`
 regardless of how many sessions the user cycles through.
 
 Behavior is **opt-in per workspace** via
@@ -138,7 +138,7 @@ When `spawn_visible_only` is set:
 
 Items beyond the cap are not spawned. Their sessions don't yet exist
 in tmux either — the tab bar shows N+1 tabs and the configured project
-list is otherwise invisible until the user reaches for `Alt+t`.
+list is otherwise invisible until the user reaches for `Alt+x`.
 
 ### Hot open (`Alt+w` while the workspace window already exists)
 
@@ -157,9 +157,9 @@ fast-switch path uses `prune_keep_items`. Net behavior:
   overflow tab via `is_overflow_tab` since it is owned by tab_visibility,
   not by `workspaces.lua`.
 
-### `Alt+t` — single-tab session rotation
+### `Alt+x` — single-tab session rotation
 
-`Alt+t` (manifest id `tab.overflow-picker`, wezterm layer, forwarded
+`Alt+x` (manifest id `tab.overflow-picker`, wezterm layer, forwarded
 into the active tmux pane via user-key 4) opens a tmux `display-menu`
 listing **all** configured sessions for the active workspace, marked
 by current state:
@@ -210,7 +210,7 @@ re-shuffle the visible tabs (those are pinned to whatever `Workspace
 | Constants | `wezterm-x/lua/constants.lua` | `tab_visibility` config block (visible_count, enabled_workspaces, spawn_visible_only, …) |
 | Spawn cap + items snapshot | `wezterm-x/lua/workspace_manager.lua` | caps `Workspace.open`, threads `prune_keep_items` through `sync_workspace_tabs`, writes per-workspace items snapshot |
 | Overflow tab spawn | `wezterm-x/lua/workspace/tabs.lua` `spawn_overflow_tab` | creates the `…` tab, browse session, records tty |
-| Manifest + handler | `wezterm-x/commands/manifest.json` + `wezterm-x/lua/ui/action_registry.lua` | `tab.overflow-picker` → `Alt+t`, forwards user-key 4 |
+| Manifest + handler | `wezterm-x/commands/manifest.json` + `wezterm-x/lua/ui/action_registry.lua` | `tab.overflow-picker` → `Alt+x`, forwards user-key 4 |
 | tmux user-key | `tmux.conf` | `bind-key -n User4` runs `tab-overflow-menu.sh` |
 | Picker menu | `scripts/runtime/tab-overflow-menu.sh` | reads items snapshot, marks visible/warm/cold, builds `tmux display-menu` |
 | Dispatch | `scripts/runtime/tab-overflow-dispatch.sh` | per-state routing (event, attach, cold-spawn) |
@@ -244,7 +244,7 @@ never by the stored `wezterm_pane_id`.
 1. **In-memory** — `spawn_overflow_tab` populates the overflow pane
    with its initial browse session (`wezterm_<slug>_overflow`).
    `titles.lua`'s `tab.activate_overflow` event handler refreshes the
-   value after each Alt+t pick (`set_pane_session(overflow_pane_id,
+   value after each Alt+x pick (`set_pane_session(overflow_pane_id,
    target_session)`). Covers the rotating overflow pane.
 2. **On-disk** — `scripts/runtime/open-project-session.sh` writes
    `<runtime_state>/state/pane-session/<wezterm_pane_id>.txt` with
@@ -300,7 +300,7 @@ Full attention render + transition rules: see
   through the picker incur ~16ms switch-client instead of ~500ms cold
   start. Requires plumbing the managed-agent launch command into bash.
 - **Cold-spawn agent.** Same plumbing — once it lands, cold sessions
-  picked from `Alt+t` can come up with the agent already running.
+  picked from `Alt+x` can come up with the agent already running.
 - **No automatic session lifecycle.** Sessions live as long as their
   tmux session lives. Killing detached sessions on demotion / TTL
   belongs to the warm-preheat work above.

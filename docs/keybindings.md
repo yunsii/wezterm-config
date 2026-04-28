@@ -45,7 +45,7 @@ These shortcuts switch WezTerm tabs inside the current workspace; they are owned
 - `Alt+n`: activate the next WezTerm tab in the current workspace
 - `Alt+Shift+n`: activate the previous WezTerm tab in the current workspace
 - `Alt+1` … `Alt+9`: activate the WezTerm tab at that position in the current workspace (1-indexed; the key maps to `ActivateTab(N-1)`)
-- `Alt+t`: open the tab-visibility overflow picker (tmux `display-menu`) listing every configured session in the current workspace that doesn't yet have a wezterm tab — selecting one spawns it (or activates an existing tab if a match is found). Requires the workspace to be opted into `tab_visibility.enabled_workspaces` so the items snapshot exists; toast fires otherwise. See [`tab-visibility.md`](./tab-visibility.md)
+- `Alt+x`: open the tab-visibility overflow picker (tmux `display-menu`) listing every configured session in the current workspace that doesn't yet have a wezterm tab — selecting one spawns it (or activates an existing tab if a match is found). Requires the workspace to be opted into `tab_visibility.enabled_workspaces` so the items snapshot exists; toast fires otherwise. See [`tab-visibility.md`](./tab-visibility.md)
 
 ## Agent Attention
 

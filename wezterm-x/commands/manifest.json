@@ -150,7 +150,7 @@
     "context": "tmux-backed",
     "binding": {"handler": "tabs.overflow_picker"},
     "hotkeys": [
-      { "keys": "Alt+t", "layer": "wezterm" }
+      { "keys": "Alt+x", "layer": "wezterm" }
     ],
     "palette": { "display_only": true }
   },
