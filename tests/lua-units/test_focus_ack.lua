@@ -120,7 +120,7 @@ describe('maybe_ack_focused', function()
     assert_eq(#recorded, 1, 'done on focused pane was not acked (regression)')
   end)
 
-  it('does NOT ack running on the focused pane', function()
+  it('does NOT ack running on the focused pane (informational)', function()
     reset()
     tab_visibility.set_pane_session(10, 'wezterm_work_a_aaaaaaaaaa')
     local now = os.time() * 1000
@@ -133,7 +133,8 @@ describe('maybe_ack_focused', function()
 
     local recorded = run_focus_ack_with(entries, 10, '/tmp/sock', 'wezterm_work_a_aaaaaaaaaa', '%5')
 
-    assert_eq(#recorded, 0, 'running was acked (it should not be — running is informational)')
+    assert_eq(#recorded, 0,
+      'running was acked on the focused pane; it should stay visible as the informational counter')
   end)
 
   it('does NOT ack a waiting entry on a different pane (regression)', function()

@@ -262,6 +262,18 @@ else
       # be `running` from an earlier transition that never got a
       # focused stop), otherwise the badge stays stuck on `running`.
       attention_state_remove "$session_id" 2>/dev/null || true
+      # Fire the wezterm tick so Lua reloads state_cache from disk and
+      # the badge actually drops the just-removed entry. Without this
+      # the disk is correct but Lua keeps the cached running/done
+      # entry until the next non-skipped hook fires — the user
+      # observed `1 running` stuck on the focused pane even after the
+      # focus-skip path successfully removed the entry on disk.
+      if [[ -e /dev/tty ]]; then
+        # shellcheck disable=SC1091
+        . "$script_dir/../runtime/wezterm-event-lib.sh"
+        wezterm_event_send "attention.tick" \
+          "$(attention_state_now_ms)" 2>/dev/null || true
+      fi
       runtime_log_info attention "hook focus-skipped upsert" \
         "status=$status" \
         "session_id=$session_id" \

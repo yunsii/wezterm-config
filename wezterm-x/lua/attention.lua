@@ -700,9 +700,13 @@ function M.render_status_segment(palette, opts)
       end
       return out
     end
-    -- Both `done` AND `waiting` collapse under focus per the user's
-    -- updated spec: focusing the pane is the acknowledgement that
-    -- the badge was for. `running` stays — informational counter.
+    -- waiting + done collapse under focus (they are action items
+    -- the user has now seen). running stays visible because it is
+    -- informational — even on the focused pane the user wants to
+    -- know "agent is doing something" without scanning the pane
+    -- contents. A stuck running entry from a prior turn is handled
+    -- separately: the hook focus-skip path on the next done/waiting
+    -- removes any prior entry for that session.
     done = drop_focused(done)
     waiting = drop_focused(waiting)
   end
@@ -797,7 +801,7 @@ function M.tab_badge(tab_info)
       if entry.status == M.STATUS_WAITING then
         if not suppress_for_focus then has_waiting = true end
       elseif entry.status == M.STATUS_RUNNING then
-        has_running = true
+        has_running = true  -- informational; visible even on focused pane
       elseif entry.status == M.STATUS_DONE then
         if not suppress_for_focus then has_done = true end
       end
@@ -1514,12 +1518,11 @@ function M.maybe_ack_focused(window, pane)
   for sid, entry in pairs(state_cache.entries or {}) do
     if entry_is_live(entry, now) then
       live_sids[sid] = true
-      -- Ack both waiting and done when the entry's pane is focused.
-      -- Earlier the policy was "done only" on the rationale that
-      -- waiting is an action item and a glance ≠ an answer; the user
-      -- updated that spec ("如果 focus 了的 tmux pane 不触发 waiting
-      -- 和 done 的加一操作"). Running stays excluded because it is
-      -- informational and clears on its own state transition.
+      -- Ack waiting + done on the focused pane (action items the user
+      -- has now seen). Running stays — it is informational ("agent is
+      -- doing something") and the user wants the counter even on the
+      -- focused pane. Stuck-running cleanup is handled by the hook
+      -- focus-skip path on the next done/waiting transition.
       if (entry.status == M.STATUS_DONE or entry.status == M.STATUS_WAITING)
         and M.is_entry_focused(entry, pane_id_str) then
         local ts = entry.ts

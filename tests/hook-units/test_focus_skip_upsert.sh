@@ -204,11 +204,15 @@ run_hook_in_sandbox "$sandbox" "waiting" "permission_prompt" \
 assert_has_entry_for_pane "waiting on UNfocused pane still upserts" "$sandbox" "%7"
 rm -rf "$sandbox"
 
-# Case 4: running should always upsert regardless of focus (informational).
+# Case 4: running upserts regardless of focus — informational counter,
+# always shown. The "stuck running" hazard is handled separately by
+# Case 5 below: when done fires on the focused pane, the focus-skip
+# path removes any prior entry (including a leftover running) for
+# that session_id.
 sandbox="$(mktemp -d)"
 run_hook_in_sandbox "$sandbox" "running" "" \
   "10" "/tmp/tmux-1000/default" "wezterm_work_a_aaaaaaaaaa" "%5" "%5"
-assert_has_entry_for_pane "running on focused pane still upserts" "$sandbox" "%5"
+assert_has_entry_for_pane "running on focused pane upserts (informational)" "$sandbox" "%5"
 rm -rf "$sandbox"
 
 # Case 5 (regression — coco-server stuck-running bug): a previously
@@ -252,6 +256,28 @@ MOCK_WEZTERM_FOCUSED_PANE_ID="999" \
   run_hook_in_sandbox "$sandbox" "waiting" "permission_prompt" \
   "10" "/tmp/tmux-1000/default" "wezterm_work_a_aaaaaaaaaa" "%5" "%5"
 assert_has_entry_for_pane "waiting in other workspace still upserts (wezterm focus elsewhere)" "$sandbox" "%5"
+rm -rf "$sandbox"
+
+# Case 9 (regression): focus-skip path MUST fire an attention.tick
+# event after attention_state_remove. Without it the disk is correct
+# but Lua keeps the cached entry until the next non-skipped hook
+# fires — the user observed `1 running` stuck on the focused pane
+# even after the focus-skip path successfully cleaned up the disk.
+sandbox="$(mktemp -d)"
+seed_running_entry "$sandbox" "ccdc-test-sid" "10" \
+  "/tmp/tmux-1000/default" "wezterm_work_a_aaaaaaaaaa" "@1" "%5"
+MOCK_HOOK_STDIN='{"session_id":"ccdc-test-sid"}' \
+  run_hook_in_sandbox "$sandbox" "done" "" \
+  "10" "/tmp/tmux-1000/default" "wezterm_work_a_aaaaaaaaaa" "%5" "%5"
+tick_file="$sandbox/wezterm-runtime/state/wezterm-events/attention.tick.json"
+if [[ -f "$tick_file" ]]; then
+  echo "  ✓ focus-skip emits attention.tick"; pass=$((pass+1))
+else
+  echo "  ✗ focus-skip emits attention.tick"
+  echo "    tick file missing: $tick_file"
+  ls "$sandbox/wezterm-runtime/state/wezterm-events/" 2>/dev/null | sed 's/^/    /'
+  fail=$((fail+1))
+fi
 rm -rf "$sandbox"
 
 echo
