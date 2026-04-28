@@ -287,20 +287,24 @@ If any of these fail, work backwards through the chain.
   side-effect ([claude-code#42821], `NO_FLICKER=1` swallows
   `Ctrl+J`) live on the same renderer.
 
-  Status as of 2026-04-27: the `claude` bot account commented on
-  #49086 "fixed as of 2.1.116" — verifiably untrue; users on
-  v2.1.116 / v2.1.118 / v2.1.119 (macOS, Linux, Windows, VS Code
-  terminal) all report the symptom unchanged. No Anthropic engineer
-  has re-engaged, no fix PR, no timeline.
+  Status as of 2026-04-28: fixed in v2.1.121. The release notes
+  call it out explicitly — "Fixed scrollback duplication when
+  pressing Ctrl+L or triggering a redraw in non-fullscreen mode on
+  tmux, GNOME Terminal, Windows Terminal, and Konsole" — which is
+  exactly our chain. This is a real change to the redraw path, not
+  a re-paste of the 2.1.116 bot comment ("fixed as of 2.1.116" was
+  verifiably untrue; users on v2.1.116 / v2.1.118 / v2.1.119
+  across macOS, Linux, Windows, and VS Code terminal all reported
+  the symptom unchanged). Locally verified on tmux 3.6a + wezterm
+  + Claude 2.1.121: scrolling the conversation up no longer shows
+  duplicated frames after SIGWINCH or streaming overflow.
 
-  No action on our side. The only Anthropic-supplied workaround is
-  `CLAUDE_CODE_NO_FLICKER=1` (force alt-screen), which does kill the
-  scrollback dup, but the rejection table above documents why we
-  refuse it: tmux mouse-selection regression (with `=1` alone) and
-  Ctrl+J / mouse-wheel regressions (with `=1 + DISABLE_MOUSE=1`).
-  Users hitting this should `exit` + resume the session as a one-off
-  cleanup; do not advise the env knob without re-checking these
-  upstream issues for a real fix.
+  Action: upgrade to ≥ v2.1.121 if anyone still sees the dup;
+  do not reach for `CLAUDE_CODE_NO_FLICKER=1`. The rejection table
+  above still applies to the env knob (tmux mouse-selection
+  regression with `=1` alone; Ctrl+J / mouse-wheel regressions with
+  `=1 + DISABLE_MOUSE=1`) and there is no longer a reason to weigh
+  it against the dup.
 
 ## Adjacent issues (for future research)
 
