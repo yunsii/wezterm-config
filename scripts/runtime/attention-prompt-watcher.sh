@@ -95,29 +95,43 @@ fi
 
 POLL_INTERVAL_S="${WEZTERM_ATTENTION_WATCHER_POLL_S:-1}"
 MAX_DURATION_S="${WEZTERM_ATTENTION_WATCHER_MAX_S:-1800}"
+# Number of consecutive missing-anchor polls required before flipping
+# waiting → running. A single miss is too aggressive — TUI partial
+# redraws (Claude refreshing the Bash preview, user navigating options,
+# terminal resize echoes) can drop the footer from one capture even
+# though the prompt is still on screen. Two consecutive misses give a
+# ≈ 2 s minimum stable absence at the default 1 s poll interval, which
+# keeps detection fast after a real approve while filtering one-frame
+# redraw artifacts.
+CONSECUTIVE_MISS_THRESHOLD="${WEZTERM_ATTENTION_WATCHER_MISS_THRESHOLD:-2}"
 
-# Anchor regex. Either pattern matching means "permission_prompt is on
-# screen". Both are footer / option-list strings that the Claude TUI
-# only emits inside the prompt UI itself; neither appears in the
+# Anchor regex. Any pattern matching means "permission_prompt is on
+# screen". All three are footer / option-list strings that the Claude
+# TUI only emits inside the prompt UI itself; none appears in the
 # agent's conversational text, so the watcher does not get fooled by a
 # pane whose chat history happens to mention the words "Do you want to
 # proceed?" (which is why the original `Do you want to proceed\?`
 # anchor was abandoned — it false-positived on chat content discussing
 # the very feature this watcher implements).
 #
-#   `Tab to amend`               — bottom footer of bash permission_prompt
-#                                  ("Esc to cancel · Tab to amend · ctrl+e
-#                                  to explain"). Unique to bash-style
-#                                  prompts.
-#   `Yes, and don.t ask again`   — option #2 row, present in every
-#                                  permission_prompt regardless of tool
-#                                  type. The `.` matches the apostrophe
-#                                  byte tolerantly across encodings.
-#
-# Elicitation dialogs use a different footer, so they fall through to
-# the "anchor missing → flip to running" branch — also fine because the
-# user has acted in either case.
-PROMPT_ANCHOR='(Tab to amend|Yes, and don.t ask again)'
+#   `Esc to cancel`              — leftmost footer item, present in every
+#                                  permission_prompt and elicitation
+#                                  dialog regardless of tool type. The
+#                                  most reliable single anchor and the
+#                                  primary signal.
+#   `Tab to amend`               — middle footer of bash-style
+#                                  permission_prompt ("Esc to cancel ·
+#                                  Tab to amend · ctrl+e to explain").
+#                                  Bash-only but kept as a redundant
+#                                  match for resilience.
+#   `Yes, and don.t ask again`   — option #2 row of the default prompt
+#                                  shape. Not always present (any prompt
+#                                  variant that swaps option #2 for a
+#                                  tool-specific allow row drops it),
+#                                  hence the `Esc to cancel` primary.
+#                                  The `.` matches the apostrophe byte
+#                                  tolerantly across encodings.
+PROMPT_ANCHOR='(Esc to cancel|Tab to amend|Yes, and don.t ask again)'
 
 state_path="$(attention_state_path)"
 start_ts="$(date +%s 2>/dev/null || printf '0')"
@@ -128,7 +142,22 @@ runtime_log_info attention "watcher started" \
   "tmux_socket=$tmux_socket" \
   "wezterm_pane=$wezterm_pane" \
   "poll_s=$POLL_INTERVAL_S" \
+  "miss_threshold=$CONSECUTIVE_MISS_THRESHOLD" \
   "max_s=$MAX_DURATION_S" 2>/dev/null || true
+
+consecutive_misses=0
+# Have we observed the anchor at least once since spawn? Notification
+# fires before the TUI finishes painting the prompt footer, so the first
+# few captures may legitimately miss the anchor even though the prompt
+# is "really" on screen. Until we see it once, we know the prompt has
+# not yet rendered and we cannot interpret a miss as "user resolved" —
+# any flip would be premature. Once seen, subsequent misses count toward
+# the debounce normally. A prompt that vanishes before the TUI ever
+# painted (impossible in practice — would require the user to approve
+# faster than ~1 s after Notification, before the TUI has finished
+# laying out the modal) safely falls through to PostToolUse, which is
+# the upstream-only behaviour and matches WEZTERM_ATTENTION_WATCHER_DISABLED=1.
+anchor_ever_seen=0
 
 while :; do
   sleep "$POLL_INTERVAL_S"
@@ -176,13 +205,36 @@ while :; do
   fi
 
   if [[ -n "$content" ]] && grep -qE "$PROMPT_ANCHOR" <<<"$content"; then
-    # Prompt still up: user has not acted yet. Keep polling.
+    # Prompt still up: user has not acted yet. Keep polling, mark the
+    # anchor as seen so future misses count toward debounce, and clear
+    # any miss streak so prior transient drops don't accumulate.
+    anchor_ever_seen=1
+    consecutive_misses=0
     continue
   fi
 
-  # Prompt anchor gone. Flip waiting → running. The transition helper
-  # re-checks status under flock, so a concurrent PostToolUse that beat
-  # us to it will short-circuit cleanly.
+  # Anchor missing. Two reasons not to flip yet:
+  #   (a) startup paint window — until we have observed the anchor at
+  #       least once, the TUI hasn't finished painting the prompt yet;
+  #       a "miss" here is meaningless because we don't know if a prompt
+  #       was ever drawn. Avoid the time-based grace by tying this gate
+  #       to an actual sighting of the prompt, which keeps post-approve
+  #       detection as fast as the debounce alone allows.
+  #   (b) consecutive-miss debounce — TUI partial redraws (Bash preview
+  #       refresh, option-cycle keystrokes, terminal resize echoes) can
+  #       drop the footer from a single capture. Require N misses in a
+  #       row before believing the prompt is gone.
+  if (( anchor_ever_seen == 0 )); then
+    continue
+  fi
+  consecutive_misses=$(( consecutive_misses + 1 ))
+  if (( consecutive_misses < CONSECUTIVE_MISS_THRESHOLD )); then
+    continue
+  fi
+
+  # Prompt anchor stably gone. Flip waiting → running. The transition
+  # helper re-checks status under flock, so a concurrent PostToolUse
+  # that beat us to it will short-circuit cleanly.
   if attention_state_transition_to_running \
        "$session_id" \
        "$wezterm_pane" \
@@ -194,14 +246,16 @@ while :; do
        2>/dev/null; then
     runtime_log_info attention "watcher flipped waiting to running" \
       "session_id=$session_id" "tmux_pane=$tmux_pane" \
-      "elapsed_s=$((now_ts - start_ts))" 2>/dev/null || true
+      "elapsed_s=$((now_ts - start_ts))" \
+      "consecutive_misses=$consecutive_misses" 2>/dev/null || true
   else
     # Helper returned no-op (the lock-protected re-check saw something
     # other than waiting/done/missing — almost certainly running already
     # via PostToolUse winning the race). Log and exit; nothing to do.
     runtime_log_info attention "watcher flip noop" \
       "session_id=$session_id" "tmux_pane=$tmux_pane" \
-      "elapsed_s=$((now_ts - start_ts))" 2>/dev/null || true
+      "elapsed_s=$((now_ts - start_ts))" \
+      "consecutive_misses=$consecutive_misses" 2>/dev/null || true
   fi
   exit 0
 done
