@@ -275,6 +275,63 @@ describe('activate_in_gui jumps via session, not stored pane id', function()
   end)
 end)
 
+describe('activate_in_gui auto-projects folded sessions into overflow', function()
+  it('spawns the project helper and lands the activation on the overflow pane', function()
+    -- Setup: coco-server is parked in tmux but no wezterm pane hosts
+    -- it. The work workspace has an overflow placeholder at pane 16.
+    -- The user picks coco-server in Alt+/. Expected behavior:
+    --   1. activate_in_gui detects no host for coco-server
+    --   2. parses session workspace = "work" from the session name
+    --   3. finds pane 16 (overflow placeholder) in the work workspace
+    --   4. calls the registered overflow_project_spawner to spawn
+    --      the bash helper that switch-clients the overflow pane
+    --   5. memoizes pane 16 → coco-server in the unified map
+    --   6. activation walks the mux and lands on pane 16
+    _G.__WEZTERM_PANE_TMUX_SESSION = {}
+    _G.__WEZTERM_TAB_OVERFLOW = {}
+
+    local activated_pane_id
+    local spawned_args = nil
+    mock.set_mux({
+      windows = {
+        { workspace = 'work', tabs = {
+          { id = 100, title = 'ai-video-collection', active_pane = { id = 10 } },
+          { id = 101, title = '…',                    active_pane = { id = 16 } },
+        }},
+      },
+    })
+    -- Patch pane:activate so the test sees the activation target.
+    for _, win in ipairs(mock.mux.all_windows()) do
+      for _, tab in ipairs(win:tabs()) do
+        for _, info in ipairs(tab:panes_with_info()) do
+          local pane = info.pane
+          pane.activate = function(self) activated_pane_id = self.id end
+        end
+      end
+    end
+
+    -- Register a fake spawner that records the call.
+    attention.register {
+      logger = nil,
+      overflow_project_spawner = function(workspace, session, pane_ref)
+        spawned_args = { workspace = workspace, session = session }
+        return { 'echo', workspace, session }  -- harmless; wezterm.background_child_process is mocked
+      end,
+    }
+
+    local ok = attention.activate_in_gui(99, nil, nil,
+      { tmux_session = 'wezterm_work_coco-server_ffffffffff' })
+
+    assert_truthy(ok, 'activate_in_gui returned false')
+    assert_truthy(spawned_args, 'project spawner was not called')
+    assert_eq(spawned_args.workspace, 'work', 'wrong workspace passed to spawner')
+    assert_eq(spawned_args.session, 'wezterm_work_coco-server_ffffffffff', 'wrong session')
+    assert_eq(activated_pane_id, 16, 'activation did not land on the overflow pane')
+    assert_eq(_G.__WEZTERM_PANE_TMUX_SESSION['16'], 'wezterm_work_coco-server_ffffffffff',
+      'unified map did not memoize the new projection')
+  end)
+end)
+
 describe('optimistic hide drops the entry immediately on Alt+.', function()
   it('removes the hidden entry from collect/picker before disk catches up', function()
     -- Setup: two done entries. Alt+. on the first should drop badge

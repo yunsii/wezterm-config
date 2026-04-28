@@ -286,11 +286,47 @@ function M.register(opts)
     end
   end
 
+  -- Track which wezterm pane the user is currently focused on across
+  -- all gui windows. The hook (emit-agent-status.sh) reads this to
+  -- decide whether to focus-skip a waiting/done upsert: "tmux pane is
+  -- focused in its session" alone is not enough, because that flag
+  -- stays true even while the user is on a totally different
+  -- workspace looking at a different wezterm pane. Only when the
+  -- wezterm-side focused pane equals the hook's WEZTERM_PANE should
+  -- the upsert be skipped.
+  wezterm.on('window-focus-changed', function(window, pane)
+    if not window or not pane then return end
+    local ok_focused, focused = pcall(function() return window:is_focused() end)
+    if not ok_focused or not focused then
+      -- Window lost focus — clear the marker. Safer than leaving the
+      -- last-focused pane id sticky: we'd rather over-upsert than
+      -- under-upsert when no wezterm window has user focus.
+      _G.__WEZTERM_FOCUSED_PANE_ID = nil
+      return
+    end
+    local ok_pid, pid = pcall(function() return pane:pane_id() end)
+    if ok_pid and pid ~= nil then
+      _G.__WEZTERM_FOCUSED_PANE_ID = tostring(pid)
+    end
+  end)
+
   wezterm.on('update-status', function(window, pane)
     local overrides = window:get_config_overrides()
     if overrides and next(overrides) ~= nil then
       window:set_config_overrides({})
       return
+    end
+
+    -- Refresh the focused-pane marker on every tick of the focused
+    -- window too — window-focus-changed fires only on transitions, so
+    -- a pane swap inside the focused window (e.g. Alt+number tab pick)
+    -- still needs an update path. Cheap: one rawset on _G.
+    local ok_focused, focused = pcall(function() return window:is_focused() end)
+    if ok_focused and focused and pane and type(pane.pane_id) == 'function' then
+      local ok_pid, pid = pcall(function() return pane:pane_id() end)
+      if ok_pid and pid ~= nil then
+        _G.__WEZTERM_FOCUSED_PANE_ID = tostring(pid)
+      end
     end
 
     local workspace = window:active_workspace() or 'default'

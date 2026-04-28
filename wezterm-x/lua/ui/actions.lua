@@ -15,6 +15,36 @@ local M = {}
 -- used to resolve a WSL distro hint; when nil the builder falls back to
 -- `constants.default_domain`. Returns nil (and logs a warn) when the
 -- script path or WSL distro cannot be resolved.
+-- Build the wsl.exe / bash argv for
+-- scripts/runtime/attention-project-into-overflow.sh, which switches
+-- the workspace overflow tab to <session> and emits a
+-- tab.activate_overflow event. Used by attention.activate_in_gui as
+-- the "no host found" fallback so Alt+/ on a folded session actually
+-- jumps the user there instead of doing nothing.
+function M.attention_project_into_overflow_args(constants, pane_ref, workspace, session, logger, trace_id)
+  local repo_root = constants and constants.repo_root
+  if not repo_root or repo_root == '' then
+    if logger then
+      logger.warn('attention', 'no repo_root to resolve project script', { trace = trace_id })
+    end
+    return nil
+  end
+  local script_path = repo_root .. '/scripts/runtime/attention-project-into-overflow.sh'
+  local runtime_mode = (constants and constants.runtime_mode) or 'hybrid-wsl'
+  if runtime_mode == 'hybrid-wsl' and constants.host_os == 'windows' then
+    local distro = common.wsl_distro_from_domain(pane_ref and pane_ref:get_domain_name())
+      or common.wsl_distro_from_domain(constants.default_domain)
+    if not distro then
+      if logger then
+        logger.warn('attention', 'unable to resolve WSL distro for overflow project', { trace = trace_id })
+      end
+      return nil
+    end
+    return { 'wsl.exe', '-d', distro, '--', 'bash', script_path, workspace, session }
+  end
+  return { 'bash', script_path, workspace, session }
+end
+
 function M.attention_jump_args(constants, pane_ref, trailing_args, logger, trace_id)
   local repo_root = constants and constants.repo_root
   if not repo_root or repo_root == '' then

@@ -218,6 +218,62 @@ elif [[ "$status" == "resolved" ]]; then
     exit 0
   fi
 else
+  # Focus-skip: when this firing pane IS the currently-focused tmux
+  # pane in its session, suppress waiting / done upserts entirely.
+  # Per user spec ("如果 focus 了的 tmux pane 不触发 waiting 和 done
+  # 的加一操作"): the user is already looking at that pane, so the
+  # badge would be noise — better to never +1 than to +1 then
+  # immediately ack via the wezterm-side focus-ack mechanism.
+  # `running` is informational and always upserts.
+  if [[ ( "$status" == "waiting" || "$status" == "done" ) \
+        && -n "$tmux_socket" && -n "$tmux_session" && -n "$tmux_pane" \
+        && -n "${WEZTERM_PANE:-}" ]]; then
+    attention_state_focus_path="$(attention_state_path)"
+    attention_state_focus_dir="${attention_state_focus_path%/*}/tmux-focus"
+    safe_socket="${tmux_socket//\//_}"
+    safe_session="${tmux_session#\$}"
+    focus_file="$attention_state_focus_dir/${safe_socket}__${safe_session}.txt"
+    live_panes_file="${attention_state_focus_path%/*}/live-panes.json"
+
+    tmux_focused_pane=""
+    if [[ -f "$focus_file" ]]; then
+      tmux_focused_pane="$(tr -d ' \n\r\t' < "$focus_file" 2>/dev/null || printf '')"
+    fi
+    wezterm_focused_pane_id=""
+    if [[ -s "$live_panes_file" ]]; then
+      wezterm_focused_pane_id="$(jq -r '.focused_wezterm_pane_id // "" | tostring' "$live_panes_file" 2>/dev/null || printf '')"
+    fi
+
+    # Both signals must agree:
+    #   - tmux side: the firing tmux pane IS the active pane in its
+    #     session (otherwise the user is looking at a different split
+    #     within the same wezterm pane).
+    #   - wezterm side: the wezterm pane hosting this session IS the
+    #     pane the user is currently focused on across all gui windows
+    #     (otherwise they are on a different workspace / tab and the
+    #     badge is the only signal they get).
+    # If either signal is missing or disagrees, fall through to the
+    # normal upsert — over-noticing beats under-noticing.
+    if [[ -n "$tmux_focused_pane" && "$tmux_focused_pane" == "$tmux_pane" \
+          && -n "$wezterm_focused_pane_id" \
+          && "$wezterm_focused_pane_id" == "${WEZTERM_PANE:-}" ]]; then
+      # User is actually looking at this pane — treat as already
+      # acknowledged. Remove any prior entry for this session (could
+      # be `running` from an earlier transition that never got a
+      # focused stop), otherwise the badge stays stuck on `running`.
+      attention_state_remove "$session_id" 2>/dev/null || true
+      runtime_log_info attention "hook focus-skipped upsert" \
+        "status=$status" \
+        "session_id=$session_id" \
+        "wezterm_pane=${WEZTERM_PANE:-}" \
+        "tmux_pane=$tmux_pane" \
+        "tmux_focused_pane=$tmux_focused_pane" \
+        "wezterm_focused_pane_id=$wezterm_focused_pane_id" \
+        "removed_existing=1" 2>/dev/null || true
+      exit 0
+    fi
+  fi
+
   attention_state_upsert \
     "$session_id" \
     "${WEZTERM_PANE:-}" \

@@ -48,6 +48,7 @@ local state_path = nil
 local state_cache = { entries = {} }
 local prune_spawner = nil
 local forget_spawner = nil
+local overflow_project_spawner = nil
 local focus_ack_scheduled = {}
 -- Map of session_id → ts for entries we have scheduled for removal and
 -- optimistically hidden from the in-memory cache. reload_state re-applies
@@ -699,12 +700,11 @@ function M.render_status_segment(palette, opts)
       end
       return out
     end
-    -- Only `done` collapses under focus. `waiting` is an action item: a
-    -- glance at the pane is not the same as answering the prompt, and
-    -- the user explicitly does not want the counter to lie about
-    -- pending input. waiting clears via the actual response path
-    -- (PreToolUse resolved / Stop / Alt+/), not via focus.
+    -- Both `done` AND `waiting` collapse under focus per the user's
+    -- updated spec: focusing the pane is the acknowledgement that
+    -- the badge was for. `running` stays — informational counter.
     done = drop_focused(done)
+    waiting = drop_focused(waiting)
   end
   local idle_bg = palette.tab_bar_background
   local idle_fg = palette.new_tab_fg
@@ -778,11 +778,12 @@ function M.tab_badge(tab_info)
   -- break a wezterm_pane_id strict match.
   --
   -- When the tab is the active one and tmux-pane focus also matches
-  -- the entry, suppress only the `done` badge (the user is looking at
-  -- that exact pane already; the green mark would be noise). `waiting`
-  -- stays visible because glancing at a prompt is not the same as
-  -- answering it. `running` stays visible so the parallel-task view
-  -- across tabs is truthful.
+  -- the entry, suppress both `done` AND `waiting` badges (the user
+  -- is looking at the exact pane; both badges would be noise). The
+  -- previous policy kept `waiting` visible on the rationale that a
+  -- glance is not the same as an answer, but the user updated the
+  -- spec to suppress both on focus. `running` stays visible so the
+  -- parallel-task view across tabs is truthful.
   local hosted_session = pane_hosted_session(active.pane_id)
   if hosted_session == nil or hosted_session == '' then
     return nil
@@ -794,7 +795,7 @@ function M.tab_badge(tab_info)
       and entry.tmux_session == hosted_session then
       local suppress_for_focus = tab_is_active and M.is_entry_focused(entry, pane_id_str)
       if entry.status == M.STATUS_WAITING then
-        has_waiting = true
+        if not suppress_for_focus then has_waiting = true end
       elseif entry.status == M.STATUS_RUNNING then
         has_running = true
       elseif entry.status == M.STATUS_DONE then
@@ -1037,6 +1038,15 @@ function M.write_live_snapshot(target_path, trace_id)
   -- could drift out of sync with the badge.
   local picker_data = M.compute_picker_data(panes_map, sessions_map)
 
+  -- Publish the wezterm-side focused pane id so the hook
+  -- (emit-agent-status.sh) can verify the user is actually looking at
+  -- the firing tab before suppressing a waiting/done upsert. Without
+  -- this, the hook would skip on the tmux-focus-file signal alone —
+  -- that signal stays true while the user is on a different workspace
+  -- viewing a different wezterm pane, so coco-server done would get
+  -- wrongly suppressed.
+  local focused_pane_id = rawget(_G, '__WEZTERM_FOCUSED_PANE_ID')
+
   local payload = {
     ts = now_ms(),
     trace = (type(trace_id) == 'string') and trace_id or '',
@@ -1044,6 +1054,7 @@ function M.write_live_snapshot(target_path, trace_id)
     sessions = sessions_map,
     picker_rows = picker_data.rows,
     picker_counts = picker_data.counts,
+    focused_wezterm_pane_id = focused_pane_id,
   }
   local ok_enc, encoded = pcall(wezterm.serde.json_encode, payload)
   if not ok_enc or type(encoded) ~= 'string' then
@@ -1151,6 +1162,70 @@ function M.activate_in_gui(pane_id_value, window, source_pane, opts)
       target_id = tostring(found)
     end
   end
+
+  -- No wezterm pane currently hosts the session (typical for a folded
+  -- session: it lives in tmux but the workspace overflow tab is
+  -- attached to something else right now). Project it into the
+  -- overflow tab — same effect as the user picking it via Alt+t —
+  -- so the click actually takes them somewhere useful instead of
+  -- silently dead-ending on the entry's stale stored pane id. We
+  -- compute the overflow placeholder pane id from the live mux to
+  -- use as the activation target, AND spawn the bash helper that
+  -- runs `tmux switch-client` on the overflow client + emits
+  -- tab.activate_overflow so the unified map updates.
+  if target_id == nil and tmux_session_hint and tmux_session_hint ~= ''
+     and type(overflow_project_spawner) == 'function' then
+    local session_workspace = tmux_session_hint:match('^wezterm_([^_]+)_')
+    if session_workspace then
+      -- Find the overflow placeholder pane in that workspace via the
+      -- same heuristic used elsewhere: tab title == OVERFLOW_GLYPH.
+      local overflow_pane_id
+      local ok_all, all_windows = pcall(wezterm.mux.all_windows)
+      if ok_all and type(all_windows) == 'table' then
+        for _, mux_win in ipairs(all_windows) do
+          local ok_ws, ws = pcall(function() return mux_win:get_workspace() end)
+          if ok_ws and ws == session_workspace then
+            local ok_tabs, tabs_list = pcall(function() return mux_win:tabs() end)
+            if ok_tabs and type(tabs_list) == 'table' then
+              for _, mux_tab in ipairs(tabs_list) do
+                local ok_title, title = pcall(function() return mux_tab:get_title() end)
+                if ok_title and title == '…' then
+                  local ok_pane, active_pane = pcall(function() return mux_tab:active_pane() end)
+                  if ok_pane and active_pane then
+                    pcall(function() overflow_pane_id = active_pane:pane_id() end)
+                  end
+                  break
+                end
+              end
+            end
+          end
+          if overflow_pane_id then break end
+        end
+      end
+      if overflow_pane_id then
+        -- Spawn the project helper. It runs tab-overflow-attach.sh
+        -- (tmux switch-client -c <tty> -t <session>) and emits
+        -- tab.activate_overflow to refresh the unified map.
+        local args = overflow_project_spawner(session_workspace, tmux_session_hint, source_pane)
+        if type(args) == 'table' and #args > 0 then
+          pcall(wezterm.background_child_process, args)
+        end
+        -- Memoize the projection in the unified map immediately so
+        -- subsequent reads (and this very activation walk) see the
+        -- new edge without waiting for the bash side / event tick.
+        memoize_pane_session(overflow_pane_id, tmux_session_hint)
+        target_id = tostring(overflow_pane_id)
+        if module_logger then
+          module_logger.info('attention', 'projected entry into overflow', {
+            session = tmux_session_hint,
+            workspace = session_workspace,
+            overflow_pane_id = overflow_pane_id,
+          })
+        end
+      end
+    end
+  end
+
   if target_id == nil and pane_id_value ~= nil and pane_id_value ~= '' then
     target_id = tostring(pane_id_value)
   end
@@ -1439,7 +1514,13 @@ function M.maybe_ack_focused(window, pane)
   for sid, entry in pairs(state_cache.entries or {}) do
     if entry_is_live(entry, now) then
       live_sids[sid] = true
-      if entry.status == M.STATUS_DONE
+      -- Ack both waiting and done when the entry's pane is focused.
+      -- Earlier the policy was "done only" on the rationale that
+      -- waiting is an action item and a glance ≠ an answer; the user
+      -- updated that spec ("如果 focus 了的 tmux pane 不触发 waiting
+      -- 和 done 的加一操作"). Running stays excluded because it is
+      -- informational and clears on its own state transition.
+      if (entry.status == M.STATUS_DONE or entry.status == M.STATUS_WAITING)
         and M.is_entry_focused(entry, pane_id_str) then
         local ts = entry.ts
         if ts ~= nil and focus_ack_scheduled[sid] ~= ts then
@@ -1509,6 +1590,9 @@ function M.register(opts)
   end
   if opts and type(opts.forget_spawner) == 'function' then
     forget_spawner = opts.forget_spawner
+  end
+  if opts and type(opts.overflow_project_spawner) == 'function' then
+    overflow_project_spawner = opts.overflow_project_spawner
   end
   if opts and opts.constants and opts.constants.attention and opts.constants.attention.state_file then
     state_path = opts.constants.attention.state_file

@@ -23,8 +23,20 @@ for t in tests/lua-units/test_*.lua; do
   fi
 done
 
+# Hook-side bash suites cover behavior that lives in
+# scripts/claude-hooks/ and scripts/runtime/ (e.g. the focused-pane
+# upsert suppression). They mock state files in a tmpdir, so they
+# do not touch the user's real attention.json.
+for t in tests/hook-units/test_*.sh; do
+  [[ -f "$t" ]] || continue
+  echo "── $t"
+  if ! bash "$t"; then
+    failures=$((failures + 1))
+  fi
+done
+
 if (( failures > 0 )); then
   echo "$failures test file(s) failed" >&2
   exit 1
 fi
-echo "all lua-unit suites passed"
+echo "all unit suites passed"

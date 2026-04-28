@@ -50,11 +50,22 @@ function M.apply(opts)
     local forget_spawner = function(trailing_args)
       return actions.attention_jump_args(constants, nil, trailing_args, logger, 'attention-focus-ack')
     end
+    -- Builds the wsl.exe argv for attention-project-into-overflow.sh
+    -- so activate_in_gui can auto-project a folded session into the
+    -- workspace overflow tab when no wezterm pane currently hosts it.
+    -- Without this, Alt+/ on a parked-but-running session falls
+    -- through to the entry stored wezterm_pane_id and silently lands
+    -- on the user own current pane.
+    local overflow_project_spawner = function(workspace, session, pane_ref)
+      return actions.attention_project_into_overflow_args(
+        constants, pane_ref, workspace, session, logger, 'attention-project')
+    end
     attention.register {
       logger = logger,
       constants = constants,
       prune_spawner = prune_spawner,
       forget_spawner = forget_spawner,
+      overflow_project_spawner = overflow_project_spawner,
     }
   end
   local helper_prewarm_started = false
