@@ -46,6 +46,7 @@ create_window_from_spec() {
   local layout="${6:?missing layout}"
   local role="${7:?missing role}"
   local window_id=""
+  local primary_pane_id=""
 
   if [[ "$create_mode" == "session" ]]; then
     window_id="$(tmux new-session -d -P -F '#{window_id}' -s "$session_name" -n "$window_label" -c "$worktree_root" "$primary_command")"
@@ -58,6 +59,15 @@ create_window_from_spec() {
   fi
 
   apply_window_metadata "$session_name" "$window_id" "$worktree_root" "$window_label" "$primary_command" "$layout" "$role"
+
+  # Tag the freshly-created primary pane so C-n / User3 can detect a
+  # managed agent pane through the resume wrapper's leaf=sh / leaf=node
+  # startup transient. Without this, panes created via session-replacement
+  # refresh would carry no `@wezterm_pane_role` and the bindings would
+  # fall through to plain key forwarding while the wrapper boots.
+  primary_pane_id="$(tmux list-panes -t "$window_id" -F '#{pane_id}' 2>/dev/null | head -n 1)"
+  ensure_primary_pane_role_tag "$primary_pane_id" "$role" "${wezterm_config_repo:-}"
+
   printf '%s\n' "$window_id"
 }
 

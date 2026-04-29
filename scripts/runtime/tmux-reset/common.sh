@@ -125,6 +125,29 @@ agent_profile_for_managed_pane() {
   printf '%s\n' "$profile"
 }
 
+# Tag (or untag) a primary pane with `@wezterm_pane_role=agent-cli:<profile>`
+# so the C-n / User3 bindings can detect it through the resume wrapper's
+# leaf=sh / leaf=node boot transient. Used by every path that respawns
+# or freshly creates a managed primary pane (in-place window refresh,
+# session-replacement clone, …) to keep the predicate semantics in one
+# place.
+ensure_primary_pane_role_tag() {
+  local pane_id="${1:?missing pane id}"
+  local role="${2:-}"
+  local wezterm_repo="${3:-}"
+  local agent_profile=""
+
+  [[ -n "$pane_id" ]] || return 0
+  if [[ "$role" == managed* ]]; then
+    agent_profile="$(agent_profile_for_managed_pane "$wezterm_repo" 2>/dev/null || true)"
+  fi
+  if [[ -n "$agent_profile" ]]; then
+    tmux set-option -p -t "$pane_id" @wezterm_pane_role "agent-cli:$agent_profile" 2>/dev/null || true
+  else
+    tmux set-option -p -t "$pane_id" -u @wezterm_pane_role 2>/dev/null || true
+  fi
+}
+
 active_window_id_for_session() {
   local session_name="${1:?missing session name}"
   tmux display-message -p -t "$session_name" '#{window_id}' 2>/dev/null || true

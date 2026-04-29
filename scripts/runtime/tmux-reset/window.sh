@@ -339,18 +339,11 @@ reset_window_in_place() {
   tmux respawn-pane -k -t "$target_pane" -c "$worktree_root" "$primary_command"
   tmux rename-window -t "$window_id" "$window_label" 2>/dev/null || true
 
-  # Tag the pane with the agent profile (or clear the tag) so the C-n /
-  # User3 bindings can recognize it as an agent pane through the resume
-  # wrapper's leaf=sh / leaf=node startup transient. See `@agent_pane_match`
-  # in tmux.conf for how this option is consumed.
-  local agent_profile=""
-  if [[ "$target_is_primary" == "1" && "$role" == managed* ]]; then
-    agent_profile="$(agent_profile_for_managed_pane "${wezterm_config_repo:-}" 2>/dev/null || true)"
-  fi
-  if [[ -n "$agent_profile" ]]; then
-    tmux set-option -p -t "$target_pane" @wezterm_pane_role "agent-cli:$agent_profile" 2>/dev/null || true
-  else
-    tmux set-option -p -t "$target_pane" -u @wezterm_pane_role 2>/dev/null || true
+  # Tag (or clear) the agent profile on the primary pane so C-n / User3
+  # can detect it through the resume wrapper's leaf=sh / leaf=node
+  # startup transient. See `@agent_pane_match` in tmux.conf.
+  if [[ "$target_is_primary" == "1" ]]; then
+    ensure_primary_pane_role_tag "$target_pane" "$role" "${wezterm_config_repo:-}"
   fi
   if [[ "$target_is_primary" == "1" && "$layout" == "managed_two_pane" && "${pane_count:-0}" -lt 2 ]]; then
     tmux_worktree_ensure_window_panes "$window_id" "$worktree_root"
