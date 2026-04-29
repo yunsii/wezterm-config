@@ -9,6 +9,7 @@ WezTerm workspaces are the top-level session unit. For the full WezTerm-vs-tmux 
 - `default`: WezTerm built-in workspace
 - `work`: managed business workspace
 - `config`: managed config workspace
+- `opensource`: managed open-source workspace (personal / `~/github` projects, bound to `Alt+s`)
 
 ## Behavior
 

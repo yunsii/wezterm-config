@@ -557,6 +557,18 @@
     "palette": { "display_only": true }
   },
   {
+    "id": "workspace.switch-opensource",
+    "label": "Workspace: Switch to opensource",
+    "description": "Open or switch to `opensource` using directories configured in `wezterm-x/local/workspaces.lua` (intended for ~/github open-source projects).",
+    "scope": "workspaces",
+    "context": "any",
+    "binding": {"handler": "workspace.switch", "args": {"name": "opensource"}},
+    "hotkeys": [
+      { "keys": "Alt+s", "layer": "wezterm" }
+    ],
+    "palette": { "display_only": true }
+  },
+  {
     "id": "workspace.switch-mock-deck",
     "label": "Workspace: Switch to mock-deck (demo)",
     "description": "Switch to the `mock-deck` demo workspace (six tabs simulating multi-agent activity). Only useful when the `mock-deck` workspace is registered in `wezterm-x/local/workspaces.lua` and the orchestrator at `scripts/dev/mock-deck/mock-deck.sh` is running.",

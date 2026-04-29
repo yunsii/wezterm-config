@@ -49,4 +49,18 @@ return {
       { cwd = '/home/your-user/work/project-c', command = { 'bash' } },
     },
   },
+
+  -- The `opensource` workspace collects personal / open-source projects
+  -- under ~/github, separate from the company `work` workspace. Bound to
+  -- Alt+s. Same launcher resolution as `work` — first open auto-resumes
+  -- the cwd's last conversation, falling back to a fresh agent.
+  opensource = {
+    defaults = {
+      launcher = managed_launcher,
+    },
+    items = {
+      { cwd = '/home/your-user/github/some-oss-repo' },
+      { cwd = '/home/your-user/github/another-oss-repo' },
+    },
+  },
 }

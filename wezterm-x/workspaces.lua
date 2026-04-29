@@ -33,6 +33,12 @@ local public_workspaces = {
       { cwd = constants.main_repo_root },
     } or {},
   },
+  opensource = {
+    defaults = {
+      launcher = managed_launcher,
+    },
+    items = {},
+  },
 }
 
 local local_workspaces = helpers.load_optional_table(join_path(runtime_dir, 'local', 'workspaces.lua')) or {}
