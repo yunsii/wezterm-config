@@ -281,6 +281,50 @@ fi
 rm -rf "$sandbox"
 
 echo
+echo "▸ emit-agent-status.sh tmux race guard"
+
+# Case A (race-guard regression): hook runs inside_tmux but
+# `tmux display-message` returns an empty pane id (typical during
+# respawn-pane after session.refresh-current-session). The hook MUST
+# skip the upsert — writing tmux_pane="" leaves a stale entry that
+# renders as `?` in the Alt+/ picker tmux_seg slot and survives until
+# 30 min TTL prune. Status mutations (running/waiting/done) are all
+# subject to the skip.
+for skip_status in running waiting done; do
+  sandbox="$(mktemp -d)"
+  guard_sandbox_paths "$sandbox/wezterm-runtime"
+  notif=""
+  [[ "$skip_status" == "waiting" ]] && notif="permission_prompt"
+  # MOCK_TMUX_PANE="" causes the mocked tmux display-message to expand
+  # `#{pane_id}` to nothing → the hook reads tmux_pane="".
+  run_hook_in_sandbox "$sandbox" "$skip_status" "$notif" \
+    "1" "/tmp/tmux-1000/default" "wezterm_config_a_aaaaaaaaaa" "" ""
+  state_path="$(state_file_in "$sandbox")"
+  if [[ ! -s "$state_path" ]]; then
+    echo "  ✓ ${skip_status} skips when tmux_pane is empty"; pass=$((pass+1))
+  elif jq -e '.entries // {} | length == 0' "$state_path" >/dev/null 2>&1; then
+    echo "  ✓ ${skip_status} skips when tmux_pane is empty"; pass=$((pass+1))
+  else
+    echo "  ✗ ${skip_status} skips when tmux_pane is empty"
+    jq '.entries' "$state_path" 2>/dev/null | sed 's/^/    /'
+    fail=$((fail+1))
+  fi
+  rm -rf "$sandbox"
+done
+
+# Case B (negative): outside tmux (TMUX env unset by leaving it as
+# the test harness default "dummy" but with empty TMUX_PANE), the
+# guard should NOT trigger. Today's harness always sets TMUX="dummy"
+# and a non-empty TMUX_PANE on the success path; we exercise that the
+# guard is precisely scoped by re-running the existing focused-pane
+# upsert case and asserting the entry IS written.
+sandbox="$(mktemp -d)"
+run_hook_in_sandbox "$sandbox" "running" "" \
+  "10" "/tmp/tmux-1000/default" "wezterm_work_a_aaaaaaaaaa" "%5" "%5"
+assert_has_entry_for_pane "running with bound tmux pane still upserts" "$sandbox" "%5"
+rm -rf "$sandbox"
+
+echo
 if (( fail > 0 )); then
   echo "$pass passed, $fail failed"
   exit 1

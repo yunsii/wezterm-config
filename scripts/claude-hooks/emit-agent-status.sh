@@ -134,6 +134,30 @@ if [[ -n "${TMUX-}" ]] && command -v tmux >/dev/null 2>&1; then
   fi
 fi
 
+# Race guard: inside tmux but display-message returned an empty pane id
+# means the tmux server has not yet finished binding this pane (typical
+# during respawn-pane after `session.refresh-current-session`). Writing a
+# state entry now would persist `tmux_window=""`/`tmux_pane=""`, which
+# the picker renders as `?` in the tmux_seg slot. The status mutation
+# this hook would publish is recoverable: the next hook from this pane
+# (within seconds) sees a fully-bound tmux pane and writes a clean
+# entry. Skip the upsert for write-status calls; resolved/cleared/
+# pane-evict are housekeeping that should still run.
+case "$status" in
+  running|waiting|done)
+    if [[ -n "${TMUX-}" && -z "$tmux_pane" ]]; then
+      runtime_log_info attention "hook skipped on tmux race" \
+        "status=$status" \
+        "session_id=${session_id:-}" \
+        "wezterm_pane=${WEZTERM_PANE:-}" \
+        "tmux_socket=${tmux_socket:-}" \
+        "tmux_pane_env=${TMUX_PANE:-}" \
+        "entry_ts_ms=$entry_ts_ms" 2>/dev/null || true
+      exit 0
+    fi
+    ;;
+esac
+
 # Resolve the git branch from the best available cwd. CLAUDE_PROJECT_DIR
 # is set by Claude Code for hook subprocesses; fall back to the tmux pane's
 # current_path, then the hook's own $PWD.
