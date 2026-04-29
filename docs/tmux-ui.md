@@ -36,6 +36,7 @@ Use this doc when you need visible UI behavior for tabs, panes, or status lines.
 - `Ctrl+c` first checks for a WezTerm terminal selection and copies it if one exists; otherwise it sends a normal terminal `Ctrl+c`.
 - tmux emits terminal focus-in and focus-out events to applications, which helps mouse-aware TUIs recover cleanly when the WezTerm window regains focus.
 - The active pane keeps the base cream background (`#f1f0e9`) while inactive panes render a slightly darker cream (`#eae9e1`), so the focused pane is visually distinct via body tint rather than border color. Pane borders stay muted beige in both states.
+- ANSI 256-color index 255 is remapped to `#dedcd0` via `colors.indexed` in `wezterm-x/lua/ui.lua` (sourced from `palette.indexed` in `constants.lua`). Claude Code's scrollback renderer paints user-message backgrounds with `\e[48;5;255m`, and the default xterm value (`#eeeeee`) is too close to the cream pane background to read clearly. The remap is applied to the wezterm color scheme rather than a Claude theme override because Claude Code's `userMessageBackground` token only takes effect in fullscreen rendering mode; in scrollback mode the only point of intervention is the terminal palette.
 
 ## Agent Attention
 

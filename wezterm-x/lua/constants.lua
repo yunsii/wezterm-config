@@ -95,6 +95,9 @@ local base_constants = {
       '#68a5a5',
       '#f6f3eb',
     },
+    indexed = {
+      [255] = '#dedcd0',
+    },
     tab_bar_background = '#f1f0e9',
     tab_inactive_bg = '#f1f0e9',
     tab_inactive_fg = '#6f685f',

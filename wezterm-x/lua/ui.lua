@@ -158,6 +158,7 @@ function M.apply(opts)
     split = palette.split,
     ansi = palette.ansi,
     brights = palette.brights,
+    indexed = palette.indexed,
     tab_bar = {
       background = palette.tab_bar_background,
       inactive_tab_edge = palette.tab_bar_background,
