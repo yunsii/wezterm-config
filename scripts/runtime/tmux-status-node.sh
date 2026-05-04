@@ -5,19 +5,18 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$script_dir/tmux-status-lib.sh"
 
-load_nvm_if_needed() {
+expose_fnm_default_if_needed() {
   if command -v node >/dev/null 2>&1; then
     return
   fi
 
-  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
-    # shellcheck disable=SC1090
-    source "$NVM_DIR/nvm.sh"
+  local fnm_default_bin="$HOME/.local/share/fnm/aliases/default/bin"
+  if [[ -d "$fnm_default_bin" ]]; then
+    PATH="$fnm_default_bin:$PATH"
   fi
 }
 
-load_nvm_if_needed
+expose_fnm_default_if_needed
 
 if ! command -v node >/dev/null 2>&1; then
   style 'fg=#7f7a72' 'Node unavailable'

@@ -173,6 +173,7 @@ write_cached_node_version() {
 
 resolve_node_version() {
   local cached_value=""
+  local fnm_default_bin=""
   local lock_dir=""
   local version=""
 
@@ -197,10 +198,9 @@ resolve_node_version() {
   fi
 
   if ! command -v node >/dev/null 2>&1; then
-    export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-    if [[ -s "$NVM_DIR/nvm.sh" ]]; then
-      # shellcheck disable=SC1090
-      source "$NVM_DIR/nvm.sh"
+    fnm_default_bin="$HOME/.local/share/fnm/aliases/default/bin"
+    if [[ -d "$fnm_default_bin" ]]; then
+      PATH="$fnm_default_bin:$PATH"
     fi
   fi
 

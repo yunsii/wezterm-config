@@ -53,7 +53,7 @@ In tmux UI terms what shows up here is: a per-tab badge (a 1-cell `█` block in
 - The third tmux line renders whenever the WakaTime toggle is enabled.
 - Any enabled status section keeps a stable on-screen slot. If live data is unavailable, that section renders placeholder text instead of disappearing.
 - A section only disappears completely when its toggle is disabled. If an entire line has no enabled sections, that line does not reserve a status row.
-- Node.js version lookup includes an `nvm` fallback and the resolved version is cached.
+- Node.js version lookup falls back to `~/.local/share/fnm/aliases/default/bin` when `node` is not already on `$PATH` (this is the path `fnm` populates from its `default` alias). The resolved version is cached.
 - WakaTime refresh is cache-backed and reuses summary data for up to 60 seconds.
 
 ## Notes
