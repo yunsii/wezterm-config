@@ -47,6 +47,7 @@ Read additional topic files only when the current file points to them or the tas
 - Whether a rule belongs in doc, script, hook, skill, or plugin → [automation.md](./automation.md)
 - Choosing, sequencing, or batching tool calls → [tool-use.md](./tool-use.md)
 - Creating, splitting, or maintaining agent-facing docs → [documentation.md](./documentation.md)
+- Initializing `AGENTS.md` / `CLAUDE.md` in a new or undocumented repo, distilling `/init`-style scaffolder output, deciding when to split into a layered profile → [repo-bootstrap.md](./repo-bootstrap.md)
 - Host-side side effects (app focus, browser, notifications, reveal in shell, wrapper boundary) → [platform-actions.md](./platform-actions.md)
 - Writing to the system clipboard → [clipboard.md](./clipboard.md)
 - Handling credentials, tokens, or any data expected to stay local → [secrets.md](./secrets.md)
