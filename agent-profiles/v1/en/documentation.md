@@ -81,3 +81,8 @@ Each topic file should ideally answer:
 - [documentation-30] Keep one source of truth for each rule.
 - [documentation-31] Other files should route to it, not restate it.
 - [documentation-32] When a change alters behavior, interfaces, or workflows that an existing doc describes, update that doc in the same edit.
+
+## Prior Art
+
+- [documentation-33] Before drafting structure, formats, or conventions for agent-facing docs, follow [implementation-45]–[implementation-49] (Prior Art First). Doc structure is a design decision; invent only after the codebase, the format spec (e.g. `agents.md`), and the broader community have been checked.
+- [documentation-34] When applying a community pattern, name the source and the year inline ("per the AGENTS.md spec, 2026") so future readers can re-verify; patterns age, especially in the LLM-tooling space.

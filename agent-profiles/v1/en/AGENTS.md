@@ -27,7 +27,7 @@ When layers conflict, the higher layer wins. Do not discard a higher-layer rule 
 
 Default loop:
 
-1. Understand the existing system before changing it.
+1. Understand the existing system, and the established community practice for this kind of problem, before designing your own.
 2. Find the narrowest owning area.
 3. Make the smallest change that closes the task.
 4. Verify automatically. Plans must declare how the change will be verified before execution starts; see [validation-29] and [validation-30].
@@ -65,6 +65,7 @@ Each rule carries a stable identifier of the form `[<topic>-NN]` so feedback, me
 One-line summaries so the entrypoint stays scannable.
 Full rules live in the routed topic file.
 
+- Prior art: before designing — code, docs, automation, hooks, anything — search the codebase, the framework, and the broader community first; cite what you adopted, adapted, or rejected; full rule in [implementation.md](./implementation.md) `Prior Art First`.
 - Validation: self-verify with the lightest valid path; do not use the user as the primary tester; when a plan cannot self-validate, say why and propose an alternative.
 - Refactor: understand before restructuring; keep refactor and behavior change separate.
 - Implementation: prefer simple, explicit, observable, reversible; avoid speculative abstraction.

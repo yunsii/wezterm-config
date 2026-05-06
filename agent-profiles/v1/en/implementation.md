@@ -24,6 +24,16 @@ When the change is a localized bug fix with no design decision, or pure text/com
 
 Prefer implementations that are understandable, observable, proportionate, and cheap to maintain.
 
+## Prior Art First
+
+Before designing a non-trivial mechanism — module layout, abstraction, retry/queue/cache strategy, lockfile workflow, doc structure, hook pattern, anything you'd otherwise invent — search the established practice first. Inventing in the open is much more expensive than reading what already exists, and bespoke patterns drift from idioms reviewers recognize.
+
+- [implementation-45] Treat "search for existing best practices" as a step that precedes design, not as a tie-breaker after design. Skipping it is a failure mode, not a shortcut.
+- [implementation-46] Sources, in priority order: (a) the codebase itself — how a sibling module or earlier commit already solved this; (b) the language/framework's official guidance; (c) the broader community — searches, vendor docs, well-cited blog posts, deepwiki / context7 for library-specific use; (d) general web search for cross-cutting patterns. Stop at the first level that gives a concrete, actionable answer.
+- [implementation-47] Cite what you found and why you adopted, adapted, or rejected it. "Followed the official `tokio::sync::OnceCell` pattern" or "deviated because we need re-init on config reload" is enough — silent invention is what you must avoid, not bespoke choices that have a stated reason.
+- [implementation-48] Time-box the search to its decision value. Five minutes for a one-file helper, longer for a subsystem. Inconclusive search is itself a finding ("no community consensus, designing from first principles") — record it and move on, do not loop.
+- [implementation-49] Prior-art findings age. When citing a practice, note its year or version; verify it still holds before adopting it on a hot path or a long-lived interface.
+
 ## Organize Around Ownership
 
 Use structures with:
