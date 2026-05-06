@@ -23,6 +23,29 @@ workspace="$1"
 cwd="$2"
 shift 2
 cwd="$(tmux_worktree_abs_path "$cwd")"
+
+# Pulled out before `[command...]` so the rest of the parser keeps treating
+# whatever's left as the launcher command verbatim. Set by the Lua side
+# (`workspace/runtime.lua:project_session_args`) when the workspace item
+# resolves to a managed agent launcher; absent for mock-deck items and for
+# direct callers (tests) that pass a custom command.
+agent_profile=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --agent-profile)
+      agent_profile="${2:-}"
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
 window_id=""
 session_created=0
 window_created=0
@@ -191,6 +214,27 @@ fi
 
 tmux_worktree_set_session_metadata "$session_name" "$workspace" managed
 tmux_worktree_set_window_metadata "$window_id" managed_primary "$worktree_root" "$worktree_label" "$primary_shell_command" managed_two_pane
+
+# Tag the primary pane with `@wezterm_pane_role=agent-cli:<base>` so the
+# Ctrl+n (`/new`) and Ctrl+P (`!git push`) bindings — driven by
+# `@agent_pane_match` in tmux.conf — can recognize the agent CLI through
+# primary-pane-wrapper.sh's startup transient (where `pane_current_command`
+# is `sh`/`node` rather than `claude`/`codex` because the resume wrapper
+# `sh -c '<resume> || exec <fresh>'` doesn't `exec` on the success branch).
+# Mirrors the refresh-side tagging in `tmux-reset/{session,window}.sh`'s
+# `ensure_primary_pane_role_tag`. Re-applied on session reuse so existing
+# panes pick up the tag retroactively the next time the workspace opens.
+if [[ -n "$agent_profile" ]]; then
+  primary_pane_id="$(tmux list-panes -t "$window_id" -F '#{pane_id}' 2>/dev/null | head -n 1)"
+  if [[ -n "$primary_pane_id" ]]; then
+    tmux set-option -p -t "$primary_pane_id" @wezterm_pane_role "agent-cli:$agent_profile" 2>/dev/null || true
+    runtime_log_info workspace "tagged primary pane with agent role" \
+      "session_name=$session_name" \
+      "window_id=$window_id" \
+      "pane_id=$primary_pane_id" \
+      "agent_profile=$agent_profile"
+  fi
+fi
 
 # Record the wezterm pane → tmux session mapping for the attention-side
 # focus-ack fallback. Without this, an attention entry whose stored

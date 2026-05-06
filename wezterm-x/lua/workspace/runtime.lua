@@ -154,19 +154,32 @@ exit 1
 
   local function project_session_args(workspace_name, item, trace_id)
     local launch_command = nil
+    local agent_profile = nil
 
     if item.launcher then
       launch_command = managed_launcher_command(item.launcher, trace_id)
+      -- e.g. `claude_resume` → `claude`. The resume-variant suffix is
+      -- normalized away so the tmux-side `@wezterm_pane_role=agent-cli:<base>`
+      -- tag matches the agent CLI's own basename — that's what
+      -- `@agent_pane_match` in tmux.conf compares against. Without this
+      -- tag the Ctrl+n / Ctrl+P bindings can't see through the wrapper's
+      -- `pane_current_command=sh` boot transient.
+      local base = item.launcher:gsub('_resume$', '')
+      if base ~= '' then
+        agent_profile = base
+      end
     else
       launch_command = item.command or {}
     end
 
-    local session_command = runtime_script_command('scripts/runtime/open-project-session.sh', {
-      workspace_name,
-      item.cwd,
-    }, {
-      trace_id = trace_id,
-    })
+    local positional = { workspace_name, item.cwd }
+    if agent_profile then
+      positional[#positional + 1] = '--agent-profile'
+      positional[#positional + 1] = agent_profile
+    end
+
+    local session_command = runtime_script_command('scripts/runtime/open-project-session.sh',
+      positional, { trace_id = trace_id })
 
     for _, part in ipairs(launch_command or {}) do
       session_command[#session_command + 1] = part
