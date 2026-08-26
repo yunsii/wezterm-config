@@ -83,6 +83,7 @@ return {
   -- ['attention.jump-waiting']          = 'Alt+j',
   -- ['attention.jump-done']             = 'Alt+k',
   -- ['attention.jump-running']          = 'Alt+l',
+  -- ['attention.jump-running-prev']     = 'Alt+Shift+l',
   -- ['attention.overlay']               = 'Alt+/',
 
   -- ── Workspace switch ──────────────────────────────────

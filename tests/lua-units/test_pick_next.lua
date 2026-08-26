@@ -273,6 +273,59 @@ describe('pick_next — round-robin (3+ pool)', function()
     assert_truthy(third, 'wrap hop nil')
     assert_eq(third.session_id, 'r_old', 'from newest should wrap to oldest')
   end)
+
+  it('reverse walks newest-ward (Alt+Shift+l)', function()
+    reset()
+    mock.set_mux {
+      windows = {
+        {
+          workspace = 'work',
+          tabs = {
+            { id = 1, title = 'a', active_pane = { id = 41 } },
+            { id = 2, title = 'b', active_pane = { id = 42 } },
+            { id = 3, title = 'c', active_pane = { id = 43 } },
+          },
+        },
+      },
+    }
+    tab_visibility.set_pane_session(41, 'wezterm_work_a_aaaaaaaaaa')
+    tab_visibility.set_pane_session(42, 'wezterm_work_b_bbbbbbbbbb')
+    tab_visibility.set_pane_session(43, 'wezterm_work_c_cccccccccc')
+    local now = os.time() * 1000
+    local entries = '{"version":1,"entries":{'
+      .. '"r_old":{"session_id":"r_old","wezterm_pane_id":"41",'
+        .. '"tmux_socket":"/tmp/sock","tmux_session":"wezterm_work_a_aaaaaaaaaa",'
+        .. '"tmux_window":"@1","tmux_pane":"%1","status":"running","ts":'
+        .. tostring(now - 3000) .. ',"reason":"old"},'
+      .. '"r_mid":{"session_id":"r_mid","wezterm_pane_id":"42",'
+        .. '"tmux_socket":"/tmp/sock","tmux_session":"wezterm_work_b_bbbbbbbbbb",'
+        .. '"tmux_window":"@1","tmux_pane":"%1","status":"running","ts":'
+        .. tostring(now - 2000) .. ',"reason":"mid"},'
+      .. '"r_new":{"session_id":"r_new","wezterm_pane_id":"43",'
+        .. '"tmux_socket":"/tmp/sock","tmux_session":"wezterm_work_c_cccccccccc",'
+        .. '"tmux_window":"@1","tmux_pane":"%1","status":"running","ts":'
+        .. tostring(now - 1000) .. ',"reason":"new"}'
+      .. '}}'
+    -- Focused on mid; reverse should go to oldest (previous in sorted order).
+    local tmp = setup_state(entries, '/tmp/sock', 'wezterm_work_b_bbbbbbbbbb', '%1', {
+      { socket = '/tmp/sock', session = 'wezterm_work_a_aaaaaaaaaa', tmux_pane = '%1' },
+      { socket = '/tmp/sock', session = 'wezterm_work_c_cccccccccc', tmux_pane = '%1' },
+    })
+    local prev = attention.pick_next(attention.STATUS_RUNNING, 42, { reverse = true })
+    assert_truthy(prev, 'reverse hop nil')
+    assert_eq(prev.session_id, 'r_old', 'from mid reverse should land on oldest')
+
+    cleanup(tmp)
+    -- Focused on oldest; reverse wraps to newest.
+    tmp = setup_state(entries, '/tmp/sock', 'wezterm_work_a_aaaaaaaaaa', '%1', {
+      { socket = '/tmp/sock', session = 'wezterm_work_b_bbbbbbbbbb', tmux_pane = '%1' },
+      { socket = '/tmp/sock', session = 'wezterm_work_c_cccccccccc', tmux_pane = '%1' },
+    })
+    local wrap = attention.pick_next(attention.STATUS_RUNNING, 41, { reverse = true })
+    cleanup(tmp)
+    assert_truthy(wrap, 'reverse wrap nil')
+    assert_eq(wrap.session_id, 'r_new', 'from oldest reverse should wrap to newest')
+  end)
 end)
 
 describe('pick_next — running pool (Alt+l)', function()

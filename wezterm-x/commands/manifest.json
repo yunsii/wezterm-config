@@ -763,7 +763,7 @@
   {
     "id": "attention.jump-running",
     "label": "Attention: Jump to next running task",
-    "description": "Jump to the next agent pane whose status is `running`. Repeated presses cycle past the current target; silent when nothing is running. Does not clear the counter (running is informational, not an ack). Toasts outside tmux.",
+    "description": "Jump to the next agent pane whose status is `running` (oldest-first round-robin). Repeated presses cycle past the current target; silent when nothing is running. Does not clear the counter (running is informational, not an ack). Reverse with `Alt+Shift+l`. Toasts outside tmux.",
     "scope": "project-navigation",
     "context": "tmux-backed",
     "binding": {
@@ -772,6 +772,28 @@
     "hotkeys": [
       {
         "keys": "Alt+l",
+        "layer": "wezterm"
+      }
+    ],
+    "palette": {
+      "display_only": true
+    }
+  },
+  {
+    "id": "attention.jump-running-prev",
+    "label": "Attention: Jump to previous running task",
+    "description": "Jump to the previous agent pane whose status is `running` (newest-ward round-robin — reverse of `Alt+l`). Silent when nothing is running. Does not clear the counter. Toasts outside tmux.",
+    "scope": "project-navigation",
+    "context": "tmux-backed",
+    "binding": {
+      "handler": "attention.jump_running",
+      "args": {
+        "reverse": true
+      }
+    },
+    "hotkeys": [
+      {
+        "keys": "Alt+Shift+l",
         "layer": "wezterm"
       }
     ],

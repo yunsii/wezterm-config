@@ -50,7 +50,7 @@ Read `AGENTS.md` first, then open only the matching file under `docs/`. Read add
   Read [`docs/multiplexer-comparison.md`](docs/multiplexer-comparison.md).
 - Agent-attention pipeline: Claude hook install / upgrade, attention.json
   schema and transitions, tab badges + right-status counters, focus-based
-  auto-ack, the `Alt+j` / `Alt+k` / `Alt+l` / `Alt+/` keyboard entry points, or
+  auto-ack, the `Alt+j` / `Alt+k` / `Alt+l` / `Alt+Shift+l` / `Alt+/` keyboard entry points, or
   Codex integration:
   Read [`docs/agent-attention.md`](docs/agent-attention.md).
 - Timed reminders (cron-driven tmux popups), the `reminder.sh` /

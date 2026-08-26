@@ -496,18 +496,24 @@ function M.new(ctx)
 
   -- Informational peek only: landing on a running pane must NOT
   -- forget/hide — running is not focus-acked (see agent-attention.md).
-  handlers['attention.jump_running'] = function()
+  -- binding.args.reverse → Alt+Shift+l walks the pool newest-ward.
+  handlers['attention.jump_running'] = function(binding_args)
+    local reverse = binding_args and binding_args.reverse == true
     return wezterm.action_callback(function(window, pane)
       local trace_id = logger.trace_id('attention')
       if not attention then return end
       attention.reload_state()
       local current_pane_id = pane and pane:pane_id() or nil
-      local entry = attention.pick_next(attention.STATUS_RUNNING, current_pane_id)
+      local entry = attention.pick_next(
+        attention.STATUS_RUNNING,
+        current_pane_id,
+        { reverse = reverse })
       if not entry then return end
-      logger.info('attention', 'alt-l jump running', {
+      logger.info('attention', reverse and 'alt-shift-l jump running' or 'alt-l jump running', {
         trace = trace_id,
         session_id = entry.session_id,
         wezterm_pane_id = entry.wezterm_pane_id,
+        reverse = reverse and 1 or 0,
       })
       attention.activate_in_gui(entry.wezterm_pane_id, window, pane,
         { tmux_session = entry.tmux_session })

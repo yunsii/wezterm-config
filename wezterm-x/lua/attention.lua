@@ -1539,6 +1539,10 @@ end
 -- presses walk the whole pool (not just the two oldest). Returns nil
 -- when the pool is empty or the only candidate is already focused.
 --
+-- opts.reverse = true walks newest-ward (Alt+Shift+l for running):
+-- from the focused slot step backward and wrap; when nothing in the
+-- pool is focused, land on the newest instead of the oldest.
+--
 -- "At the user's focused position" is tmux-pane-precise: a single
 -- wezterm pane commonly hosts a whole tmux session whose split panes
 -- have independent focus, so a sibling tmux pane is a valid jump target
@@ -1556,7 +1560,8 @@ end
 -- `return pool[1]` made the handler "jump to self" — a no-op visually,
 -- but it still ran the post-jump optimistically_hide + forget side
 -- effects, silently archiving the pane the user was actively looking at.
-function M.pick_next(kind, current_pane_id)
+function M.pick_next(kind, current_pane_id, opts)
+  local reverse = type(opts) == 'table' and opts.reverse == true
   local waiting, done, running = M.collect()
   local pool
   if kind == M.STATUS_DONE then
@@ -1576,9 +1581,10 @@ function M.pick_next(kind, current_pane_id)
   -- Round-robin in sorted order. The older "first non-focused" scan
   -- ping-ponged forever between the two oldest entries whenever the
   -- pool had 3+: from A it picked B, from B it picked A again, and C
-  -- was never reachable. Find the focused slot (if any) and return the
-  -- next one, wrapping. When nothing in the pool is focused, land on
-  -- the oldest. When the only candidate is focused, return nil.
+  -- was never reachable. Find the focused slot (if any) and step
+  -- forward (or backward when reverse). When nothing in the pool is
+  -- focused, land on the oldest (newest if reverse). When the only
+  -- candidate is focused, return nil.
   local current = current_pane_id and tostring(current_pane_id) or nil
   local focused_idx = nil
   for i, entry in ipairs(pool) do
@@ -1604,12 +1610,18 @@ function M.pick_next(kind, current_pane_id)
     end
   end
   if not focused_idx then
-    return pool[1]
+    return reverse and pool[#pool] or pool[1]
   end
   if #pool == 1 then
     return nil
   end
-  return pool[(focused_idx % #pool) + 1]
+  local next_idx = reverse and (focused_idx - 1) or (focused_idx + 1)
+  if next_idx < 1 then
+    next_idx = #pool
+  elseif next_idx > #pool then
+    next_idx = 1
+  end
+  return pool[next_idx]
 end
 
 -- Periodic shell-side prune. Called from titles.lua's update-status tick
