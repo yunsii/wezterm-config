@@ -14,7 +14,7 @@ typically fires it 50-100+ times because it is the eyes-on entry point
 for the multi-agent attention pipeline (every "is anything waiting?"
 glance routes through it). 100ms vs 50ms is the difference between
 "feels snappy" and "feels sluggish" at that frequency, and the chord
-sits on the critical path for several derived flows (`Alt+,` and `Alt+.`
+sits on the critical path for several derived flows (`Alt+j` and `Alt+k`
 share most of the same dispatch infrastructure; the worktree picker
 re-uses the popup pattern).
 

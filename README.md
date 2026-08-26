@@ -24,7 +24,7 @@ This repository is the source of truth for the WezDeck runtime. The GitHub repo 
 
 - **Tab × Worktree × Agent in one frame** — every WezTerm tab is one repo, every tmux window inside it is a linked git worktree, every pane can host an agent CLI (`claude` / `codex` / …).
 - **Live attention surface** — per-tab badges plus a single right-status counter `⟳ N running ⚠ N waiting ✓ N done`, driven by a Claude hook → `attention.json` pipeline.
-- **One keystroke to jump** — `Alt+/` opens a popup of every pending pane across every tab; `Alt+,` / `Alt+.` step through them.
+- **One keystroke to jump** — `Alt+/` opens a popup of every pending pane across every tab; `Alt+j` / `Alt+k` / `Alt+l` step through waiting / done / running.
 - **One keystroke to spawn a worktree** — `Ctrl+k g d/t/h` carves out a new linked worktree (with its own agent) without leaving the keyboard.
 - **Manifest-driven hotkeys** — `wezterm-x/commands/manifest.json` is the single source of truth; per-machine overrides live in `wezterm-x/local/keybindings.lua`.
 

@@ -644,7 +644,7 @@ function M.register(opts)
   -- attention.jump handler. Fires on picker-driven jumps, currently
   -- always via the file transport because the picker runs inside a
   -- tmux popup whose DCS pass-through doesn't reach wezterm. Same
-  -- in-process mux activate Alt+,/. use, plus a background spawn of
+  -- in-process mux activate Alt+j/k/l use, plus a background spawn of
   -- `attention-jump.sh --direct` for the tmux side.
   event_bus.on('attention.jump', function(payload, meta)
     if not attention or not attention.parse_jump_payload then return end
@@ -683,6 +683,32 @@ function M.register(opts)
         wezterm_pane = coords.wezterm_pane,
         activated    = activated,
         transport    = meta.transport,
+      })
+    end
+  end)
+
+  -- link.quick_select — command-palette path for opening URLs. No default
+  -- hotkey (Alt+l is attention.jump-running); Ctrl+Shift+P → Link fires
+  -- scripts/runtime/link-quick-select.sh → file-transport event → here.
+  event_bus.on('link.quick_select', function(_payload, meta)
+    if not meta.window or not meta.pane then return end
+    if not actions_mod or type(actions_mod.link_quick_select_action) ~= 'function' then
+      if logger then
+        logger.warn('link', 'quick_select missing actions helper', {
+          transport = meta.transport,
+        })
+      end
+      return
+    end
+    local action = actions_mod.link_quick_select_action(wezterm, logger)
+    local ok, err = pcall(function()
+      meta.window:perform_action(action, meta.pane)
+    end)
+    if logger then
+      logger.info('link', 'quick_select dispatched', {
+        transport = meta.transport,
+        ok = ok,
+        err = ok and nil or tostring(err),
       })
     end
   end)

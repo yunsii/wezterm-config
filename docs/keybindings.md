@@ -14,8 +14,8 @@ This workspace is designed keyboard-first: every feature is expected to have a k
 - `Ctrl+v`: smart paste; in Windows-hosted `hybrid-wsl`, WezTerm asks the Windows native helper for the live clipboard state over IPC at paste time, falls back to a normal clipboard paste for text, and pastes the exported WSL image path when the latest clipboard content is an image
 - `Ctrl+Shift+v`: force a normal clipboard paste without the image-export helper
 - `Enter` in tmux copy-mode: copy the current tmux selection to the system clipboard and leave copy-mode
-- `Alt+l`: trigger WezTerm QuickSelect to label every `http(s)://…` URL in the visible pane and WezTerm scrollback; press the shown letter to open the URL via the system default handler
-- `Ctrl+LeftClick`: open the link under the mouse cursor in the system browser (mouse fallback for `Alt+l`)
+- `Ctrl+Shift+P` → **Link: Open URL from viewport**: trigger WezTerm QuickSelect to label every `http(s)://…` URL in the visible pane and WezTerm scrollback; press the shown letter to open via the system default handler. No default hotkey (remap in `wezterm-x/local/keybindings.lua` if wanted)
+- `Ctrl+LeftClick`: open the link under the mouse cursor in the system browser (mouse fallback for the palette entry above)
 
 ## Scrollback
 
@@ -52,10 +52,11 @@ These shortcuts switch WezTerm tabs inside the current workspace; they are owned
 
 ## Agent Attention
 
-These shortcuts navigate the shared agent-attention state. All three require a tmux-backed pane and show the standard `... only available when the current pane is running tmux` toast otherwise. Implementation detail (Lua vs popup, `--direct` vs `--session` paths, focus-based auto-ack, `--only-if-ts` guard, clear-all sentinel): [`agent-attention.md#keyboard`](./agent-attention.md#keyboard).
+These shortcuts navigate the shared agent-attention state. All four require a tmux-backed pane and show the standard `... only available when the current pane is running tmux` toast otherwise. Implementation detail (Lua vs popup, `--direct` vs `--session` paths, focus-based auto-ack, `--only-if-ts` guard, clear-all sentinel): [`agent-attention.md#keyboard`](./agent-attention.md#keyboard).
 
-- `Alt+,`: jump to the next `waiting` task. Silent when there are none. Cycles past the current pane on repeated presses.
-- `Alt+.`: jump to the next `done` task. Same flow as `Alt+,`; landing on the pane auto-clears the `✓` counter on the next status tick.
+- `Alt+j`: jump to the next `waiting` task. Silent when there are none. Cycles past the current pane on repeated presses.
+- `Alt+k`: jump to the next `done` task. Same flow as `Alt+j`; landing on the pane auto-clears the `✓` counter on the next status tick.
+- `Alt+l`: jump to the next `running` task. Same cycle flow as `Alt+j`; does **not** clear the `●` counter (running is informational, not an ack).
 - `Alt+/`: open a centered tmux popup picker listing every pending task. Rows are `<workspace>/<tab_index>_<tab_title>/<tmux_window>_<tmux_pane>/<branch>  <marker> <reason>  (<age>[, no pane])`, where marker is `▲` waiting / `●` running / `✓` done / `○` recent. The popup has a command-palette-style always-on `Search:` input on row 2 (dim `Type to filter (Tab cycles status)…` placeholder when empty); typing any printable ASCII filters by case-insensitive substring against the row body (workspace / tab / branch / reason all match). `Backspace` edits, `Ctrl+U` clears the query in one keystroke, `Esc` clears a non-empty query first and closes only on the second press. `Up`/`Down` move, `Enter` jumps. `Tab` cycles an orthogonal status filter `all → waiting → done → running → all` shown as a chip in the title; `recent` rows live only in the `all` band and surface previously-active sessions archived from any exit path (TTL prune, focus-ack forget, same-pane eviction, `--clear-all`, etc. — see [`agent-attention.md` *Recent archive*](./agent-attention.md#state-file)). Recent rows render with a dim `(<last_status>, archived)` suffix and dispatch through `attention-jump.sh --recent`, which probes pane existence first; if the pane is gone the row is removed from `recent[]` and you get a toast instead of a silent no-op jump. Press `Alt+/` or `Ctrl+C` again to close from any state (true toggle). Last row is a destructive `——  clear all · N entries  ——` sentinel (hidden when any filter is active) that wipes active state into `recent[]` for recovery (WezTerm restart, agents killed without hooks).
 
 ## Agent CLI

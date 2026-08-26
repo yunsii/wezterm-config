@@ -1,7 +1,8 @@
 -- Regression tests for attention.pick_next, especially the multi-tmux-
 -- pane single-wezterm-pane topology where two split-pane Claude agents
 -- share one wezterm pane id. Without tmux-pane-precise filtering, the
--- sibling tmux pane's done/waiting was unreachable via Alt+./Alt+,.
+-- sibling tmux pane's done/waiting/running was unreachable via
+-- Alt+k / Alt+j / Alt+l.
 --
 -- Drive with scripts/dev/test-lua-units.sh.
 
@@ -113,7 +114,7 @@ describe('pick_next — multi-tmux-pane single-wezterm-pane', function()
     assert_eq(picked.session_id, 'd_other', 'wrong entry returned')
   end)
 
-  it('returns the sibling tmux pane waiting too (Alt+, parity)', function()
+  it('returns the sibling tmux pane waiting too (Alt+j parity)', function()
     reset()
     set_single_pane_topology(42, 'work')
     tab_visibility.set_pane_session(42, 'wezterm_work_a_aaaaaaaaaa')
@@ -206,6 +207,118 @@ describe('pick_next — cross-wezterm-pane topology (regression guard)', functio
     cleanup(tmp)
     assert_truthy(picked, 'cross-wezterm-pane done was filtered out')
     assert_eq(picked.session_id, 'd_other', 'wrong entry returned')
+  end)
+end)
+
+describe('pick_next — round-robin (3+ pool)', function()
+  it('walks all three running entries instead of ping-ponging the two oldest', function()
+    reset()
+    -- Three wezterm panes / three tmux sessions, all running.
+    mock.set_mux {
+      windows = {
+        {
+          workspace = 'work',
+          tabs = {
+            { id = 1, title = 'a', active_pane = { id = 41 } },
+            { id = 2, title = 'b', active_pane = { id = 42 } },
+            { id = 3, title = 'c', active_pane = { id = 43 } },
+          },
+        },
+      },
+    }
+    tab_visibility.set_pane_session(41, 'wezterm_work_a_aaaaaaaaaa')
+    tab_visibility.set_pane_session(42, 'wezterm_work_b_bbbbbbbbbb')
+    tab_visibility.set_pane_session(43, 'wezterm_work_c_cccccccccc')
+    local now = os.time() * 1000
+    local entries = '{"version":1,"entries":{'
+      .. '"r_old":{"session_id":"r_old","wezterm_pane_id":"41",'
+        .. '"tmux_socket":"/tmp/sock","tmux_session":"wezterm_work_a_aaaaaaaaaa",'
+        .. '"tmux_window":"@1","tmux_pane":"%1","status":"running","ts":'
+        .. tostring(now - 3000) .. ',"reason":"old"},'
+      .. '"r_mid":{"session_id":"r_mid","wezterm_pane_id":"42",'
+        .. '"tmux_socket":"/tmp/sock","tmux_session":"wezterm_work_b_bbbbbbbbbb",'
+        .. '"tmux_window":"@1","tmux_pane":"%1","status":"running","ts":'
+        .. tostring(now - 2000) .. ',"reason":"mid"},'
+      .. '"r_new":{"session_id":"r_new","wezterm_pane_id":"43",'
+        .. '"tmux_socket":"/tmp/sock","tmux_session":"wezterm_work_c_cccccccccc",'
+        .. '"tmux_window":"@1","tmux_pane":"%1","status":"running","ts":'
+        .. tostring(now - 1000) .. ',"reason":"new"}'
+      .. '}}'
+    -- Start focused on the oldest (pane 41 / %1 of session a).
+    local tmp = setup_state(entries, '/tmp/sock', 'wezterm_work_a_aaaaaaaaaa', '%1', {
+      { socket = '/tmp/sock', session = 'wezterm_work_b_bbbbbbbbbb', tmux_pane = '%1' },
+      { socket = '/tmp/sock', session = 'wezterm_work_c_cccccccccc', tmux_pane = '%1' },
+    })
+    local first = attention.pick_next(attention.STATUS_RUNNING, 41)
+    assert_truthy(first, 'first hop nil')
+    assert_eq(first.session_id, 'r_mid', 'from oldest should advance to mid')
+
+    -- Simulate landing on mid: refresh focus file for session b.
+    cleanup(tmp)
+    tmp = setup_state(entries, '/tmp/sock', 'wezterm_work_b_bbbbbbbbbb', '%1', {
+      { socket = '/tmp/sock', session = 'wezterm_work_a_aaaaaaaaaa', tmux_pane = '%1' },
+      { socket = '/tmp/sock', session = 'wezterm_work_c_cccccccccc', tmux_pane = '%1' },
+    })
+    local second = attention.pick_next(attention.STATUS_RUNNING, 42)
+    assert_truthy(second, 'second hop nil')
+    assert_eq(second.session_id, 'r_new', 'from mid must reach newest (not bounce to oldest)')
+
+    cleanup(tmp)
+    tmp = setup_state(entries, '/tmp/sock', 'wezterm_work_c_cccccccccc', '%1', {
+      { socket = '/tmp/sock', session = 'wezterm_work_a_aaaaaaaaaa', tmux_pane = '%1' },
+      { socket = '/tmp/sock', session = 'wezterm_work_b_bbbbbbbbbb', tmux_pane = '%1' },
+    })
+    local third = attention.pick_next(attention.STATUS_RUNNING, 43)
+    cleanup(tmp)
+    assert_truthy(third, 'wrap hop nil')
+    assert_eq(third.session_id, 'r_old', 'from newest should wrap to oldest')
+  end)
+end)
+
+describe('pick_next — running pool (Alt+l)', function()
+  it('returns a sibling running entry and ignores waiting/done', function()
+    reset()
+    set_single_pane_topology(42, 'work')
+    tab_visibility.set_pane_session(42, 'wezterm_work_a_aaaaaaaaaa')
+    local now = os.time() * 1000
+    local entries = '{"version":1,"entries":{'
+      .. '"w1":{"session_id":"w1","wezterm_pane_id":"42",'
+        .. '"tmux_socket":"/tmp/sock","tmux_session":"wezterm_work_a_aaaaaaaaaa",'
+        .. '"tmux_window":"@1","tmux_pane":"%2","status":"waiting","ts":'
+        .. tostring(now - 3000) .. ',"reason":"perm"},'
+      .. '"r1":{"session_id":"r1","wezterm_pane_id":"42",'
+        .. '"tmux_socket":"/tmp/sock","tmux_session":"wezterm_work_a_aaaaaaaaaa",'
+        .. '"tmux_window":"@1","tmux_pane":"%2","status":"running","ts":'
+        .. tostring(now - 2000) .. ',"reason":"mid-turn"},'
+      .. '"d1":{"session_id":"d1","wezterm_pane_id":"42",'
+        .. '"tmux_socket":"/tmp/sock","tmux_session":"wezterm_work_a_aaaaaaaaaa",'
+        .. '"tmux_window":"@1","tmux_pane":"%2","status":"done","ts":'
+        .. tostring(now - 1000) .. ',"reason":"stop"}'
+      .. '}}'
+    -- User focused on %1; sibling %2 has waiting+running+done — pick_next
+    -- for running must return only r1.
+    local tmp = setup_state(entries, '/tmp/sock', 'wezterm_work_a_aaaaaaaaaa', '%1')
+    local picked = attention.pick_next(attention.STATUS_RUNNING, 42)
+    cleanup(tmp)
+    assert_truthy(picked, 'running sibling was not returned')
+    assert_eq(picked.session_id, 'r1', 'pick_next(running) returned a non-running entry')
+  end)
+
+  it('returns nil when the only running entry is the focused pane', function()
+    reset()
+    set_single_pane_topology(42, 'work')
+    tab_visibility.set_pane_session(42, 'wezterm_work_a_aaaaaaaaaa')
+    local now = os.time() * 1000
+    local entries = '{"version":1,"entries":{'
+      .. '"r_self":{"session_id":"r_self","wezterm_pane_id":"42",'
+        .. '"tmux_socket":"/tmp/sock","tmux_session":"wezterm_work_a_aaaaaaaaaa",'
+        .. '"tmux_window":"@1","tmux_pane":"%1","status":"running","ts":'
+        .. tostring(now) .. ',"reason":"self"}'
+      .. '}}'
+    local tmp = setup_state(entries, '/tmp/sock', 'wezterm_work_a_aaaaaaaaaa', '%1')
+    local picked = attention.pick_next(attention.STATUS_RUNNING, 42)
+    cleanup(tmp)
+    assert_nil(picked, 'pick_next(running) jumped to self')
   end)
 end)
 

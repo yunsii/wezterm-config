@@ -163,7 +163,7 @@ Windows 侧从"每次调用都起一次 PowerShell"升级为**长期存活的 C#
 
 平台开始**消费 Agent CLI 的 hook 事件**，主动把任务状态推给我 —— 而不是等我巡检。`UserPromptSubmit → running`、`Notification → waiting`、`Pre/PostToolUse → resolved`、`Stop → done`、`SessionStart(matcher:clear) → pane-evict`，加上 OSC 1337 `attention_tick` 实时唤醒 Lua tick re-render —— 一条 hook → 状态文件 → OSC → Lua → 徽章渲染的链路。
 
-具体形态（一回合 8 步 sequence diagram、focus-based auto-ack 的 `--only-if-ts` 时序、`Alt+,` / `Alt+.` / `Alt+/` 分工）见 [outline §核心特性 1](./ai-workspace-sharing-outline.md#1-跨-pane-的-agent-attention-流水线)；代表 commit：[`ce60661`](https://github.com/yunsii/wezterm-config/commit/ce60661)（核心）、[`f2eac78`](https://github.com/yunsii/wezterm-config/commit/f2eac78)、[`718e026`](https://github.com/yunsii/wezterm-config/commit/718e026)。
+具体形态（一回合 8 步 sequence diagram、focus-based auto-ack 的 `--only-if-ts` 时序、`Alt+j` / `Alt+k` / `Alt+l` / `Alt+/` 分工）见 [outline §核心特性 1](./ai-workspace-sharing-outline.md#1-跨-pane-的-agent-attention-流水线)；代表 commit：[`ce60661`](https://github.com/yunsii/wezterm-config/commit/ce60661)（核心）、[`f2eac78`](https://github.com/yunsii/wezterm-config/commit/f2eac78)、[`718e026`](https://github.com/yunsii/wezterm-config/commit/718e026)。
 
 **这段的本质**：平台第一次拥有"Agent 端的事实视图"。哪个 pane 的 Agent 在跑、在等我、跑完了，全部由 hook 推来。多任务并行的"人脑调度成本"从这里开始被真正摊掉。
 
@@ -285,7 +285,7 @@ D 节描述的是**分工设想**；要让人愿意一天里反复按 `Ctrl+k g 
 |---|---|---:|
 | 打开 pending-task overlay | `Alt+/` | 78 |
 | 跳到下一个 `done` | `Alt+.` | 62 |
-| 跳到下一个 `waiting` | `Alt+,` | 33 |
+| 跳到下一个 `waiting` | `Alt+j` | 33 |
 | **attention 三入口合计** | | **173** |
 
 > *样本日为 2026-04-25*。`Alt+x`（跨工作区 tab picker）是 v5 E2 的 04-29 才加入这条 loop 的，那一刻起跨工作区切换从 `Alt+w` → `Alt+1..9` 二跳变成 `Alt+x` 一跳；新的全量计数还没采到，等下一次样本日补上。
@@ -300,7 +300,7 @@ D 节描述的是**分工设想**；要让人愿意一天里反复按 `Ctrl+k g 
 
 ### 一句话压缩
 
-> **我今天的工作方式不是"我去轮询 Agent"，而是"Agent 通过 attention pipeline 轮询我"**。主循环：早上一次铺开 → `Alt+/` 看总览 → `Alt+.` / `Alt+,` 跳到该处理的 pane → `Alt+v` / `Alt+b` 借 VS Code 和 Chrome 做真实验证 → 回 pane 继续。一天几十次循环，**由 hook 驱动、tab 层细粒度导航、pane 层近乎冻结**。
+> **我今天的工作方式不是"我去轮询 Agent"，而是"Agent 通过 attention pipeline 轮询我"**。主循环：早上一次铺开 → `Alt+/` 看总览 → `Alt+k` / `Alt+j` / `Alt+l` 跳到该处理的 pane → `Alt+v` / `Alt+b` 借 VS Code 和 Chrome 做真实验证 → 回 pane 继续。一天几十次循环，**由 hook 驱动、tab 层细粒度导航、pane 层近乎冻结**。
 
 ---
 

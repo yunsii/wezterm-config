@@ -450,7 +450,7 @@ function M.new(ctx)
       local current_pane_id = pane and pane:pane_id() or nil
       local entry = attention.pick_next(attention.STATUS_WAITING, current_pane_id)
       if not entry then return end
-      logger.info('attention', 'alt-comma jump', {
+      logger.info('attention', 'alt-j jump waiting', {
         trace = trace_id,
         session_id = entry.session_id,
         wezterm_pane_id = entry.wezterm_pane_id,
@@ -470,7 +470,7 @@ function M.new(ctx)
       local current_pane_id = pane and pane:pane_id() or nil
       local entry = attention.pick_next(attention.STATUS_DONE, current_pane_id)
       if not entry then return end
-      logger.info('attention', 'alt-dot jump', {
+      logger.info('attention', 'alt-k jump done', {
         trace = trace_id,
         session_id = entry.session_id,
         wezterm_pane_id = entry.wezterm_pane_id,
@@ -483,7 +483,7 @@ function M.new(ctx)
         -- Drop from the in-memory cache before the subprocess lands on
         -- disk so the badge / picker decrement immediately. Without
         -- this the user sees `done 2` for 50-200 ms after the jump,
-        -- and a second Alt+. that races with the disk catch-up jumps
+        -- and a second Alt+k that races with the disk catch-up jumps
         -- the count from 2 → 0 instead of 2 → 1 → 0.
         if attention.optimistically_hide then
           attention.optimistically_hide(entry)
@@ -491,6 +491,28 @@ function M.new(ctx)
         local forget_args = attention_forget_args(entry, pane, trace_id)
         if forget_args then wezterm.background_child_process(forget_args) end
       end
+    end)
+  end
+
+  -- Informational peek only: landing on a running pane must NOT
+  -- forget/hide — running is not focus-acked (see agent-attention.md).
+  handlers['attention.jump_running'] = function()
+    return wezterm.action_callback(function(window, pane)
+      local trace_id = logger.trace_id('attention')
+      if not attention then return end
+      attention.reload_state()
+      local current_pane_id = pane and pane:pane_id() or nil
+      local entry = attention.pick_next(attention.STATUS_RUNNING, current_pane_id)
+      if not entry then return end
+      logger.info('attention', 'alt-l jump running', {
+        trace = trace_id,
+        session_id = entry.session_id,
+        wezterm_pane_id = entry.wezterm_pane_id,
+      })
+      attention.activate_in_gui(entry.wezterm_pane_id, window, pane,
+        { tmux_session = entry.tmux_session })
+      local args = attention_direct_args(entry, pane, trace_id)
+      if args then wezterm.background_child_process(args) end
     end)
   end
 
@@ -535,17 +557,7 @@ function M.new(ctx)
   -- ── Link ──────────────────────────────────────────────
 
   handlers['link.open_in_viewport'] = function()
-    return wezterm.action.QuickSelectArgs {
-      label = 'open url',
-      patterns = { 'https?://\\S+' },
-      action = wezterm.action_callback(function(window, pane)
-        local url = window:get_selection_text_for_pane(pane)
-        if not url or url == '' then return end
-        local trace_id = logger.trace_id('link')
-        logger.info('link', 'opening url via QuickSelect', common.merge_fields(trace_id, { url = url }))
-        wezterm.open_with(url)
-      end),
-    }
+    return actions.link_quick_select_action(wezterm, logger)
   end
 
   -- ── Workspace ─────────────────────────────────────────

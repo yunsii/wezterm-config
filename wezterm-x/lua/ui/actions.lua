@@ -152,6 +152,26 @@ function M.forward_shortcut_to_pane(wezterm, window, pane, shortcut, sequence, l
   window:perform_action(wezterm.action.SendString(sequence), pane)
 end
 
+-- QuickSelect that labels every http(s) URL in the focused pane / scrollback
+-- and opens the chosen one via the system handler. Shared by the (optional)
+-- WezTerm-layer hotkey and the command-palette → event-bus path
+-- (`link.quick_select`).
+function M.link_quick_select_action(wezterm, logger)
+  return wezterm.action.QuickSelectArgs {
+    label = 'open url',
+    patterns = { 'https?://\\S+' },
+    action = wezterm.action_callback(function(window, pane)
+      local url = window:get_selection_text_for_pane(pane)
+      if not url or url == '' then return end
+      local trace_id = logger and logger.trace_id('link') or nil
+      if logger then
+        logger.info('link', 'opening url via QuickSelect', common.merge_fields(trace_id, { url = url }))
+      end
+      wezterm.open_with(url)
+    end),
+  }
+end
+
 function M.tmux_only_shortcut(window, logger, shortcut, trace_id)
   logger.warn('workspace', 'shortcut requires a tmux-backed pane', common.merge_fields(trace_id, {
     shortcut = shortcut,

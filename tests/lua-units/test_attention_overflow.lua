@@ -342,7 +342,7 @@ describe('optimistic hide drops the entry immediately on Alt+.', function()
     -- Setup: two done entries. Alt+. on the first should drop badge
     -- from `done 2` to `done 1` immediately. Without optimistic_hide
     -- the badge stays at 2 until the background --forget completes
-    -- and reload_state catches up — and a second Alt+. that races
+    -- and reload_state catches up — and a second Alt+k that races
     -- the disk update sees both vanish (2 → 0).
     _G.__WEZTERM_PANE_TMUX_SESSION = {}
     mock.set_mux({

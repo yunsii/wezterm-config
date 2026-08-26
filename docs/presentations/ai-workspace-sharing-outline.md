@@ -52,7 +52,7 @@ WezDeck 的存在不是把这些做成"几个快捷键 + 几个脚本"，而是*
 
 - **Tab 标签**带 1-cell `█` 色块徽章（暖橙 waiting / 冷蓝 running / 暗绿 done）
 - **右栏永久占位的三段计数**：`▲ N waiting   ✓ N done   ● N running`
-- **`Alt+,` / `Alt+.` / `Alt+/`** 三个键分别跳到下一个 waiting / done / 用 popup 看全部
+- **`Alt+j` / `Alt+k` / `Alt+l` / `Alt+/`** 四个键分别跳到下一个 waiting / done / running / 用 popup 看全部
 
 整条链路：
 

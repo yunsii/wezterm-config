@@ -33,7 +33,7 @@ return {
   -- ['clipboard.copy-selection-strict'] = 'Ctrl+Shift+c',
   -- ['clipboard.paste-smart']           = 'Ctrl+v',
   -- ['clipboard.paste-plain']           = 'Ctrl+Shift+v',
-  -- ['link.open-in-viewport']           = 'Alt+l',
+  -- ['link.open-in-viewport']           = 'Alt+Shift+l', -- no default hotkey; palette / Ctrl+LeftClick
 
   -- ── Panes / chord prefix ──────────────────────────────
   -- ['session.fix-layout']             = 'Ctrl+k r', -- light heal after RDP/DPI
@@ -80,8 +80,9 @@ return {
   -- after wezterm-runtime-sync regenerates wezterm-x/tmux/chord-bindings.generated.conf.
 
   -- ── Agent attention ───────────────────────────────────
-  -- ['attention.jump-waiting']          = 'Alt+,',
-  -- ['attention.jump-done']             = 'Alt+.',
+  -- ['attention.jump-waiting']          = 'Alt+j',
+  -- ['attention.jump-done']             = 'Alt+k',
+  -- ['attention.jump-running']          = 'Alt+l',
   -- ['attention.overlay']               = 'Alt+/',
 
   -- ── Workspace switch ──────────────────────────────────

@@ -32,7 +32,7 @@ Sizes are `git ls-files | wc -l` over each subsystem, measured 2026-08-18.
 
 | Subsystem | Lines | Files | Verdict |
 | --- | --- | --- | --- |
-| attention pipeline | 6,111 | 13 | **Split.** herdr natively detects agent state and ships `herdr integration install <agent>` for 16 agents; that replaces detection. Cross-workspace aggregation, WezTerm tab badges, and `Alt+,` / `Alt+.` orchestration have no herdr equivalent — herdr assumes it is the outermost container. |
+| attention pipeline | 6,111 | 13 | **Split.** herdr natively detects agent state and ships `herdr integration install <agent>` for 16 agents; that replaces detection. Cross-workspace aggregation, WezTerm tab badges, and `Alt+j` / `Alt+k` / `Alt+l` orchestration have no herdr equivalent — herdr assumes it is the outermost container. |
 | worktree subsystem | 5,390 | 32 | **Mostly stays.** `[worktrees]` + `herdr worktree` cover create/open/remove against a plain `<dir>/<repo>/<branch-slug>` layout. The dev/task/hotfix semantics, repo-family reuse, task-prompt injection, reclaim, and the `${WEZTERM_REPO}` expansion are ours. |
 | tmux tests | 4,736 | 37 | Follows whatever it covers. |
 | tab visibility / overflow | 3,198 | 11 | **Deletable under B or C.** Exists because repos outnumber `Alt+1..9` slots; herdr's sidebar lists every workspace at once and `switch_workspace` + `[keys.indexed]` addresses the same problem natively. |

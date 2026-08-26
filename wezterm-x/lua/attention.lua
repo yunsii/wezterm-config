@@ -902,7 +902,7 @@ function M.tab_badge(tab_info)
   -- rule does not: a `waiting` that has sat unanswered for two minutes
   -- gets hidden the moment another worktree starts a turn, because the
   -- fresh `running` is newer. That case is covered by the right-status
-  -- `▲ N waiting` counter, `Alt+,`, and `Alt+/`, and the user asked for
+  -- `▲ N waiting` counter, `Alt+j`, and `Alt+/`, and the user asked for
   -- "latest" twice — so recency wins here. Flipping back means ranking
   -- on (status, ts) instead of ts alone.
   for _, entry in pairs(state_cache.entries or {}) do
@@ -1388,7 +1388,7 @@ end
 --      wezterm panes. In this repo's split-pane layout the main shell
 --      pane and the agent pane both attach a single tmux session and
 --      just display different tmux panes, so historically reverse-
---      lookup would silently misroute Alt+. / Alt+, jumps to the wrong
+--      lookup would silently misroute Alt+k / Alt+j jumps to the wrong
 --      wezterm pane (typically the leftmost main shell pane). Doing
 --      reverse-lookup AFTER step (1) keeps stale-id recovery working
 --      without overruling a live id that still hosts the session.
@@ -1534,9 +1534,10 @@ function M.parse_jump_payload(value)
   return nil
 end
 
--- Pick next entry matching `kind` ('waiting' or 'done') that is *not*
--- already at the user's focused position, so repeated Alt+,/Alt+.
--- presses cycle through other panes. Returns the entry or nil.
+-- Pick next entry matching `kind` ('waiting', 'done', or 'running')
+-- in oldest-first round-robin order, so repeated Alt+j / Alt+k / Alt+l
+-- presses walk the whole pool (not just the two oldest). Returns nil
+-- when the pool is empty or the only candidate is already focused.
 --
 -- "At the user's focused position" is tmux-pane-precise: a single
 -- wezterm pane commonly hosts a whole tmux session whose split panes
@@ -1556,16 +1557,31 @@ end
 -- but it still ran the post-jump optimistically_hide + forget side
 -- effects, silently archiving the pane the user was actively looking at.
 function M.pick_next(kind, current_pane_id)
-  local waiting, done = M.collect()
-  local pool = kind == M.STATUS_DONE and done or waiting
+  local waiting, done, running = M.collect()
+  local pool
+  if kind == M.STATUS_DONE then
+    pool = done
+  elseif kind == M.STATUS_RUNNING then
+    pool = running
+  else
+    pool = waiting
+  end
   if #pool == 0 then
     return nil
   end
   table.sort(pool, function(a, b)
     return (tonumber(a.ts) or 0) < (tonumber(b.ts) or 0)
   end)
+
+  -- Round-robin in sorted order. The older "first non-focused" scan
+  -- ping-ponged forever between the two oldest entries whenever the
+  -- pool had 3+: from A it picked B, from B it picked A again, and C
+  -- was never reachable. Find the focused slot (if any) and return the
+  -- next one, wrapping. When nothing in the pool is focused, land on
+  -- the oldest. When the only candidate is focused, return nil.
   local current = current_pane_id and tostring(current_pane_id) or nil
-  for _, entry in ipairs(pool) do
+  local focused_idx = nil
+  for i, entry in ipairs(pool) do
     local at_current
     if not current then
       at_current = false
@@ -1582,11 +1598,18 @@ function M.pick_next(kind, current_pane_id)
       -- cycles correctly.
       at_current = (tostring(entry.wezterm_pane_id or '') == current)
     end
-    if not at_current then
-      return entry
+    if at_current then
+      focused_idx = i
+      break
     end
   end
-  return nil
+  if not focused_idx then
+    return pool[1]
+  end
+  if #pool == 1 then
+    return nil
+  end
+  return pool[(focused_idx % #pool) + 1]
 end
 
 -- Periodic shell-side prune. Called from titles.lua's update-status tick

@@ -41,7 +41,7 @@ WezTerm process
 - `tmux.conf` owns pane splits, copy-mode, mouse handling, worktree-window switching, and status-line rendering. Its chord key tables (`command-chord`, `worktree-chord`) are **generated** from the same `manifest.json` by `scripts/runtime/render-tmux-bindings.sh` into `wezterm-x/tmux/chord-bindings.generated.conf` (gitignored), which `tmux.conf` loads via `source-file -Fq`. The renderer runs during `wezterm-runtime-sync`.
 - WezTerm keys that mutate tmux state (`Alt+v` / `Alt+g` / `Alt+Shift+g` / `Alt+/` / `Alt+o` / `Ctrl+p` / `Ctrl+k` / `Ctrl+Shift+P`) resolve through the registry on the WezTerm side; they forward into the active tmux-backed pane via short escape sequences (`\x1bv`, `\x1b/`, `\x0b`, etc.) so tmux owns the execution. The tmux `bind-key -n M-v / M-g / M-/ / User0-3` lines that receive those bytes are transport infrastructure and stay inline in `tmux.conf`, not user-customizable.
 - Per-machine keybinding overrides live in `wezterm-x/local/keybindings.lua`, addressed by manifest `id`. The WezTerm path consumes them directly at reload (`wezterm-x/lua/ui/keybinding_overrides.lua`); the tmux-chord path consumes the same file at sync time via the bash renderer. Both sides share one source of truth and one override file.
-- Agent attention is layered: provider adapters under `scripts/runtime/agent-attention/adapters/` normalize Claude / Codex hook payloads; `scripts/runtime/agent-attention/emit.sh` writes shared state via `scripts/runtime/attention-state-lib.sh` and publishes an `attention.tick` event through the [event bus](./event-bus.md) (`wezterm_event_send` → OSC `we_attention_tick` when the producer has a regular pane tty, else file). `wezterm-x/lua/titles.lua` registers the bus handler and reloads state for tab badges + right-status (render lives in `wezterm-x/lua/attention.lua`; no pane walking, no user_var state). Jump path splits by entry point: `Alt+,` / `Alt+.` are Lua-driven `--direct` calls; `Alt+/` is forwarded into tmux and runs the popup picker. Full pipeline: [`agent-attention.md`](./agent-attention.md).
+- Agent attention is layered: provider adapters under `scripts/runtime/agent-attention/adapters/` normalize Claude / Codex hook payloads; `scripts/runtime/agent-attention/emit.sh` writes shared state via `scripts/runtime/attention-state-lib.sh` and publishes an `attention.tick` event through the [event bus](./event-bus.md) (`wezterm_event_send` → OSC `we_attention_tick` when the producer has a regular pane tty, else file). `wezterm-x/lua/titles.lua` registers the bus handler and reloads state for tab badges + right-status (render lives in `wezterm-x/lua/attention.lua`; no pane walking, no user_var state). Jump path splits by entry point: `Alt+j` / `Alt+k` / `Alt+l` are Lua-driven `--direct` calls; `Alt+/` is forwarded into tmux and runs the popup picker. Full pipeline: [`agent-attention.md`](./agent-attention.md).
 
 ### Naming guidance for code and docs
 
@@ -67,7 +67,7 @@ flowchart TB
     ATT[("attention.json<br/>running / waiting / done")]
     WS --> TAB --> SESS --> WIN --> PANE --> AGENT
     AGENT -->|"lifecycle hooks"| ATT
-    ATT -->|"OSC / file tick"| BADGE["tab badges + right-status<br/>Alt+, / Alt+. / Alt+/"]
+    ATT -->|"OSC / file tick"| BADGE["tab badges + right-status<br/>Alt+j / Alt+k / Alt+l / Alt+/"]
   end
 
   subgraph SB["Interop · OpenClaw session-bridge"]
@@ -107,7 +107,7 @@ The nesting and ownership rules are in [*Interaction Layers*](#interaction-layer
 - **Naming / reuse.** A managed WezTerm tab maps to one repo family and attaches to **one tmux session per repo family**, reused across that repo's linked worktrees. Each git worktree is one tmux window; each window splits into a left agent pane and a right shell pane. Managed workspaces are `work` / `config` / `opensource`; `default` is the built-in WezTerm workspace.
 - **Worktree sessions.** `worktree-task` creates linked worktrees under `.worktrees/<repo>/` and opens them as additional windows in the same session. Directory prefixes encode lifecycle (`dev-*` / `task-*` / `hotfix-*`), created by `Ctrl+k g d/t/h` and reclaimed by `Ctrl+k g r`; branch naming is independent. Full lifecycle + reclaim safety: [`workspaces.md#task-worktree-lifecycle-model`](./workspaces.md#task-worktree-lifecycle-model).
 - **Agent pane lifecycle.** Every agent-CLI launch terminates at `scripts/runtime/agent-launcher.sh <profile>` (the single env-loading + boot-cue site); resume variants (`sh -c 'claude --continue || exec claude'`) fall back to a fresh session on a brand-new worktree. `primary-pane-wrapper.sh` execs the login shell after the agent exits so the pane survives agent death. See [*Startup Invariants*](#startup-invariants).
-- **Attention state.** Provider hooks → `agent-attention/emit.sh` → `attention.json` (`running` / `waiting` / `done`, keyed by session id or `pane:<N>`) → event bus tick → tab badges + right-status counter; jump via `Alt+,` / `Alt+.` (Lua `--direct`) and `Alt+/` (tmux popup). This is the same state file the interop layer reads. Full pipeline: [`agent-attention.md`](./agent-attention.md).
+- **Attention state.** Provider hooks → `agent-attention/emit.sh` → `attention.json` (`running` / `waiting` / `done`, keyed by session id or `pane:<N>`) → event bus tick → tab badges + right-status counter; jump via `Alt+j` / `Alt+k` / `Alt+l` (Lua `--direct`) and `Alt+/` (tmux popup). This is the same state file the interop layer reads. Full pipeline: [`agent-attention.md`](./agent-attention.md).
 
 ### Interop (host TUI ↔ session-bridge ↔ Feishu)
 
@@ -124,7 +124,7 @@ The host TUI agents (`claude` / `codex`, plus `grok` when run natively) live ins
 |---|---|---|
 | Session | WezTerm ⊃ tmux nesting, repo-family session reuse, agent pane resume + survival | **Built** |
 | Session | Worktree lifecycle (`dev/task/hotfix`, `Ctrl+k g d/t/h/r`), branch-independent naming | **Built** |
-| Session | Attention pipeline (hooks → `attention.json` → badges + `Alt+,`/`.`/`/`) | **Built** |
+| Session | Attention pipeline (hooks → `attention.json` → badges + `Alt+j`/`k`/`l`/`/`) | **Built** |
 | Interop | Read (host + claw), `poke`, `panic`, `audit` (P1) | **Built** |
 | Interop | `lease` + `host-send-keys` + `bot-send` + attention inference + audit receipt (P2) | **Built** |
 | Interop | `say-as-me` (P3, lark-cli user identity) | **Built**, default `--dry-run` — **convention**: `--confirm` to actually send |

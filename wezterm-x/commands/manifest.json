@@ -66,20 +66,19 @@
   {
     "id": "link.open-in-viewport",
     "label": "Link: Open URL from viewport",
-    "description": "Trigger WezTerm QuickSelect to label every `http(s)://…` URL across the visible pane and WezTerm scrollback; press the label key to open the URL via the system default handler. Keyboard-first counterpart to `Ctrl+LeftClick`.",
+    "description": "Trigger WezTerm QuickSelect to label every `http(s)://…` URL across the visible pane and WezTerm scrollback; press the label key to open the URL via the system default handler. No default hotkey — invoke from `Ctrl+Shift+P` (command palette) or use `Ctrl+LeftClick` on a URL. Remap via `wezterm-x/local/keybindings.lua` if you want a dedicated key.",
     "scope": "clipboard",
     "context": "any",
     "binding": {
       "handler": "link.open_in_viewport"
     },
-    "hotkeys": [
-      {
-        "keys": "Alt+l",
-        "layer": "wezterm"
-      }
-    ],
+    "hotkeys": [],
     "palette": {
-      "display_only": true
+      "command": [
+        "bash",
+        "-lc",
+        "bash {repo_root}/scripts/runtime/link-quick-select.sh"
+      ]
     }
   },
   {
@@ -734,7 +733,7 @@
     },
     "hotkeys": [
       {
-        "keys": "Alt+,",
+        "keys": "Alt+j",
         "layer": "wezterm"
       }
     ],
@@ -753,7 +752,26 @@
     },
     "hotkeys": [
       {
-        "keys": "Alt+.",
+        "keys": "Alt+k",
+        "layer": "wezterm"
+      }
+    ],
+    "palette": {
+      "display_only": true
+    }
+  },
+  {
+    "id": "attention.jump-running",
+    "label": "Attention: Jump to next running task",
+    "description": "Jump to the next agent pane whose status is `running`. Repeated presses cycle past the current target; silent when nothing is running. Does not clear the counter (running is informational, not an ack). Toasts outside tmux.",
+    "scope": "project-navigation",
+    "context": "tmux-backed",
+    "binding": {
+      "handler": "attention.jump_running"
+    },
+    "hotkeys": [
+      {
+        "keys": "Alt+l",
         "layer": "wezterm"
       }
     ],
