@@ -105,6 +105,13 @@ Pick the name from the dictionary when one exists; coin a new field only when no
 | manifest hotkey id | `hotkey_id` (not `id`, not `key`) |
 | latency kind | `kind="hotkey"` or `kind="status"` |
 | configured slow threshold | `threshold_ms` |
+| guest mem used % (slow latency only) | `mem_used_pct` |
+| guest mem available MiB | `mem_avail_mib` |
+| guest mem badge level | `mem_level` (`ok` / `warn` / `crit`) |
+| guest swap used % | `swap_used_pct` |
+| guest load average | `loadavg_1` / `loadavg_5` / `loadavg_15` |
+| guest runnable / total procs | `proc_runnable` / `proc_total` |
+| largest RSS consumer (when badge ≠ ok) | `top_comm` / `top_rss_mib` |
 
 The dictionary is small on purpose. Before inventing a field, grep existing log lines for an analogous one.
 
@@ -117,6 +124,8 @@ Cross-cutting input-feel observability lives in `wezterm-x/lua/latency.lua`:
 | Slow WezTerm-layer hotkey | `latency` · `message="slow key handler"` | handler `duration_ms >= hotkey_slow_ms` (default 50) |
 | Slow `update-status` tick | `latency` · `message="slow status tick"` | tick `duration_ms >= status_slow_ms` (default 40) |
 | Every sample | `latency.perf` | only when `diagnostics.wezterm.latency.emit_all = true` (or an explicit categories allowlist that includes `latency.perf`) |
+
+Slow rows (and only slow rows) also attach guest pressure fields from `mem_guard.status_file` (`mem_used_pct`, `loadavg_*`, …) — see the field dictionary. Do **not** open that file on the under-threshold / `latency.perf` path.
 
 Empty `diagnostics.wezterm.categories` still means "all **base** categories" for the logger, but `latency.lua` deliberately does **not** treat that as permission to flood `latency.perf` at 4 Hz — full sampling needs the explicit flag / allowlist entry above.
 

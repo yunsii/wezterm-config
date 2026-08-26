@@ -166,12 +166,91 @@ top_hotkeys() {
     }' | sort -nr
 }
 
+# Compact "mem=60% load=12.3 runnable=2/3000" suffix from a slow-event line.
+pressure_suffix() {
+  local line="$1"
+  local mem load runnable swap
+  mem="$(printf '%s' "$line" | sed -n 's/.*mem_used_pct="\([^"]*\)".*/\1/p')"
+  load="$(printf '%s' "$line" | sed -n 's/.*loadavg_1="\([^"]*\)".*/\1/p')"
+  runnable="$(printf '%s' "$line" | sed -n 's/.*proc_runnable="\([^"]*\)".*/\1/p')"
+  local total
+  total="$(printf '%s' "$line" | sed -n 's/.*proc_total="\([^"]*\)".*/\1/p')"
+  swap="$(printf '%s' "$line" | sed -n 's/.*swap_used_pct="\([^"]*\)".*/\1/p')"
+  if [[ -z "$mem$load$runnable$swap" ]]; then
+    return 0
+  fi
+  printf '  ['
+  local first=1
+  if [[ -n "$mem" ]]; then
+    printf 'mem=%s%%' "$mem"
+    first=0
+  fi
+  if [[ -n "$swap" ]]; then
+    (( first )) || printf ' '
+    printf 'swap=%s%%' "$swap"
+    first=0
+  fi
+  if [[ -n "$load" ]]; then
+    (( first )) || printf ' '
+    printf 'load1=%s' "$load"
+    first=0
+  fi
+  if [[ -n "$runnable" && -n "$total" ]]; then
+    (( first )) || printf ' '
+    printf 'run=%s/%s' "$runnable" "$total"
+  fi
+  printf ']'
+}
+
 case "$mode" in
   raw)
-    extract_rows "$raw_day" | awk -F'\t' '{
-      hk = ($3 == "" ? "-" : $3)
-      printf "%s  %-6s  %6sms  %s\n", $1, $2, $4, hk
-    }'
+    # Prefer a direct scan so pressure columns survive (extract_rows drops them).
+    awk -v day="$raw_day" \
+        -v cat_token="$category_token" \
+        -v want_kind="$kind_filter" \
+        -v want_hotkey="$hotkey_id_filter" \
+        -v perf="$use_perf" '
+      index($0, cat_token) == 0 { next }
+      day != "" && index($0, "ts=\"" day) == 0 { next }
+      {
+        kind=""; hotkey=""; dur=""; msg=""; ts=""
+        mem=""; load=""; runnable=""; total=""; swap=""
+        for (i = 1; i <= NF; i++) {
+          if (match($i, /^ts="[^"]+"/)) ts = substr($i, 5, length($i) - 5)
+          else if (match($i, /^message="[^"]+"/)) msg = substr($i, 10, length($i) - 10)
+          else if (match($i, /^kind="[^"]+"/)) kind = substr($i, 7, length($i) - 7)
+          else if (match($i, /^hotkey_id="[^"]+"/)) hotkey = substr($i, 12, length($i) - 12)
+          else if (match($i, /^duration_ms="[^"]+"/)) dur = substr($i, 14, length($i) - 14)
+          else if (match($i, /^mem_used_pct="[^"]+"/)) mem = substr($i, 15, length($i) - 15)
+          else if (match($i, /^loadavg_1="[^"]+"/)) load = substr($i, 12, length($i) - 12)
+          else if (match($i, /^proc_runnable="[^"]+"/)) runnable = substr($i, 16, length($i) - 16)
+          else if (match($i, /^proc_total="[^"]+"/)) total = substr($i, 13, length($i) - 13)
+          else if (match($i, /^swap_used_pct="[^"]+"/)) swap = substr($i, 16, length($i) - 16)
+        }
+        if (dur == "") next
+        if (perf == 0) {
+          if (msg != "slow key handler" && msg != "slow status tick") next
+        }
+        if (kind == "") {
+          if (msg ~ /status/) kind = "status"
+          else kind = "hotkey"
+        }
+        if (want_kind != "" && kind != want_kind) next
+        if (want_hotkey != "" && hotkey != want_hotkey) next
+        hk = (hotkey == "" ? "-" : hotkey)
+        printf "%s  %-6s  %6sms  %s", substr(ts, 1, 10), kind, dur, hk
+        if (mem != "" || load != "" || runnable != "" || swap != "") {
+          printf "  ["
+          sep = ""
+          if (mem != "") { printf "mem=%s%%", mem; sep = " " }
+          if (swap != "") { printf "%sswap=%s%%", sep, swap; sep = " " }
+          if (load != "") { printf "%sload1=%s", sep, load; sep = " " }
+          if (runnable != "" && total != "") printf "%srun=%s/%s", sep, runnable, total
+          printf "]"
+        }
+        printf "\n"
+      }
+    ' "$log_file"
     ;;
   watch)
     printf 'watching %s for %s rows…\n' "$log_file" "$category_token"
@@ -185,7 +264,9 @@ case "$mode" in
           continue
         fi
       fi
-      printf '%s\n' "$line"
+      printf '%s' "$line"
+      pressure_suffix "$line"
+      printf '\n'
     done
     ;;
   trend)

@@ -545,10 +545,31 @@ top_consumer() {
 # Publishes the badge JSON. Hand-rolled rather than jq-piped for the same reason
 # as the disk guard: this runs from a systemd unit where a missing jq must not
 # cost the badge its heartbeat.
+# /proc/loadavg → "1.23 4.56 7.89 N/M …". Used by latency slow-event
+# enrichment (WezTerm Lua reads this JSON on Windows NTFS) so a sticky
+# UI tick can be correlated with guest CPU pressure after the fact.
+read_loadavg() {
+  local l1=0 l5=0 l15=0 runnable=0 procs=0 rest
+  # shellcheck disable=SC2034
+  read -r l1 l5 l15 rest < /proc/loadavg 2>/dev/null || true
+  if [[ "$rest" =~ ^([0-9]+)/([0-9]+) ]]; then
+    runnable="${BASH_REMATCH[1]}"
+    procs="${BASH_REMATCH[2]}"
+  fi
+  # Keep JSON numeric; fall back to 0 on a weird/empty read.
+  [[ "$l1" =~ ^[0-9]+([.][0-9]+)?$ ]] || l1=0
+  [[ "$l5" =~ ^[0-9]+([.][0-9]+)?$ ]] || l5=0
+  [[ "$l15" =~ ^[0-9]+([.][0-9]+)?$ ]] || l15=0
+  [[ "$runnable" =~ ^[0-9]+$ ]] || runnable=0
+  [[ "$procs" =~ ^[0-9]+$ ]] || procs=0
+  printf '%s %s %s %s %s' "$l1" "$l5" "$l15" "$runnable" "$procs"
+}
+
 publish_status() {
   local level="$1" mem_total="$2" mem_avail="$3" mem_pct="$4"
   local swap_total="$5" swap_used="$6" swap_pct="$7"
   local path tmp top_comm="" top_rss=""
+  local load1=0 load5=0 load15=0 proc_runnable=0 proc_total=0
 
   if [[ "$level" != "ok" ]]; then
     read -r top_rss top_comm <<<"$(top_consumer)"
@@ -559,6 +580,8 @@ publish_status() {
     top_comm="${top_comm//\"/}"
     [[ "$top_rss" =~ ^[0-9]+$ ]] || top_rss=""
   fi
+
+  read -r load1 load5 load15 proc_runnable proc_total <<<"$(read_loadavg)"
 
   path="$(status_file_path)"
   mkdir -p "$(dirname "$path")" 2>/dev/null || true
@@ -573,6 +596,11 @@ publish_status() {
   "swap_total_mib": $swap_total,
   "swap_used_mib": $swap_used,
   "swap_used_pct": $swap_pct,
+  "loadavg_1": $load1,
+  "loadavg_5": $load5,
+  "loadavg_15": $load15,
+  "proc_runnable": $proc_runnable,
+  "proc_total": $proc_total,
   "top_comm": $( [[ -n "$top_comm" ]] && printf '"%s"' "${top_comm//\"/}" || printf 'null' ),
   "top_rss_mib": ${top_rss:-null},
   "warn_pct": $WARN_PCT,

@@ -263,6 +263,32 @@ PY
 }
 it 'publishes the fragmentation fields without changing the badge level' json_carries_frag_fields
 
+json_carries_loadavg_fields() {
+  # Loadavg enrichment rides the same sample publish as the badge; latency
+  # slow-event rows on the WezTerm side read these fields from status.json.
+  write_buddyinfo "$tmpdir/buddyinfo" 500
+  write_kmsg
+  rm -f "$status_file"
+  WEZTERM_OOM_MEMINFO="$tmpdir/meminfo" \
+  WEZTERM_OOM_STATUS_FILE="$status_file" \
+  WEZTERM_OOM_BUDDYINFO="$tmpdir/buddyinfo" \
+  WEZTERM_OOM_KMSG_FILE="$tmpdir/kmsg" \
+    "$guard" sample >/dev/null 2>&1
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$status_file" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+for key in ('loadavg_1', 'loadavg_5', 'loadavg_15', 'proc_runnable', 'proc_total'):
+  assert key in d, key
+  assert isinstance(d[key], (int, float)), (key, type(d[key]), d[key])
+assert d['proc_total'] >= d['proc_runnable'] >= 0
+PY
+    return $?
+  fi
+  grep -q '"loadavg_1":' "$status_file" && grep -q '"proc_total":' "$status_file"
+}
+it 'publishes loadavg fields for latency slow-event enrichment' json_carries_loadavg_fields
+
 # --- relief, driven through the real watch loop ---------------------------
 fake_ps_rows="$tmpdir/ps_rows"
 cat >"$fake_bin/ps" <<'EOF'

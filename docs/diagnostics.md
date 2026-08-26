@@ -30,6 +30,17 @@ Occasional typing stutter or slow shortcuts usually means the WezTerm UI thread 
 
 Shared fields: `duration_ms`, `threshold_ms`, `kind="hotkey|status"`, plus `hotkey_id` / `workspace` / `pane_id` / `domain` / `foreground` when available.
 
+**Slow rows also attach a guest-pressure snapshot** (only when `duration_ms` crosses the gate — never on the quiet path or on `latency.perf` under-threshold samples):
+
+| Field | Source |
+|---|---|
+| `mem_level` / `mem_used_pct` / `mem_avail_mib` / `swap_used_pct` | `state/oom-guard/status.json` (same file as the `M·` badge) |
+| `loadavg_1` / `loadavg_5` / `loadavg_15` | guest `/proc/loadavg`, published by `wsl-oom-guard.sh` |
+| `proc_runnable` / `proc_total` | runnable/total from the same loadavg line |
+| `top_comm` / `top_rss_mib` | only when the badge level is not `ok` |
+
+Reads are cached ~2 s (`diagnostics.wezterm.latency.pressure_cache_ms`) so a storm of slow ticks shares one NTFS open. Disable with `pressure_enrich = false`. Freshness follows the oom-record publish cadence (~30 s) — enough to tell "was the guest hot?" after a sticky-typing report, not a profiler.
+
 Config (tracked defaults in `wezterm-x/lua/constants.lua`, override in `wezterm-x/local/constants.lua`):
 
 ```lua
@@ -39,6 +50,8 @@ diagnostics = {
       hotkey_slow_ms = 50,
       status_slow_ms = 40,
       emit_all = false,  -- true → also write every sample under latency.perf
+      -- pressure_enrich = false,       -- opt out of mem/loadavg on slow rows
+      -- pressure_cache_ms = 2000,
     },
     -- If you use a categories allowlist, keep latency = true or slow
     -- rows are filtered out by the logger.
@@ -57,11 +70,14 @@ scripts/dev/latency-report.sh
 scripts/dev/latency-report.sh --hotkey-id workspace.switch
 scripts/dev/latency-report.sh --kind status
 
-# Live tail while reproducing a stutter
+# Live tail while reproducing a stutter (shows mem/loadavg when present)
 scripts/dev/latency-report.sh --watch
+
+# One day's slow rows with pressure columns
+scripts/dev/latency-report.sh --raw today
 ```
 
-Limits: this does not measure GPU frame time, WSL/tmux internal lag, or OS IME candidate-window delay. A quiet log during a felt stutter means the blockage is outside these Lua callbacks — use that as a negative signal, not as "nothing happened".
+Limits: this does not measure GPU frame time, WSL/tmux internal lag, or OS IME candidate-window delay. A quiet log during a felt stutter means the blockage is outside these Lua callbacks — use that as a negative signal, not as "nothing happened". Pressure fields are guest-side (WSL); they will not explain a Windows-host-only CPU spike.
 
 ## Runtime Diagnostics
 
