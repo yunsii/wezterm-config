@@ -112,6 +112,7 @@ Pick the name from the dictionary when one exists; coin a new field only when no
 | guest load average | `loadavg_1` / `loadavg_5` / `loadavg_15` |
 | guest runnable / total procs | `proc_runnable` / `proc_total` |
 | largest RSS consumer (when badge ≠ ok) | `top_comm` / `top_rss_mib` |
+| slow status tick phase (temporary) | `phase_left_ms` / `phase_tabvis_ms` / `phase_prefetch_ms` / `phase_attention_ms` / `phase_live_snap_ms` / `phase_event_bus_ms` / `phase_right_ms` |
 
 The dictionary is small on purpose. Before inventing a field, grep existing log lines for an analogous one.
 
@@ -124,6 +125,8 @@ Cross-cutting input-feel observability lives in `wezterm-x/lua/latency.lua`:
 | Slow WezTerm-layer hotkey | `latency` · `message="slow key handler"` | handler `duration_ms >= hotkey_slow_ms` (default 50) |
 | Slow `update-status` tick | `latency` · `message="slow status tick"` | tick `duration_ms >= status_slow_ms` (default 40) |
 | Every sample | `latency.perf` | only when `diagnostics.wezterm.latency.emit_all = true` (or an explicit categories allowlist that includes `latency.perf`) |
+| WezTerm-layer hotkey fired | `hotkey` · `message="pressed"` | keymap wrap entered (every press; keep `categories.hotkey = true` under an allowlist) |
+| WezTerm-layer hotkey finished | `hotkey` · `message="dispatched"` | `perform_action` returned; fields include `duration_ms`, `ok` |
 
 Slow rows (and only slow rows) also attach guest pressure fields from `mem_guard.status_file` (`mem_used_pct`, `loadavg_*`, …) — see the field dictionary. Do **not** open that file on the under-threshold / `latency.perf` path.
 

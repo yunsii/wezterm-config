@@ -77,6 +77,10 @@ fi
 # Output TSV: day \t kind \t hotkey_id \t duration_ms \t message
 extract_rows() {
   local day_prefix="${1:-}"
+  # Match key="value" on the whole line — do NOT split on whitespace.
+  # Values such as ts="2026-08-27 13:45:23.135" and
+  # message="slow status tick" contain spaces; default FS would smash
+  # them and make every day look empty.
   awk -v day="$day_prefix" \
       -v cat_token="$category_token" \
       -v want_kind="$kind_filter" \
@@ -87,18 +91,20 @@ extract_rows() {
 
     {
       kind=""; hotkey=""; dur=""; msg=""; ts=""
-      for (i = 1; i <= NF; i++) {
-        if (match($i, /^ts="[^"]+"/)) {
-          ts = substr($i, 5, length($i) - 5)
-        } else if (match($i, /^message="[^"]+"/)) {
-          msg = substr($i, 10, length($i) - 10)
-        } else if (match($i, /^kind="[^"]+"/)) {
-          kind = substr($i, 7, length($i) - 7)
-        } else if (match($i, /^hotkey_id="[^"]+"/)) {
-          hotkey = substr($i, 12, length($i) - 12)
-        } else if (match($i, /^duration_ms="[^"]+"/)) {
-          dur = substr($i, 14, length($i) - 14)
-        }
+      if (match($0, /ts="[^"]+"/)) {
+        ts = substr($0, RSTART + 4, RLENGTH - 5)
+      }
+      if (match($0, /message="[^"]+"/)) {
+        msg = substr($0, RSTART + 9, RLENGTH - 10)
+      }
+      if (match($0, /kind="[^"]+"/)) {
+        kind = substr($0, RSTART + 6, RLENGTH - 7)
+      }
+      if (match($0, /hotkey_id="[^"]+"/)) {
+        hotkey = substr($0, RSTART + 11, RLENGTH - 12)
+      }
+      if (match($0, /duration_ms="[^"]+"/)) {
+        dur = substr($0, RSTART + 13, RLENGTH - 14)
       }
       if (dur == "") next
       if (perf == 0) {

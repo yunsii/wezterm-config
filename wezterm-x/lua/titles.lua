@@ -406,6 +406,20 @@ function M.register(opts)
     -- when duration crosses status_slow_ms (or emit_all). See
     -- docs/logging-conventions.md render-path discipline.
     local tick_t0 = latency.now_ms(wezterm)
+    -- Phase marks for slow-tick attribution (only attached when the
+    -- whole tick crosses status_slow_ms). Names match the blocks below.
+    local mark = tick_t0
+    local phase_left_ms, phase_tabvis_ms, phase_prefetch_ms
+    local phase_attention_ms, phase_live_snap_ms, phase_event_bus_ms, phase_right_ms
+    local function lap()
+      local t = latency.now_ms(wezterm)
+      if not t or not mark then
+        return 0
+      end
+      local d = t - mark
+      mark = t
+      return d
+    end
 
     -- Refresh the focused-pane marker on every tick of the focused
     -- window too — window-focus-changed fires only on transitions, so
@@ -421,6 +435,7 @@ function M.register(opts)
 
     local workspace = window:active_workspace() or 'default'
     window:set_left_status(format_workspace_label(workspace))
+    phase_left_ms = lap()
 
     -- Tab-visibility: recompute the top-N slot assignment for this
     -- workspace at most once per recompute_interval_ms (the module owns
@@ -468,9 +483,18 @@ function M.register(opts)
             end
           end
         end
+        phase_tabvis_ms = lap()
         -- Keep Alt+x menu cache warm (items has_tab + overflow-base.tsv).
         maybe_refresh_overflow_prefetch(now_ms, pane)
+        phase_prefetch_ms = lap()
+      else
+        phase_tabvis_ms = lap()
+        phase_prefetch_ms = 0
       end
+    else
+      phase_tabvis_ms = 0
+      phase_prefetch_ms = 0
+      lap()
     end
 
     -- update-status owns the periodic housekeeping that genuinely
@@ -491,24 +515,30 @@ function M.register(opts)
     if attention and attention.maybe_prune then
       attention.maybe_prune()
     end
+    phase_attention_ms = lap()
     if attention and attention.maybe_refresh_live_snapshot then
       local snapshot_path = constants.attention and constants.attention.live_panes_file
       if snapshot_path then
         attention.maybe_refresh_live_snapshot(snapshot_path)
       end
     end
+    phase_live_snap_ms = lap()
     if attention and attention.maybe_ack_focused then
       attention.maybe_ack_focused(window, pane)
     end
+    -- Fold ack into attention phase (order preserved: prune → snapshot → ack).
+    phase_attention_ms = (phase_attention_ms or 0) + lap()
 
     -- Drain pending file-transport events. Hooks targeting OSC arrive
     -- via user-var-changed (sub-frame); anything that landed via the
     -- file branch — picker-driven attention.jump in particular —
     -- shows up here within one tick. See docs/event-bus.md.
     event_bus.poll_files(window, pane)
+    phase_event_bus_ms = lap()
 
     refresh_right_status(window, pane)
     log_rendered_status(window)
+    phase_right_ms = lap()
 
     local tick_t1 = latency.now_ms(wezterm)
     if logger and tick_t0 and tick_t1 then
@@ -517,7 +547,16 @@ function M.register(opts)
         duration_ms = tick_t1 - tick_t0,
         window = window,
         pane = pane,
-        fields = { workspace = workspace },
+        fields = {
+          workspace = workspace,
+          phase_left_ms = phase_left_ms,
+          phase_tabvis_ms = phase_tabvis_ms,
+          phase_prefetch_ms = phase_prefetch_ms,
+          phase_attention_ms = phase_attention_ms,
+          phase_live_snap_ms = phase_live_snap_ms,
+          phase_event_bus_ms = phase_event_bus_ms,
+          phase_right_ms = phase_right_ms,
+        },
       })
     end
   end)

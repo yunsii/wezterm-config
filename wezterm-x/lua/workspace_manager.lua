@@ -245,15 +245,33 @@ function M.new(opts)
     -- Build the set of cwds currently spawned as wezterm tabs in this
     -- workspace's mux window. Empty when the workspace has no window
     -- yet (cold start or first-ever open).
+    --
+    -- Title-first, cwd-once. tab_matches_item falls back to
+    -- pane:get_current_working_dir() on title miss; without this split
+    -- that was O(tabs × items) cross-FS lookups and blocked the UI
+    -- thread ~800ms every 5s (phase_prefetch_ms). Managed tabs already
+    -- carry project titles, so the cwd path is the exception.
     local spawned_cwds = {}
     for _, mux_window in ipairs(mux.all_windows()) do
       if mux_window:get_workspace() == workspace_name then
         for _, info in ipairs(mux_window:tabs_with_info()) do
+          local tab = info.tab
           local item_for_match = nil
           for _, candidate in ipairs(raw_items or {}) do
-            if tabs.tab_matches_item(info.tab, candidate) then
+            if tabs.tab_matches_item(tab, candidate, false) then
               item_for_match = candidate
               break
+            end
+          end
+          if not item_for_match and tabs.tab_path then
+            local path = tabs.tab_path(tab)
+            if path then
+              for _, candidate in ipairs(raw_items or {}) do
+                if tabs.tab_matches_item(tab, candidate, path) then
+                  item_for_match = candidate
+                  break
+                end
+              end
             end
           end
           if item_for_match then
@@ -268,10 +286,11 @@ function M.new(opts)
     -- shells out to git once per item and was the Alt+x menu's dominant
     -- cost (~300ms for 14 work rows). Only bulk-compute missing cwds.
     local prev_sessions = {}
+    local prev_body = nil
     do
       local prev_fd = io.open(path, 'rb')
       if prev_fd then
-        local prev_body = prev_fd:read('*a')
+        prev_body = prev_fd:read('*a')
         prev_fd:close()
         if type(prev_body) == 'string' and prev_body ~= '' then
           local ok_dec, prev = pcall(function()
@@ -336,6 +355,12 @@ function M.new(opts)
         workspace_name:gsub('\\', '\\\\'):gsub('"', '\\"'),
         table.concat(parts, ','))
     end
+    -- Skip NTFS rewrite when nothing changed. has_tab / session / label
+    -- are stable across most 5s ticks; rewriting anyway just burned
+    -- UI-thread time and woke AV scanners.
+    if type(prev_body) == 'string' and prev_body == body then
+      return
+    end
     local fd = io.open(path, 'wb')
     if not fd then
       logger.warn('workspace', 'tab-visibility items snapshot write failed', with_trace_id(trace_id, {
@@ -394,6 +419,21 @@ function M.new(opts)
   function Workspace.open(window, pane, name)
     local trace_id = logger.trace_id('workspace')
     local start_ms = now_ms()
+    -- When opened from a WezTerm-layer hotkey wrap, keymaps.lua stashes
+    -- the manifest id so these rows correlate with hotkey/pressed +
+    -- hotkey/dispatched. Absent when called from other entry points
+    -- (palette toast, startup, overflow spawn, …).
+    local active_hotkey_id = rawget(_G, '__WEZTERM_ACTIVE_HOTKEY_ID')
+    if type(active_hotkey_id) ~= 'string' or active_hotkey_id == '' then
+      active_hotkey_id = nil
+    end
+    local function open_fields(extra)
+      local fields = with_trace_id(trace_id, extra)
+      if active_hotkey_id then
+        fields.hotkey_id = active_hotkey_id
+      end
+      return fields
+    end
     local raw_items = runtime.workspace_items(name)
     -- Don't write the items snapshot here unconditionally — it costs
     -- mux walk + json encode + cross-FS NTFS write per Alt+w press,
@@ -409,7 +449,7 @@ function M.new(opts)
       skip_session_compute = workspace_exists,
     })
     if #items < #raw_items then
-      logger.info('workspace', 'capped startup items by tab_visibility', with_trace_id(trace_id, {
+      logger.info('workspace', 'capped startup items by tab_visibility', open_fields({
         workspace = name,
         configured_count = #raw_items,
         spawned_count = #items,
@@ -418,7 +458,7 @@ function M.new(opts)
     local prereq_error = runtime.managed_workspace_prereq_error()
 
     if prereq_error then
-      logger.warn('workspace', 'managed workspace prerequisites failed', with_trace_id(trace_id, {
+      logger.warn('workspace', 'managed workspace prerequisites failed', open_fields({
         error = prereq_error,
         workspace = name,
       }))
@@ -427,7 +467,7 @@ function M.new(opts)
     end
 
     if #items == 0 then
-      logger.warn('workspace', 'workspace has no configured directories', with_trace_id(trace_id, {
+      logger.warn('workspace', 'workspace has no configured directories', open_fields({
         workspace = name,
       }))
       window:toast_notification('WezTerm', 'No directories configured for workspace: ' .. name, nil, 3000)
@@ -436,7 +476,7 @@ function M.new(opts)
 
     for _, item in ipairs(items) do
       if item.command_error then
-        logger.warn('workspace', 'workspace item launcher resolution failed', with_trace_id(trace_id, {
+        logger.warn('workspace', 'workspace item launcher resolution failed', open_fields({
           cwd = item.cwd,
           error = item.command_error,
           launcher = item.launcher,
@@ -448,7 +488,7 @@ function M.new(opts)
     end
 
     if workspace_exists then
-      logger.info('workspace', 'switching to existing workspace', with_trace_id(trace_id, {
+      logger.info('workspace', 'switching to existing workspace', open_fields({
         item_count = #items,
         skipped_session_compute = true,
         workspace = name,
@@ -500,7 +540,7 @@ function M.new(opts)
         end
       end
       local finish_ms = now_ms()
-      logger.info('workspace', 'workspace open completed', with_trace_id(trace_id, {
+      logger.info('workspace', 'workspace open completed', open_fields({
         duration_ms = start_ms and finish_ms and (finish_ms - start_ms) or nil,
         mode = 'existing',
         skipped_session_compute = true,
@@ -509,7 +549,7 @@ function M.new(opts)
       return
     end
 
-    logger.info('workspace', 'creating new workspace window', with_trace_id(trace_id, {
+    logger.info('workspace', 'creating new workspace window', open_fields({
       first_cwd = items[1].cwd,
       item_count = #items,
       workspace = name,
@@ -545,7 +585,7 @@ function M.new(opts)
     -- workspaces.lua is edited.
     maybe_write_items_snapshot(name, raw_items, trace_id)
     local finish_ms = now_ms()
-    logger.info('workspace', 'workspace open completed', with_trace_id(trace_id, {
+    logger.info('workspace', 'workspace open completed', open_fields({
       duration_ms = start_ms and finish_ms and (finish_ms - start_ms) or nil,
       mode = 'created',
       skipped_session_compute = false,

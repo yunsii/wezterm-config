@@ -31,6 +31,10 @@ return {
         -- Slow key / status-tick events (threshold-gated). Keep enabled
         -- when using an allowlist, or those rows are filtered out.
         latency = true,
+        -- Per-press audit (pressed + dispatched). Required when the
+        -- allowlist is non-empty — otherwise "did this hotkey fire?"
+        -- cannot be answered from wezterm.log.
+        hotkey = true,
       },
       -- Thresholds for category=latency slow events. emit_all writes
       -- every sample under latency.perf (noisy at ~4 Hz status ticks).

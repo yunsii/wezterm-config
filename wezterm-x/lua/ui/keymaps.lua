@@ -51,24 +51,57 @@ function M.build(opts)
   local usage = opts.usage
   local raw_overrides = opts.raw_overrides or {}
 
-  -- Wrap an entry so pressing the key bumps the usage counter and records
-  -- handler duration. The bump is fire-and-forget; latency logging is
-  -- threshold-gated (see diagnostics.wezterm.latency) so the hot path
-  -- stays quiet unless a press is actually slow.
+  -- Wrap an entry so pressing the key:
+  --   1. bumps the aggregate usage counter (fire-and-forget);
+  --   2. emits hotkey/pressed then hotkey/dispatched audit rows so a
+  --      "key did nothing" report can distinguish "binding never fired"
+  --      from "binding fired but action was a no-op / queued behind a
+  --      slow update-status";
+  --   3. records threshold-gated latency (diagnostics.wezterm.latency).
+  -- Stashes hotkey_id on _G for the duration of perform_action so
+  -- nested action logs (e.g. workspace.open) can cite the same id.
   local lat_cfg = latency.config(constants)
   local function inst(hotkey_id, entry)
     local original_action = entry.action
     entry.action = wezterm.action_callback(function(window, pane)
+      local ctx = { window = window, pane = pane }
       local t0 = latency.now_ms(wezterm)
       if usage and usage.bump then
-        usage.bump(hotkey_id, { window = window, pane = pane })
+        usage.bump(hotkey_id, ctx)
       end
-      window:perform_action(original_action, pane)
+      if usage and usage.log_event then
+        usage.log_event('pressed', hotkey_id, ctx)
+      elseif logger and logger.info then
+        logger.info('hotkey', 'pressed', { hotkey_id = hotkey_id })
+      end
+      local prev_hotkey = rawget(_G, '__WEZTERM_ACTIVE_HOTKEY_ID')
+      _G.__WEZTERM_ACTIVE_HOTKEY_ID = hotkey_id
+      local ok_action, action_err = pcall(function()
+        window:perform_action(original_action, pane)
+      end)
+      _G.__WEZTERM_ACTIVE_HOTKEY_ID = prev_hotkey
       local t1 = latency.now_ms(wezterm)
-      if logger and t0 and t1 then
+      local duration_ms = (t0 and t1) and (t1 - t0) or nil
+      local dispatch_fields = {}
+      if duration_ms then
+        dispatch_fields.duration_ms = duration_ms
+      end
+      if not ok_action then
+        dispatch_fields.ok = '0'
+        dispatch_fields.err = tostring(action_err)
+      else
+        dispatch_fields.ok = '1'
+      end
+      if usage and usage.log_event then
+        usage.log_event('dispatched', hotkey_id, ctx, dispatch_fields)
+      elseif logger and logger.info then
+        dispatch_fields.hotkey_id = hotkey_id
+        logger.info('hotkey', 'dispatched', dispatch_fields)
+      end
+      if logger and duration_ms then
         latency.observe(logger, lat_cfg, {
           kind = 'hotkey',
-          duration_ms = t1 - t0,
+          duration_ms = duration_ms,
           window = window,
           pane = pane,
           fields = { hotkey_id = hotkey_id },

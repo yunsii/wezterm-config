@@ -4,13 +4,15 @@
 -- resolves the bump script and spawns it; a missing script or
 -- unavailable WSL distro is a silent no-op for the counter.
 --
--- Each bump also emits one `category="hotkey"` line to the runtime log
--- (via the shared logger, when provided) with pane / workspace /
--- foreground-process context. This is the audit trail for diagnosing
--- suspicious counter values such as "this hotkey rose to N but I never
--- pressed it" — the log identifies which pane, which foreground
--- program, and which WezTerm domain saw the key. Missing logger means
--- the counter still increments but no audit trail is recorded.
+-- WezTerm-layer presses also emit `category="hotkey"` audit rows
+-- (via the shared logger, when provided):
+--   message="pressed"    — keymap wrap entered (binding fired)
+--   message="dispatched" — perform_action returned (handler finished)
+-- keymaps.lua owns those two lines; this module only bumps the counter
+-- and may emit `pressed` when called standalone. Context stays cheap
+-- (workspace / pane_id / domain) — no get_foreground_process_name on
+-- the press path (hybrid-wsl cross-domain cost). If `hotkey` is missing
+-- from diagnostics.wezterm.categories allowlist, rows are filtered out.
 
 local path_sep = package.config:sub(1, 1)
 local function join_path(...)
@@ -43,20 +45,14 @@ local function collect_context_fields(context)
       fields.pane_id = tostring(pane_id)
     end
 
-    local ok_fg, fg = pcall(function() return pane:get_foreground_process_name() end)
-    if ok_fg and type(fg) == 'string' and fg ~= '' then
-      fields.foreground = fg
-    end
-
     local ok_dom, dom = pcall(function() return pane:get_domain_name() end)
     if ok_dom and type(dom) == 'string' and dom ~= '' then
       fields.domain = dom
     end
-
-    local ok_title, title = pcall(function() return pane:get_title() end)
-    if ok_title and type(title) == 'string' and title ~= '' then
-      fields.pane_title = title
-    end
+    -- Deliberately skip get_foreground_process_name / get_title here:
+    -- both can cross into the guest on hybrid-wsl and the press path
+    -- must stay sub-millisecond. Use category=latency slow rows when
+    -- you need foreground on a sticky press.
   end
 
   return fields
@@ -95,15 +91,25 @@ function M.new(opts)
     if args then
       pcall(function() wezterm.background_child_process(args) end)
     end
-
-    if logger and logger.info then
-      local fields = collect_context_fields(context)
-      fields.hotkey_id = hotkey_id
-      logger.info('hotkey', 'bump', fields)
-    end
   end
 
-  return { bump = bump }
+  -- Emit a hotkey audit row. message is typically "pressed" or
+  -- "dispatched"; extra fields (duration_ms, …) are merged in.
+  local function log_event(message, hotkey_id, context, extra)
+    if not (logger and logger.info) then return end
+    if type(hotkey_id) ~= 'string' or hotkey_id == '' then return end
+    if type(message) ~= 'string' or message == '' then return end
+    local fields = collect_context_fields(context)
+    fields.hotkey_id = hotkey_id
+    if type(extra) == 'table' then
+      for k, v in pairs(extra) do
+        fields[k] = v
+      end
+    end
+    logger.info('hotkey', message, fields)
+  end
+
+  return { bump = bump, log_event = log_event, context_fields = collect_context_fields }
 end
 
 return M

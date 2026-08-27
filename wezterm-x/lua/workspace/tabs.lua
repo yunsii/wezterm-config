@@ -255,12 +255,29 @@ exec tmux attach -t "$session"
     end
   end
 
-  local function tab_matches_item(tab, item)
+  -- cached_path:
+  --   nil   → resolve via tab_path (pane:get_current_working_dir) on title miss
+  --   false → title-only probe; never touch cwd (hot path for snapshot scans)
+  --   string → use the pre-resolved cwd; never re-enter get_current_working_dir
+  -- Callers that match one tab against many items MUST pass false then a
+  -- once-resolved string — otherwise each failed title compare re-enters
+  -- the guest on hybrid-wsl (~800ms per 5s update-status tick measured).
+  local function tab_matches_item(tab, item, cached_path)
     if not tab or not item then
       return false
     end
 
-    return tab:get_title() == project_tab_title(item) or tab_path(tab) == item.cwd
+    if tab:get_title() == project_tab_title(item) then
+      return true
+    end
+    if cached_path == false then
+      return false
+    end
+    local path = cached_path
+    if path == nil then
+      path = tab_path(tab)
+    end
+    return path == item.cwd
   end
 
   local function spawn_workspace_tab(mux_window, item, trace_id)
@@ -658,6 +675,7 @@ exec tmux attach -t "$session"
     spawn_workspace_tab = spawn_workspace_tab,
     sync_workspace_tabs = sync_workspace_tabs,
     tab_matches_item = tab_matches_item,
+    tab_path = tab_path,
     spawn_overflow_tab = spawn_overflow_tab,
     find_overflow_tab = find_overflow_tab,
     is_overflow_tab = is_overflow_tab,

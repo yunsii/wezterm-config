@@ -30,6 +30,22 @@ Occasional typing stutter or slow shortcuts usually means the WezTerm UI thread 
 
 Shared fields: `duration_ms`, `threshold_ms`, `kind="hotkey|status"`, plus `hotkey_id` / `workspace` / `pane_id` / `domain` / `foreground` when available.
 
+Slow **status** rows also attach a phase breakdown (ms) so a sticky tick can be attributed without turning on `emit_all`:
+
+| Field | Block in `titles.lua` `update-status` |
+|---|---|
+| `phase_left_ms` | focus marker + left-status workspace label |
+| `phase_tabvis_ms` | `tab_visibility.tick` + sample / overflow-collision / hot-reorder |
+| `phase_prefetch_ms` | `refresh_all_items_snapshots` + background overflow-base rebuild |
+| `phase_attention_ms` | per-tick cache reset, TTL prune, focus-ack |
+| `phase_live_snap_ms` | `attention.maybe_refresh_live_snapshot` (1 s throttle) |
+| `phase_event_bus_ms` | `event_bus.poll_files` |
+| `phase_right_ms` | right-status segments + render log |
+
+These fields are investigation instrumentation; drop them once the sticky-tick owner is fixed and verified.
+
+**2026-08-27 sticky Alt+c/w:** slow ticks were ~every 5s with `phase_prefetch_ms` p50≈810ms — `refresh_all_items_snapshots` matching tabs via repeated `pane:get_current_working_dir()` (O(tabs×items) on hybrid-wsl). Fix: title-first match + at most one cwd resolve per tab, and skip the NTFS rewrite when the snapshot body is unchanged. Re-check with `grep phase_prefetch_ms= …/wezterm.log | tail`.
+
 **Slow rows also attach a guest-pressure snapshot** (only when `duration_ms` crosses the gate — never on the quiet path or on `latency.perf` under-threshold samples):
 
 | Field | Source |
@@ -133,7 +149,27 @@ Aggregate press counts — no event log — for every WezTerm keymap entry and t
 - Ids are the manifest entry ids from [`wezterm-x/commands/manifest.json`](../wezterm-x/commands/manifest.json). Every hotkey should be registered there (enforced by the rule in [`AGENTS.md`](../AGENTS.md)); ad-hoc ids that ever slip through render with label `(unregistered)` in the report, which is the signal to add the missing manifest entry.
 - Run [`scripts/dev/hotkey-usage-report.sh`](../scripts/dev/hotkey-usage-report.sh) for a sorted table (count, keys, id, label, first-seen, last-seen ages). `--json` dumps the raw counter, `--path` prints the resolved file path.
 - Deleting the counter file is safe and resets all counts; the bump script recreates it on the next press.
-- The counter is aggregate-only. For per-press audit (which pane, which foreground program, which WezTerm domain saw the key), look at `category="hotkey" message="bump"` lines in the WezTerm runtime log — same file as the other WezTerm categories, filtered via `diagnostics.wezterm.categories`. Use this to investigate suspicious rows such as "this hotkey rose to N but I never pressed it" — the log will tell you whether the source was a tmux TUI, a Windows IME translation, a keyboard remap, etc. tmux chord bumps do not emit this line (the shell bump path has no pane context); only WezTerm keymap bumps do.
+- The counter is aggregate-only. For **per-press audit** of WezTerm-layer bindings, look at `category="hotkey"` rows in `%LOCALAPPDATA%\wezterm-runtime\logs\wezterm.log` (filtered via `diagnostics.wezterm.categories` — keep `hotkey = true` when using an allowlist):
+
+  | message | Meaning |
+  |---|---|
+  | `pressed` | Keymap wrap entered — the binding fired (or at least reached Lua after any UI-thread queue) |
+  | `dispatched` | `perform_action` returned — `ok="1"` means no Lua error; `duration_ms` is wrap wall time |
+
+  Shared fields: `hotkey_id`, `workspace`, `pane_id`, `domain`. Nested action logs (for example `category="workspace" message="workspace open completed"`) carry the same `hotkey_id` when the open was driven by a hotkey wrap, so one grep correlates press → business logic:
+
+  ```bash
+  grep 'hotkey_id="workspace.switch-work"' \
+    /mnt/c/Users/*/AppData/Local/wezterm-runtime/logs/wezterm.log | tail
+  ```
+
+  How to read a "key did nothing" report:
+  1. **No `pressed`** — binding never reached Lua (IME swallow, wrong layer, focus elsewhere, or UI thread still blocked so the wrap has not run yet).
+  2. **`pressed` but no `dispatched`** — handler still running / crashed before return (`ok="0"` on a later dispatched row).
+  3. **`dispatched ok=1` but no matching action log** — wrap finished but the action was a no-op or lives outside logged code (built-in WezTerm action with no Lua side effect).
+  4. **Both hotkey rows + action log** — logic ran; if the UI still felt stuck, look at preceding `slow status tick` / `phase_*` rows.
+
+  tmux chord bumps do **not** emit these lines (the shell bump path has no pane context); only WezTerm keymap wraps do.
 
 ## Smoke Tests
 
