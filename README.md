@@ -1,3 +1,6 @@
+
+</think>
+
 <p align="center">
   <img src="assets/brand/banner.svg" alt="WezDeck — A flight deck for your AI agents" width="960">
 </p>
@@ -73,7 +76,7 @@ $EDITOR wezterm-x/local/constants.lua   # runtime_mode, default_domain, shell, �
 $EDITOR wezterm-x/local/shared.env      # WAKATIME_API_KEY, MANAGED_AGENT_PROFILE, …
 
 # 2. Sync the runtime into $HOME (writes ~/.wezterm.lua + ~/.wezterm-x/)
-skills/wezterm-runtime-sync/scripts/sync-runtime.sh
+bash skills/wezterm-runtime-sync/scripts/sync-runtime.sh
 
 # 3. Reload WezTerm and confirm the right status shows
 #    "⟳ 0 ⚠ 0 ✓ 0" — that means the attention pipeline is live.
