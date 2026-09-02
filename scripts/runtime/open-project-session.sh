@@ -242,16 +242,56 @@ tmux_worktree_ensure_tmux_config_loaded "$TMUX_CONF" "$(repo_root_path)"
 
 # Focus restore: prefer ledger last_path (survives tmux death), then the
 # session's already-active window when reusing. Only fall back to the
-# configured item cwd when nothing else resolves. Missing worktree
-# windows are not pre-created — Alt+g shows last-visit age instead of
-# `(new)`, and selecting a row creates+resumes on demand.
+# configured item cwd when nothing else resolves.
+#
+# When last_path's directory still exists but its tmux window was not
+# recreated (cold open after kill-server / WSL restart), create that
+# one window on demand — same contract as Alt+g Enter — rather than
+# landing on the item cwd. Landing on main and then ledger-touching it
+# used to push the primary worktree to the top of Alt+g after every
+# restart even when the user had been in a nested worktree. Sibling
+# worktrees beyond last_path are still not pre-created.
 startup_step="select_window"
 focus_window_id="$window_id"
 restore_path="$(access_ledger_session_last_path "$session_name" || true)"
+restore_root=""
+restore_family_ok=0
+if [[ -n "$restore_path" ]]; then
+  restore_path="$(tmux_worktree_abs_path "$restore_path")"
+fi
 if [[ -n "$restore_path" && -d "$restore_path" ]]; then
-  restore_window="$(tmux_worktree_find_window "$session_name" "$restore_path" || true)"
-  if [[ -n "$restore_window" ]]; then
-    focus_window_id="$restore_window"
+  restore_root="$restore_path"
+  if tmux_worktree_in_git_repo "$restore_path"; then
+    restore_root="$(tmux_worktree_repo_root "$restore_path")"
+  fi
+  restore_family_ok=1
+  if [[ -n "$repo_common_dir" ]]; then
+    restore_common="$(tmux_worktree_common_dir "$restore_root" || true)"
+    if [[ -z "$restore_common" || "$restore_common" != "$repo_common_dir" ]]; then
+      restore_family_ok=0
+    fi
+  fi
+  if (( restore_family_ok )); then
+    restore_window="$(tmux_worktree_find_window "$session_name" "$restore_root" || true)"
+    if [[ -n "$restore_window" ]]; then
+      focus_window_id="$restore_window"
+    elif [[ "$restore_root" != "$worktree_root" ]]; then
+      restore_label="$(tmux_worktree_label_for_root "$restore_root" "$main_worktree_root")"
+      startup_step="restore_last_path_window"
+      runtime_log_info worktree "recreating last_path worktree window" \
+        "session_name=$session_name" \
+        "restore_path=$restore_path" \
+        "restore_root=$restore_root" \
+        "restore_label=$restore_label"
+      focus_window_id="$(tmux_worktree_create_window "$session_name" "$restore_root" "$primary_shell_command" "$restore_label")"
+      tmux_worktree_set_window_metadata "$focus_window_id" managed_primary "$restore_root" "$restore_label" "$primary_shell_command" managed_two_pane
+      if [[ -n "$agent_profile" ]]; then
+        restore_primary_pane_id="$(tmux list-panes -t "$focus_window_id" -F '#{pane_id}' 2>/dev/null | head -n 1)"
+        if [[ -n "$restore_primary_pane_id" ]]; then
+          tmux set-option -p -t "$restore_primary_pane_id" @wezterm_pane_role "agent-cli:$agent_profile" 2>/dev/null || true
+        fi
+      fi
+    fi
   fi
 fi
 if (( session_created == 0 )) && [[ "$focus_window_id" == "$window_id" ]]; then
@@ -263,10 +303,21 @@ if (( session_created == 0 )) && [[ "$focus_window_id" == "$window_id" ]]; then
   fi
 fi
 tmux select-window -t "$focus_window_id"
-# Record focus so a subsequent kill-server → cold-open can land here.
-focus_path="$(tmux display-message -p -t "$focus_window_id" '#{pane_current_path}' 2>/dev/null || true)"
-if [[ -n "$focus_path" && -d "$focus_path" ]]; then
-  access_ledger_touch "$session_name" "$(tmux_worktree_abs_path "$focus_path")" >/dev/null 2>&1 || true
+# Record focus for the next kill-server → cold-open. When we had a
+# same-family last_path to restore, keep that path as MRU even if focus
+# is still on the item cwd (create failed) so the primary worktree does
+# not steal Alt+g / Alt+x ranking after every restart.
+ledger_touch_path=""
+if (( restore_family_ok )) && [[ -n "$restore_root" && -d "$restore_root" ]]; then
+  ledger_touch_path="$restore_root"
+else
+  focus_path="$(tmux display-message -p -t "$focus_window_id" '#{pane_current_path}' 2>/dev/null || true)"
+  if [[ -n "$focus_path" && -d "$focus_path" ]]; then
+    ledger_touch_path="$(tmux_worktree_abs_path "$focus_path")"
+  fi
+fi
+if [[ -n "$ledger_touch_path" && -d "$ledger_touch_path" ]]; then
+  access_ledger_touch "$session_name" "$ledger_touch_path" >/dev/null 2>&1 || true
 fi
 
 startup_step="attach"
@@ -276,5 +327,23 @@ runtime_log_info workspace "open-project-session prepared tmux session" \
   "focus_window_id=$focus_window_id" \
   "duration_ms=$(runtime_log_duration_ms "$start_ms")"
 runtime_log_info workspace "attaching tmux session" "session_name=$session_name" "window_id=$focus_window_id"
+
+# Workday-playback narrative: session surface only (no agent transcript).
+# Best-effort; never block attach.
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/narrative-lib.sh" 2>/dev/null || true
+if declare -F narrative_append_event >/dev/null 2>&1; then
+  project_label="$(basename "$cwd")"
+  narr_fields=(
+    "workspace=$workspace"
+    "session_name=$session_name"
+    "project=$project_label"
+    "session_created=$session_created"
+    "window_created=$window_created"
+  )
+  [[ -n "$agent_profile" ]] && narr_fields+=("agent_profile=$agent_profile")
+  narrative_append_event session.launch "${narr_fields[@]}" || true
+fi
+
 trap - EXIT
 exec tmux attach-session -t "$session_name"

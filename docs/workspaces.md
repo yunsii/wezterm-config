@@ -65,7 +65,7 @@ WezTerm workspaces are the top-level session unit. For the full WezTerm-vs-tmux 
 - Managed agent commands run inside the resolved login shell so workspace startup sees the same shell environment as your normal terminal sessions.
 - Raw `command = { ... }` overrides still bypass the managed launcher profile entirely.
 - Existing tmux worktree sessions are reused as-is. Changing the launcher affects newly created or recreated sessions.
-- **Focus restore on reopen.** `scripts/runtime/open-project-session.sh` no longer forces `select-window` onto the configured item cwd when a session already exists. It prefers the durable access-ledger `last_path` for that session (survives `tmux kill-server`), then the session's already-active window (survives WezTerm-only quit), and only then falls back to the item cwd. Other worktree windows are **not** pre-created on session recreate — `Alt+g` shows last-visit age for paths without a live window, and selecting a row creates+resumes on demand. Ledger path: `~/.local/state/wezterm-runtime/state/access-ledger.json` (see [`tab-visibility.md`](./tab-visibility.md) for the Alt+x / Alt+g shared sort contract).
+- **Focus restore on reopen.** `scripts/runtime/open-project-session.sh` no longer forces `select-window` onto the configured item cwd when a session already exists. It prefers the durable access-ledger `last_path` for that session (survives `tmux kill-server`), then the session's already-active window (survives WezTerm-only quit), and only then falls back to the item cwd. When `last_path` still exists on disk but its tmux window was not recreated (cold open after `kill-server` / WSL restart), open recreates **that one** window on demand — same contract as `Alt+g` Enter — so focus lands on the worktree you were actually in, instead of the primary cwd. Sibling worktrees beyond `last_path` are still not pre-created; `Alt+g` shows last-visit age for those paths and selecting a row creates+resumes on demand. Ledger path: `~/.local/state/wezterm-runtime/state/access-ledger.json` (see [`tab-visibility.md`](./tab-visibility.md) for the Alt+x / Alt+g shared sort contract).
 - `workspace.open()` opens only its first configured entry window immediately. Wider navigation is expected to happen inside tmux.
 
 ### Agent selection layers
@@ -75,8 +75,8 @@ Three layers, most specific wins:
 | Layer | Where | Example |
 |---|---|---|
 | **Repo** | `items[].launcher` in `workspaces.lua` | one opensource checkout on `codex_resume` |
-| **Workspace** | `defaults.launcher` for that workspace | `config` → `grok_resume` (tracked baseline + local example) |
-| **Global** | `MANAGED_AGENT_PROFILE` in `wezterm-x/local/shared.env` (else `WT_PROVIDER_AGENT_PROFILE` / built-in `claude`) | machine default for `work` / `opensource` when their defaults still point at `managed_launcher` |
+| **Workspace** | `defaults.launcher` for that workspace | `config` / `opensource` → `grok_resume` (tracked baseline + local example) |
+| **Global** | `MANAGED_AGENT_PROFILE` in `wezterm-x/local/shared.env` (else `WT_PROVIDER_AGENT_PROFILE` / built-in `claude`) | machine default for `work` when its defaults still point at `managed_launcher` |
 
 ```lua
 config = {
