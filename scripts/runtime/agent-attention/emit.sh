@@ -85,6 +85,10 @@ case "$status" in
 esac
 
 reason="$default_reason"
+# Workday-playback fields for agent.user_input (summary only — never full body).
+prompt_summary=""
+prompt_chars=""
+prompt_lines=""
 if [[ ! -t 0 ]] && command -v jq >/dev/null 2>&1; then
   stdin_payload="$(cat || true)"
   if [[ -n "$stdin_payload" ]]; then
@@ -104,6 +108,16 @@ if [[ ! -t 0 ]] && command -v jq >/dev/null 2>&1; then
         reason="$extracted"
       fi
     fi
+    # Narrative summary: first line ≤80 + char/line counts (no full prompt).
+    prompt_summary="$(printf '%s' "$stdin_payload" \
+      | jq -r '(.prompt | if . == null then empty else (split("\n")[0] | .[0:80]) end) // empty' \
+        2>/dev/null || true)"
+    prompt_chars="$(printf '%s' "$stdin_payload" \
+      | jq -r '(.prompt | if . == null then empty else (tostring | length) end) // empty' \
+        2>/dev/null || true)"
+    prompt_lines="$(printf '%s' "$stdin_payload" \
+      | jq -r '(.prompt | if . == null then empty else (split("\n") | length) end) // empty' \
+        2>/dev/null || true)"
     if [[ -z "$notification_type" ]]; then
       notification_type="$(printf '%s' "$stdin_payload" \
         | jq -r '.notification_type // .notificationType // .type // empty' \
@@ -198,19 +212,20 @@ tmux_socket=""
 tmux_session=""
 tmux_window=""
 tmux_pane=""
+tmux_window_name=""
 if [[ -n "${TMUX-}" ]] && command -v tmux >/dev/null 2>&1; then
   # Target our own pane explicitly. Without -t, tmux returns the client's
   # currently active pane regardless of which hook fired, so every entry
   # would collapse onto whichever pane the user is looking at.
   target_pane="${TMUX_PANE:-}"
   if [[ -n "$target_pane" ]]; then
-    tmux_meta="$(tmux display-message -p -t "$target_pane" -F '#{socket_path}|#{session_name}|#{window_id}|#{pane_id}' 2>/dev/null || true)"
+    tmux_meta="$(tmux display-message -p -t "$target_pane" -F '#{socket_path}|#{session_name}|#{window_id}|#{pane_id}|#{window_name}' 2>/dev/null || true)"
   fi
   if [[ -z "${tmux_meta:-}" ]]; then
-    tmux_meta="$(tmux display-message -p -F '#{socket_path}|#{session_name}|#{window_id}|#{pane_id}' 2>/dev/null || true)"
+    tmux_meta="$(tmux display-message -p -F '#{socket_path}|#{session_name}|#{window_id}|#{pane_id}|#{window_name}' 2>/dev/null || true)"
   fi
   if [[ -n "${tmux_meta:-}" ]]; then
-    IFS='|' read -r tmux_socket tmux_session tmux_window tmux_pane <<<"$tmux_meta"
+    IFS='|' read -r tmux_socket tmux_session tmux_window tmux_pane tmux_window_name <<<"$tmux_meta"
   fi
 fi
 
@@ -463,6 +478,28 @@ else
       | tr '-' '_')"
   fi
 
+  # Sticky display fields for Alt+/ : last real user prompt + provider
+  # session name. Stop/waiting overwrite `reason` with end_turn / permission
+  # copy; these two must survive so recent rows stay readable.
+  last_user_prompt=""
+  if [[ -n "$prompt_summary" ]]; then
+    last_user_prompt="$prompt_summary"
+  elif [[ "$status" == "running" && -n "$reason" \
+          && "$reason" != "running…" && "$reason" != "running" ]]; then
+    last_user_prompt="$reason"
+  fi
+  agent_name=""
+  if [[ -n "$session_id" && "$session_id" != pane:* ]]; then
+    existing_agent_name="$(jq -r --arg sid "$session_id" \
+      '.entries[$sid].agent_name // empty' \
+      "$(attention_state_path)" 2>/dev/null || true)"
+    if [[ -n "$existing_agent_name" ]]; then
+      agent_name="$existing_agent_name"
+    else
+      agent_name="$(attention_resolve_agent_name "$session_id" 2>/dev/null || true)"
+    fi
+  fi
+
   attention_state_upsert \
     "$session_id" \
     "${WEZTERM_PANE:-}" \
@@ -474,6 +511,9 @@ else
     "$reason" \
     "$git_branch" \
     "$waiting_kind" \
+    "$last_user_prompt" \
+    "$agent_name" \
+    "$tmux_window_name" \
     2>/dev/null || true
 
   # Spawn the prompt-watcher when a user-action waiting lands.
@@ -586,5 +626,34 @@ runtime_log_info attention "hook emitted agent status" \
   "tick_ms=$tick_ms" \
   "entry_ts_ms=$entry_ts_ms" \
   "elapsed_ms=$elapsed_ms" 2>/dev/null || true
+
+# Workday playback narrative (fail-open).
+rev_lc="$(printf '%s' "$raw_event" | tr '[:upper:]' '[:lower:]')"
+# shellcheck disable=SC1091
+. "$script_dir/../narrative-lib.sh" 2>/dev/null || true
+if declare -F narrative_append_event >/dev/null 2>&1; then
+  if [[ "$status" == "running" \
+        && ( "$rev_lc" == "userpromptsubmit" || -n "$prompt_summary" ) ]]; then
+    summary_out="${prompt_summary:-$reason}"
+    [[ -z "$summary_out" ]] && summary_out="(user message)"
+    summary_out="$(printf '%s' "$summary_out" | tr '\n\r\t|=' '    ' | cut -c1-80)"
+    narr_fields=(
+      "summary=$summary_out"
+      "provider=$provider"
+    )
+    [[ -n "$session_id" ]] && narr_fields+=("session_id=$session_id")
+    [[ -n "$prompt_chars" ]] && narr_fields+=("chars=$prompt_chars")
+    [[ -n "$prompt_lines" ]] && narr_fields+=("lines=$prompt_lines")
+    [[ -n "${WEZTERM_PANE:-}" ]] && narr_fields+=("pane_id=$WEZTERM_PANE")
+    narrative_append_event agent.user_input "${narr_fields[@]}" || true
+  fi
+  # agent.reply: animation-only signal on Stop/done — no reply body stored.
+  if [[ "$status" == "done" ]]; then
+    narr_fields=("provider=$provider")
+    [[ -n "$session_id" ]] && narr_fields+=("session_id=$session_id")
+    [[ -n "${WEZTERM_PANE:-}" ]] && narr_fields+=("pane_id=$WEZTERM_PANE")
+    narrative_append_event agent.reply "${narr_fields[@]}" || true
+  fi
+fi
 
 exit 0

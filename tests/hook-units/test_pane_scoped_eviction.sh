@@ -101,6 +101,17 @@ assert_recent_has_sid() {
   fi
 }
 
+assert_eq() {
+  local label="$1" actual="$2" expected="$3"
+  if [[ "$actual" == "$expected" ]]; then
+    echo "  ✓ $label"; pass=$((pass+1))
+  else
+    echo "  ✗ $label"
+    echo "    expected=$expected actual=$actual"
+    fail=$((fail+1))
+  fi
+}
+
 socket="/tmp/tmux-1000/default"
 session="wezterm_config_x_1f5ee8662c"
 
@@ -215,6 +226,42 @@ run_in_sandbox "$sandbox" attention_state_upsert \
 assert_has_entry "new sid lands on pane" "$sandbox" "sid-new"
 assert_no_entry "old sid on same pane gets evicted" "$sandbox" "sid-old"
 assert_recent_has_sid "evicted same-pane sid lands in recent[]" "$sandbox" "sid-old"
+rm -rf "$sandbox"
+
+echo
+echo "▸ attention_state_upsert: sticky last_user_prompt / agent_name / window_name"
+
+# Case 7: Stop overwrites reason with end_turn but must keep the last
+# real user prompt + agent session name so Alt+/ recent rows stay useful.
+sandbox="$(mktemp -d)"
+seed_state "$sandbox" '{"version":1,"entries":{},"recent":[]}'
+run_in_sandbox "$sandbox" attention_state_upsert \
+  "sid-p" "1" "$socket" "$session" "@2" "%5" "running" "fix the i18n scripts" "master" "" \
+  "fix the i18n scripts" "dev-ci-63" "dev-ci"
+sf="$(state_file_in "$sandbox")"
+lup="$(jq -r '.entries["sid-p"].last_user_prompt // empty' "$sf")"
+an="$(jq -r '.entries["sid-p"].agent_name // empty' "$sf")"
+wn="$(jq -r '.entries["sid-p"].tmux_window_name // empty' "$sf")"
+assert_eq "running stores last_user_prompt" "$lup" "fix the i18n scripts"
+assert_eq "running stores agent_name" "$an" "dev-ci-63"
+assert_eq "running stores tmux_window_name" "$wn" "dev-ci"
+
+run_in_sandbox "$sandbox" attention_state_upsert \
+  "sid-p" "1" "$socket" "$session" "@2" "%5" "done" "end_turn" "master" "" "" "" ""
+lup="$(jq -r '.entries["sid-p"].last_user_prompt // empty' "$sf")"
+an="$(jq -r '.entries["sid-p"].agent_name // empty' "$sf")"
+wn="$(jq -r '.entries["sid-p"].tmux_window_name // empty' "$sf")"
+reason="$(jq -r '.entries["sid-p"].reason // empty' "$sf")"
+assert_eq "done keeps last_user_prompt" "$lup" "fix the i18n scripts"
+assert_eq "done keeps agent_name" "$an" "dev-ci-63"
+assert_eq "done keeps tmux_window_name" "$wn" "dev-ci"
+assert_eq "done still records stop reason" "$reason" "end_turn"
+
+run_in_sandbox "$sandbox" attention_state_remove "sid-p"
+lup="$(jq -r '(.recent // []) | map(select(.session_id=="sid-p")) | .[0].last_user_prompt // empty' "$sf")"
+an="$(jq -r '(.recent // []) | map(select(.session_id=="sid-p")) | .[0].agent_name // empty' "$sf")"
+assert_eq "archive preserves last_user_prompt" "$lup" "fix the i18n scripts"
+assert_eq "archive preserves agent_name" "$an" "dev-ci-63"
 rm -rf "$sandbox"
 
 echo

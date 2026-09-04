@@ -358,10 +358,12 @@ end
 -- workspace can all change while the tmux session keeps running, so
 -- the label cannot read the live pane and stay stable. Identity comes
 -- from `tmux_session = wezterm_<ws>_<repo>_<hex>`; tab segment is the
--- parsed repo name; tmux_window/tmux_pane/git_branch are recorded by
--- the hook at fire time and stay accurate for the lifetime of that
--- entry. Default-workspace ad-hoc shells (`wezterm_default_shell_…`)
--- parse out as ws=`default`, repo=`shell`, which is fine.
+-- parsed repo name; tmux_window/tmux_pane are recorded by the hook at
+-- fire time. The leaf prefers `tmux_window_name` (worktree leaf like
+-- `dev-ci`) over `git_branch` — operators recognise the window name,
+-- and branch can drift from the worktree leaf after local renames.
+-- Default-workspace ad-hoc shells (`wezterm_default_shell_…`) parse
+-- out as ws=`default`, repo=`shell`, which is fine.
 local function compute_label(entry)
   local ws = parse_session_workspace(entry.tmux_session) or '?'
   local tab = parse_session_repo(entry.tmux_session) or '?'
@@ -377,12 +379,73 @@ local function compute_label(entry)
     tmux_seg = '?'
   end
 
-  local branch = nonempty_str(entry.git_branch) and entry.git_branch or '?'
+  local leaf = '?'
+  if nonempty_str(entry.tmux_window_name) then
+    leaf = entry.tmux_window_name
+  elseif nonempty_str(entry.git_branch) then
+    leaf = entry.git_branch
+  end
 
-  if ws == '?' and tab == '?' and tmux_seg == '?' and branch == '?' then
+  if ws == '?' and tab == '?' and tmux_seg == '?' and leaf == '?' then
     return nil
   end
-  return ws .. '/' .. tab .. '/' .. tmux_seg .. '/' .. branch
+  return ws .. '/' .. tab .. '/' .. tmux_seg .. '/' .. leaf
+end
+
+-- Stop / sticky-waiting overwrite `reason` with provider stop codes or
+-- permission copy. Those must never be the Alt+/ body once we have a
+-- real user prompt or agent session name.
+local function is_canned_reason(text)
+  if not nonempty_str(text) then return true end
+  local t = text:lower()
+  if t == 'task done' or t == 'end_turn' or t == 'running' or t == 'running…'
+      or t == 'running...' or t == 'input required' or t == 'recent' then
+    return true
+  end
+  if t == '<task-notification>' or t == '<system-reminder>' then
+    return true
+  end
+  if t:find('needs your permission', 1, true)
+      or t:find('tool permission', 1, true)
+      or t:find('permission requested', 1, true) then
+    return true
+  end
+  return false
+end
+
+local function compose_detail(primary, secondary)
+  if nonempty_str(primary) and nonempty_str(secondary) then
+    return primary .. ' · ' .. secondary
+  end
+  if nonempty_str(primary) then return primary end
+  if nonempty_str(secondary) then return secondary end
+  return nil
+end
+
+-- Active rows: prefer sticky last_user_prompt; fall back to non-canned
+-- reason; finally the status word.
+local function active_detail(entry)
+  if nonempty_str(entry.last_user_prompt) then
+    return entry.last_user_prompt
+  end
+  if nonempty_str(entry.reason) and not is_canned_reason(entry.reason) then
+    return entry.reason
+  end
+  return entry.status or ''
+end
+
+-- Recent / done-ish rows: agent_name · last_user_prompt when available;
+-- never surface raw task-done / end_turn as the only body.
+local function recent_detail(r)
+  local detail = compose_detail(r.agent_name, r.last_user_prompt)
+  if detail then return detail end
+  if nonempty_str(r.last_reason) and not is_canned_reason(r.last_reason) then
+    return r.last_reason
+  end
+  if nonempty_str(r.tmux_window_name) then
+    return r.tmux_window_name
+  end
+  return r.last_status or 'recent'
 end
 
 -- Reachability predicate driven by snapshot-time facts (panes_map +
@@ -435,12 +498,7 @@ local function status_rank(s)
 end
 
 local function build_active_row(entry, label, age_text)
-  local body
-  if nonempty_str(entry.reason) then
-    body = entry.reason
-  else
-    body = entry.status or ''
-  end
+  local body = active_detail(entry)
   if label and label ~= '' then
     body = label .. '  ' .. body
   end
@@ -459,12 +517,7 @@ local function build_active_row(entry, label, age_text)
 end
 
 local function build_recent_row(r, label, age_text)
-  local body
-  if nonempty_str(r.last_reason) then
-    body = r.last_reason
-  else
-    body = r.last_status or 'recent'
-  end
+  local body = recent_detail(r)
   if label and label ~= '' then
     body = label .. '  ' .. body
   end
@@ -482,12 +535,17 @@ local function build_recent_row(r, label, age_text)
   }
 end
 
+-- Picker shows at most this many recent rows (disk still keeps up to
+-- ATTENTION_RECENT_CAP / 7-day TTL). Sorted by activity desc.
+M.PICKER_RECENT_CAP = 20
+
 -- Single source of truth for picker rows and badge counts. Returns a
 -- table { rows = [...], counts = { waiting, done, running } } where
 -- rows is a flat array (active rows ordered waiting → done → running
--- by ts; recent rows appended after, deduped by tmux_session, ordered
--- by archived_ts desc). The picker reads rows directly; the badge
--- reads counts. Both surfaces therefore agree by construction.
+-- by ts; recent rows appended after, deduped by tmux_session+window,
+-- ordered by archived_ts desc, capped at PICKER_RECENT_CAP). The
+-- picker reads rows directly; the badge reads counts. Both surfaces
+-- therefore agree by construction.
 function M.compute_picker_data(panes_map, sessions_map)
   panes_map = panes_map or {}
   sessions_map = sessions_map or {}
@@ -524,16 +582,31 @@ function M.compute_picker_data(panes_map, sessions_map)
   end
 
   -- ── Recent entries ─────────────────────────────────────────────────
-  -- Dedupe by tmux_session (or session_id for legacy rows). One
-  -- session has at most one current host, so showing every archived
-  -- entry just stacks N rows that all jump to the same place.
+  -- Dedupe by (tmux_session, tmux_window). One WezTerm tab = one tmux
+  -- session = many worktree windows; collapsing to session alone hid
+  -- every sibling worktree under a single ○ RCNT row. Window is the
+  -- worktree identity Alt+g / operators already use. Split panes in
+  -- the same window still collapse (one jump target).
   local recent_by_key = {}
   for _, r in ipairs(state_cache.recent or {}) do
     if not active_sids[r.session_id or ''] then
-      local key = nonempty_str(r.tmux_session) and r.tmux_session or (r.session_id or '')
+      local sess = r.tmux_session or ''
+      local win = r.tmux_window or ''
+      local key
+      if nonempty_str(sess) and nonempty_str(win) then
+        key = sess .. '\0' .. win
+      elseif nonempty_str(sess) then
+        key = sess
+      else
+        key = r.session_id or ''
+      end
       if key ~= '' then
         local existing = recent_by_key[key]
-        if not existing or (tonumber(r.archived_ts) or 0) > (tonumber(existing.archived_ts) or 0) then
+        local activity = tonumber(r.live_ts) or tonumber(r.archived_ts) or 0
+        local existing_activity = existing
+          and (tonumber(existing.live_ts) or tonumber(existing.archived_ts) or 0)
+          or -1
+        if not existing or activity > existing_activity then
           recent_by_key[key] = r
         end
       end
@@ -542,14 +615,23 @@ function M.compute_picker_data(panes_map, sessions_map)
   local recents = {}
   for _, r in pairs(recent_by_key) do
     -- Recent never has running status, so reachability is the gate.
+    -- Reachability is session-level (WezTerm still hosts the tmux
+    -- session); the menu layer further requires the tmux window to
+    -- still exist so Enter can select-window even if the archived
+    -- pane id was recycled.
     if entry_reachable(r, panes_map, sessions_map) then
       table.insert(recents, r)
     end
   end
   table.sort(recents, function(a, b)
+    local aa = tonumber(a.live_ts) or tonumber(a.archived_ts) or 0
+    local bb = tonumber(b.live_ts) or tonumber(b.archived_ts) or 0
+    if aa ~= bb then return aa > bb end
     return (tonumber(a.archived_ts) or 0) > (tonumber(b.archived_ts) or 0)
   end)
-  for _, r in ipairs(recents) do
+  local recent_cap = M.PICKER_RECENT_CAP or 20
+  for i, r in ipairs(recents) do
+    if i > recent_cap then break end
     local label = compute_label(r)
     local age_ms = now - (tonumber(r.archived_ts) or now)
     local age_text = format_age(age_ms)

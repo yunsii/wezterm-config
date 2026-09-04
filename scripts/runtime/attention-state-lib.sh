@@ -12,8 +12,11 @@
 #         "tmux_session":   "<string>",
 #         "tmux_window":    "<string>",   -- e.g. "@5"
 #         "tmux_pane":      "<string>",   -- e.g. "%12"
+#         "tmux_window_name":"<string>",  -- e.g. "dev-ci" (worktree leaf)
 #         "status":         "running" | "waiting" | "done",
-#         "reason":         "<short text>",
+#         "reason":         "<short text>",  -- may be overwritten by Stop
+#         "last_user_prompt":"<string>", -- UserPromptSubmit first line; sticky
+#         "agent_name":     "<string>",  -- provider session name when known
 #         "git_branch":     "<string>",
 #         "waiting_kind":   "<optional; only while status=waiting>",
 #                          # e.g. permission_prompt | elicitation_dialog |
@@ -28,7 +31,8 @@
 #       {
 #         "session_id", "wezterm_pane_id",
 #         "tmux_socket", "tmux_session", "tmux_window", "tmux_pane",
-#         "git_branch",
+#         "tmux_window_name", "git_branch",
+#         "agent_name", "last_user_prompt",
 #         "last_reason":  "<text at archive time>",
 #         "last_status":  "running" | "waiting" | "done",
 #         "live_ts":      <epoch ms when entry last lived>,
@@ -39,9 +43,10 @@
 #
 # `recent[]` stores tombstones for sessions that left .entries via any of
 # the five exit paths (same-session eviction, evict_session, --forget, TTL
-# prune, --clear-all). Dedup key is (tmux_socket, tmux_session); cap is
-# 50 entries; TTL is 7 days. Active state in `.entries` is the source of
-# truth — picker dedups recent against active by session_id (active wins).
+# prune, --clear-all). Disk dedup key is (tmux_socket, tmux_session,
+# tmux_pane); cap is 50 entries; TTL is 7 days. Active state in `.entries`
+# is the source of truth — the Alt+/ picker further dedups display by
+# (tmux_session, tmux_window) and shows the freshest 20.
 #
 # Sourced by:
 #   scripts/runtime/agent-attention/emit.sh  (writer)
@@ -138,7 +143,10 @@ def archive_into_recent($to_archive; $now; $cap; $ttl):
        tmux_session: (.tmux_session // ""),
        tmux_window: (.tmux_window // ""),
        tmux_pane: (.tmux_pane // ""),
+       tmux_window_name: (.tmux_window_name // ""),
        git_branch: (.git_branch // ""),
+       agent_name: (.agent_name // ""),
+       last_user_prompt: (.last_user_prompt // ""),
        last_reason: (.reason // ""),
        last_status: (.status // ""),
        live_ts: (.ts // $now),
@@ -153,6 +161,22 @@ def archive_into_recent($to_archive; $now; $cap; $ttl):
       | .[0:$cap]
     );
 '
+
+# Best-effort Claude session display name from ~/.claude/sessions/<pid>.json
+# (field `name`, usually derived like `dev-ci-63`). Returns empty on miss.
+# Cost is a single grep -rlF over small JSON files (~tens of ms).
+attention_resolve_agent_name() {
+  local sid="${1:-}"
+  [[ -z "$sid" || "$sid" == pane:* ]] && return 0
+  local dir="${HOME}/.claude/sessions"
+  [[ -d "$dir" ]] || return 0
+  local f=""
+  f="$(grep -rlF --include='*.json' -- "$sid" "$dir" 2>/dev/null | head -n1 || true)"
+  [[ -n "$f" && -f "$f" ]] || return 0
+  jq -r --arg sid "$sid" \
+    'select(.sessionId == $sid) | .name // empty' \
+    "$f" 2>/dev/null || true
+}
 
 attention_state_now_ms() {
   date +%s%3N
@@ -214,6 +238,10 @@ attention_state_upsert() {
   # approval_required). Stored only while status=waiting so PostToolUse can
   # refuse to clear elicitation_dialog (see transition_to_running).
   local waiting_kind="${10:-}"
+  # Optional sticky display fields. Empty means "keep previous value".
+  local last_user_prompt="${11:-}"
+  local agent_name="${12:-}"
+  local tmux_window_name="${13:-}"
   local ts; ts="$(attention_state_now_ms)"
   attention_state_init
   local lock
@@ -246,6 +274,12 @@ attention_state_upsert() {
     # preserved so the counter does not oscillate and the TTL clock keeps
     # running from the moment Claude first blocked for input. Only a
     # non-waiting upsert (normally `done`) transitions the entry out.
+    #
+    # last_user_prompt / agent_name / tmux_window_name are sticky across
+    # Stop and waiting: an empty incoming value keeps the previous entry's
+    # field so Alt+/ recent rows still show the last real user input and
+    # provider session name after reason is overwritten with end_turn /
+    # task done.
     next="$(
       jq --arg sid "$session_id" \
          --arg wp "$wezterm_pane" \
@@ -257,6 +291,9 @@ attention_state_upsert() {
          --arg rs "$reason" \
          --arg gb "$git_branch" \
          --arg wk "$waiting_kind" \
+         --arg lup "$last_user_prompt" \
+         --arg an "$agent_name" \
+         --arg wn "$tmux_window_name" \
          --argjson ts "$ts" \
          --argjson cap "$ATTENTION_RECENT_CAP" \
          --argjson ttl "$ATTENTION_RECENT_TTL_MS" \
@@ -283,24 +320,38 @@ attention_state_upsert() {
              )
            | if ($st == "waiting") and ((.entries[$sid].status // "") == "waiting")
              then .
-             else .entries[$sid] = (
-                 {
-                   session_id: $sid,
-                   wezterm_pane_id: $wp,
-                   tmux_socket: $tsk,
-                   tmux_session: $tses,
-                   tmux_window: $tw,
-                   tmux_pane: $tp,
-                   status: $st,
-                   reason: $rs,
-                   git_branch: $gb,
-                   ts: $ts
-                 }
-                 + (if ($st == "waiting") and ($wk != "")
-                    then {waiting_kind: $wk}
-                    else {}
-                    end)
-               )
+             else
+               ((.entries[$sid] // {}) as $prev
+               | .entries[$sid] = (
+                   {
+                     session_id: $sid,
+                     wezterm_pane_id: $wp,
+                     tmux_socket: $tsk,
+                     tmux_session: $tses,
+                     tmux_window: $tw,
+                     tmux_pane: $tp,
+                     status: $st,
+                     reason: $rs,
+                     git_branch: $gb,
+                     ts: $ts
+                   }
+                   + (if $lup != "" then {last_user_prompt: $lup}
+                      elif (($prev.last_user_prompt // "") != "")
+                      then {last_user_prompt: $prev.last_user_prompt}
+                      else {} end)
+                   + (if $an != "" then {agent_name: $an}
+                      elif (($prev.agent_name // "") != "")
+                      then {agent_name: $prev.agent_name}
+                      else {} end)
+                   + (if $wn != "" then {tmux_window_name: $wn}
+                      elif (($prev.tmux_window_name // "") != "")
+                      then {tmux_window_name: $prev.tmux_window_name}
+                      else {} end)
+                   + (if ($st == "waiting") and ($wk != "")
+                      then {waiting_kind: $wk}
+                      else {}
+                      end)
+                 ))
              end
            | archive_into_recent($evicted; $ts; $cap; $ttl)
          ' <<<"$current"

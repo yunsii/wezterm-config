@@ -95,8 +95,19 @@ if [[ "${1:-}" == "--direct" ]]; then
   done
   if [[ -n "$direct_socket" && -n "$direct_window" ]]; then
     tmux -S "$direct_socket" select-window -t "$direct_window" 2>/dev/null || true
+    pane_ok=0
     if [[ -n "$direct_pane" ]]; then
-      tmux -S "$direct_socket" select-pane -t "$direct_pane" 2>/dev/null || true
+      if tmux -S "$direct_socket" list-panes -t "$direct_window" -F '#{pane_id}' 2>/dev/null \
+           | grep -Fxq "$direct_pane"; then
+        tmux -S "$direct_socket" select-pane -t "$direct_pane" 2>/dev/null || true
+        pane_ok=1
+      fi
+    fi
+    if (( ! pane_ok )); then
+      live_pane="$(tmux -S "$direct_socket" list-panes -t "$direct_window" -F '#{pane_id}' 2>/dev/null | head -n1 || true)"
+      if [[ -n "$live_pane" ]]; then
+        tmux -S "$direct_socket" select-pane -t "$live_pane" 2>/dev/null || true
+      fi
     fi
     refresh_jump_target_status "$direct_socket" "$direct_window"
   fi
@@ -300,29 +311,43 @@ if (( recent_jump )); then
   target_tmux_pane="$(read_field tmux_pane)"
   target_archived_ts="$(read_field archived_ts)"
 
-  # Pane-existence probe. Both checks are scoped to the recorded socket
-  # so we never accidentally jump to a different agent pane that reused
-  # the same `%N` id under a different tmux server.
-  pane_alive=0
-  if [[ -n "$target_tmux_socket" && -n "$target_tmux_session" && -n "$target_tmux_pane" ]]; then
+  # Window-existence probe. Archived pane ids are routinely recycled
+  # after split/kill; as long as the worktree window still exists we
+  # can select-window and land on a live pane inside it. Only drop the
+  # recent row when the window (or session) itself is gone.
+  window_alive=0
+  if [[ -n "$target_tmux_socket" && -n "$target_tmux_session" && -n "$target_tmux_window" ]]; then
     if tmux -S "$target_tmux_socket" has-session -t "$target_tmux_session" 2>/dev/null; then
-      if tmux -S "$target_tmux_socket" list-panes -s -t "$target_tmux_session" -F '#{pane_id}' 2>/dev/null \
-           | grep -Fxq "$target_tmux_pane"; then
-        pane_alive=1
+      if tmux -S "$target_tmux_socket" list-windows -t "$target_tmux_session" -F '#{window_id}' 2>/dev/null \
+           | grep -Fxq "$target_tmux_window"; then
+        window_alive=1
       fi
     fi
   fi
 
-  if (( ! pane_alive )); then
+  if (( ! window_alive )); then
     attention_state_recent_remove "$explicit_session" "${target_archived_ts:-0}" 2>/dev/null || true
     nudge_wezterm_tick
-    notify_tmux 'agent-attention: pane no longer exists, removed from recent' '' ''
+    notify_tmux 'agent-attention: window no longer exists, removed from recent' '' ''
     exit 0
   fi
 
   if [[ -n "$target_tmux_window" ]]; then
     tmux -S "$target_tmux_socket" select-window -t "$target_tmux_window" 2>/dev/null || true
-    tmux -S "$target_tmux_socket" select-pane -t "$target_tmux_pane" 2>/dev/null || true
+    pane_ok=0
+    if [[ -n "$target_tmux_pane" ]]; then
+      if tmux -S "$target_tmux_socket" list-panes -t "$target_tmux_window" -F '#{pane_id}' 2>/dev/null \
+           | grep -Fxq "$target_tmux_pane"; then
+        tmux -S "$target_tmux_socket" select-pane -t "$target_tmux_pane" 2>/dev/null || true
+        pane_ok=1
+      fi
+    fi
+    if (( ! pane_ok )); then
+      live_pane="$(tmux -S "$target_tmux_socket" list-panes -t "$target_tmux_window" -F '#{pane_id}' 2>/dev/null | head -n1 || true)"
+      if [[ -n "$live_pane" ]]; then
+        tmux -S "$target_tmux_socket" select-pane -t "$live_pane" 2>/dev/null || true
+      fi
+    fi
     refresh_jump_target_status "$target_tmux_socket" "$target_tmux_window"
   fi
 
@@ -415,8 +440,19 @@ fi
 
 if [[ -n "$target_tmux_socket" && -n "$target_tmux_window" ]]; then
   tmux -S "$target_tmux_socket" select-window -t "$target_tmux_window" 2>/dev/null || true
+  pane_ok=0
   if [[ -n "$target_tmux_pane" ]]; then
-    tmux -S "$target_tmux_socket" select-pane -t "$target_tmux_pane" 2>/dev/null || true
+    if tmux -S "$target_tmux_socket" list-panes -t "$target_tmux_window" -F '#{pane_id}' 2>/dev/null \
+         | grep -Fxq "$target_tmux_pane"; then
+      tmux -S "$target_tmux_socket" select-pane -t "$target_tmux_pane" 2>/dev/null || true
+      pane_ok=1
+    fi
+  fi
+  if (( ! pane_ok )); then
+    live_pane="$(tmux -S "$target_tmux_socket" list-panes -t "$target_tmux_window" -F '#{pane_id}' 2>/dev/null | head -n1 || true)"
+    if [[ -n "$live_pane" ]]; then
+      tmux -S "$target_tmux_socket" select-pane -t "$live_pane" 2>/dev/null || true
+    fi
   fi
   refresh_jump_target_status "$target_tmux_socket" "$target_tmux_window"
 fi

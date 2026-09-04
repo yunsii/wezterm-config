@@ -59,14 +59,14 @@ trace_id="attention-$EPOCHSECONDS-$$-$RANDOM"
 live_panes_path="$(attention_live_panes_path)"
 bench_mark state_read
 
-# Live-pane set per tmux socket, built only when the snapshot has at
+# Live-window set per tmux socket, built only when the snapshot has at
 # least one recent row so the typical "no recent yet" hot path pays
-# nothing extra. Recent rows whose recorded (socket, pane) is no
+# nothing extra. Recent rows whose recorded (socket, window) is no
 # longer alive get filtered out at the final TSV-projection step
-# below — jump-time has its own redundant probe to catch the race
-# where the pane dies between menu render and Enter, but doing it
-# here too keeps the picker from showing rows that cannot be jumped.
-alive_panes_json='{}'
+# below. Window (not pane) is the gate: a worktree window routinely
+# recycles panes after split/kill, and Enter can still select-window
+# then land on a live pane in that window.
+alive_windows_json='{}'
 recent_sockets=''
 if [[ -s "$live_panes_path" ]]; then
   recent_sockets="$(jq -r '[.picker_rows[]? | select(.status == "recent") | .tmux_socket // "" | select(length > 0)] | unique | .[]' "$live_panes_path" 2>/dev/null || printf '')"
@@ -75,12 +75,12 @@ if [[ -n "$recent_sockets" ]]; then
   alive_pieces=()
   while IFS= read -r sock; do
     [[ -z "$sock" ]] && continue
-    panes_raw="$(tmux -S "$sock" list-panes -a -F '#{pane_id}' 2>/dev/null || printf '')"
-    alive_pieces+=("$(jq -n --arg s "$sock" --arg p "$panes_raw" \
-      '{($s): ($p | split("\n") | map(select(length > 0)))}')")
+    wins_raw="$(tmux -S "$sock" list-windows -a -F '#{window_id}' 2>/dev/null || printf '')"
+    alive_pieces+=("$(jq -n --arg s "$sock" --arg w "$wins_raw" \
+      '{($s): ($w | split("\n") | map(select(length > 0)))}')")
   done <<<"$recent_sockets"
   if (( ${#alive_pieces[@]} > 0 )); then
-    alive_panes_json="$(printf '%s\n' "${alive_pieces[@]}" | jq -s 'add')"
+    alive_windows_json="$(printf '%s\n' "${alive_pieces[@]}" | jq -s 'add')"
   fi
 fi
 bench_mark alive_panes
@@ -115,10 +115,10 @@ bench_mark live_map
 # filter pipeline.
 #
 # Shell-side still applies one final filter that wezterm cannot answer
-# from Lua: hiding recent rows whose tmux pane is no longer alive
-# (rows would render but the jump would dead-end). The active block
-# does not need this — an active entry implies a recent hook fire,
-# which implies the tmux pane existed seconds ago.
+# from Lua: hiding recent rows whose tmux window is no longer alive
+# (rows would render but select-window would dead-end). The active
+# block does not need this — an active entry implies a recent hook
+# fire, which implies the tmux pane existed seconds ago.
 #
 # TSV layout per row (10 tab-separated fields):
 #   status \t body \t age \t id \t wezterm_pane_id \t tmux_socket \t
@@ -129,13 +129,13 @@ bench_mark live_map
 #                   for recent; "__clear_all__" for the sentinel
 #   - last_status / tmux_session live at the trailing edge so empty
 #     middle fields cannot collapse via bash IFS=$'\t' read.
-rows_tsv="$(jq -r --argjson alive "$alive_panes_json" '
+rows_tsv="$(jq -r --argjson alive "$alive_windows_json" '
   (.picker_rows // []) | .[]
   | . as $r
   | ($r.tmux_socket // "") as $s
-  | ($r.tmux_pane // "")   as $p
+  | ($r.tmux_window // "") as $w
   | (if ($r.status == "recent")
-       then ($s != "" and $p != "" and (($alive[$s] // []) | index($p)) != null)
+       then ($s != "" and $w != "" and (($alive[$s] // []) | index($w)) != null)
        else true end) as $alive_ok
   | select($alive_ok)
   | "\($r.status)\t\($r.body)\t\($r.age_text)\t\($r.id)\t\($r.wezterm_pane_id // "")\t\($r.tmux_socket // "")\t\($r.tmux_window // "")\t\($r.tmux_pane // "")\t\($r.last_status // "")\t\($r.tmux_session // "")"

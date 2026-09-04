@@ -196,8 +196,8 @@ describe('overflow tab label uses session repo, not the … glyph', function()
   end)
 end)
 
-describe('recent rows are deduped per session and ordered by archived_ts desc', function()
-  it('keeps only the freshest archived entry per tmux_session', function()
+describe('recent rows are deduped per window and ordered by activity desc', function()
+  it('keeps one freshest row per tmux_window inside the same session', function()
     reset()
     mock.set_mux({
       windows = {
@@ -214,13 +214,21 @@ describe('recent rows are deduped per session and ordered by archived_ts desc', 
       "recent": [
         { "session_id": "old",   "tmux_session": "wezterm_work_ai-video-collection_aaaaaaaaaa",
           "wezterm_pane_id": "10", "tmux_socket": "/tmp/sock", "tmux_window": "@2", "tmux_pane": "%5",
-          "last_status": "done", "archived_ts": 1000 },
+          "tmux_window_name": "dev-ci", "last_status": "done", "archived_ts": 1000 },
         { "session_id": "newer", "tmux_session": "wezterm_work_ai-video-collection_aaaaaaaaaa",
           "wezterm_pane_id": "10", "tmux_socket": "/tmp/sock", "tmux_window": "@2", "tmux_pane": "%5",
-          "last_status": "done", "archived_ts": 2000 },
+          "tmux_window_name": "dev-ci", "last_status": "done", "archived_ts": 2000,
+          "last_user_prompt": "older prompt" },
         { "session_id": "newest","tmux_session": "wezterm_work_ai-video-collection_aaaaaaaaaa",
           "wezterm_pane_id": "10", "tmux_socket": "/tmp/sock", "tmux_window": "@2", "tmux_pane": "%5",
-          "last_status": "done", "archived_ts": 3000 }
+          "tmux_window_name": "dev-ci", "agent_name": "dev-ci-63",
+          "last_user_prompt": "国际化脚本确认", "last_status": "done",
+          "last_reason": "task done", "live_ts": 2500, "archived_ts": 3000 },
+        { "session_id": "sibling","tmux_session": "wezterm_work_ai-video-collection_aaaaaaaaaa",
+          "wezterm_pane_id": "10", "tmux_socket": "/tmp/sock", "tmux_window": "@12", "tmux_pane": "%21",
+          "tmux_window_name": "dev-infra", "agent_name": "dev-infra-f1",
+          "last_user_prompt": "observability", "last_status": "done",
+          "last_reason": "task done", "live_ts": 4000, "archived_ts": 4100 }
       ]
     }]])
     local out = os.tmpname()
@@ -235,9 +243,56 @@ describe('recent rows are deduped per session and ordered by archived_ts desc', 
     for _, r in ipairs(snapshot.picker_rows) do
       if r.status == 'recent' then table.insert(recent_rows, r) end
     end
-    assert_eq(#recent_rows, 1, 'recent rows not deduped')
-    assert_truthy(recent_rows[1].id:find('newest', 1, true),
-      'kept the wrong archived entry: ' .. recent_rows[1].id)
+    assert_eq(#recent_rows, 2, 'expected one recent row per worktree window')
+    assert_truthy(recent_rows[1].id:find('sibling', 1, true),
+      'first recent should be the higher-activity window: ' .. recent_rows[1].id)
+    assert_truthy(recent_rows[2].id:find('newest', 1, true),
+      'second recent should be the freshest @2 tombstone: ' .. recent_rows[2].id)
+    assert_truthy(recent_rows[2].body:find('dev%-ci%-63', 1, false),
+      'recent body should prefer agent_name over task done; got ' .. recent_rows[2].body)
+    assert_truthy(recent_rows[2].body:find('国际化脚本确认', 1, true),
+      'recent body should keep last_user_prompt; got ' .. recent_rows[2].body)
+    assert_falsy(recent_rows[2].body:find('task done', 1, true),
+      'canned last_reason leaked into recent body: ' .. recent_rows[2].body)
+  end)
+
+  it('caps recent rows at PICKER_RECENT_CAP', function()
+    reset()
+    mock.set_mux({
+      windows = {
+        { workspace = 'work', tabs = {
+          { id = 100, title = 'ai-video-collection', active_pane = { id = 10 } },
+        }},
+      },
+    })
+    tab_visibility.set_pane_session(10, 'wezterm_work_ai-video-collection_aaaaaaaaaa')
+
+    local parts = { '{"version":1,"entries":{},"recent":[' }
+    for i = 1, 25 do
+      if i > 1 then parts[#parts + 1] = ',' end
+      parts[#parts + 1] = string.format(
+        '{"session_id":"s%d","tmux_session":"wezterm_work_ai-video-collection_aaaaaaaaaa",'
+          .. '"wezterm_pane_id":"10","tmux_socket":"/tmp/sock","tmux_window":"@%d","tmux_pane":"%%%d",'
+          .. '"tmux_window_name":"w%d","last_status":"done","live_ts":%d,"archived_ts":%d}',
+        i, i, i, i, i * 10, i * 10)
+    end
+    parts[#parts + 1] = ']}'
+    load_state(table.concat(parts))
+
+    local out = os.tmpname()
+    attention.write_live_snapshot(out, 'test')
+    local fd = io.open(out, 'r')
+    local body = fd:read('*a')
+    fd:close()
+    os.remove(out)
+    local snapshot = require('json_mini').decode(body)
+    local recent_rows = {}
+    for _, r in ipairs(snapshot.picker_rows) do
+      if r.status == 'recent' then table.insert(recent_rows, r) end
+    end
+    assert_eq(#recent_rows, attention.PICKER_RECENT_CAP, 'recent cap not applied')
+    assert_truthy(recent_rows[1].id:find('s25', 1, true),
+      'cap should keep the highest-activity rows first')
   end)
 end)
 
