@@ -119,6 +119,7 @@ Grok’s fullscreen (alt-screen) TUI under this stack has three separable issues
 | What you see | Cause | Fix layer |
 | --- | --- | --- |
 | Entire transcript flashes one frame on `Alt+o` / pane click (empty session often quieter) | tmux `focus-events on` delivers CSI FocusIn (`\e[I`); Grok enables `\e[?1004h`, then on FocusGained runs `terminal.clear()` (`\e[2J`) + full `app.draw` when `repaints_pane_out_of_band()` is true | **Repo:** PATH wrapper strips FocusIn/Out before they reach Grok ([Local fix](#local-fix-focus-filter)). Do **not** turn session `focus-events` off as the standing fix (starves Vim / Claude / attention). |
+| Direct `grok` in a shell flashes, but some managed panes look fine (or the reverse after update) | `grok update` overwrites `~/.grok/bin/grok` with a bare ELF / downloads symlink; `~/.zshrc` prepends that dir, so interactive `grok` bypasses the filter. `agent-launcher.sh` now execs the wrapper by absolute path for managed panes — PATH order no longer saves or sinks those | **Ops:** `scripts/runtime/grok-with-focus-filter.sh --check` then `--install`; exit/`--resume` every live Grok. See [Standing ops](#standing-ops-after-grok-update). |
 | Cool-grey flash / canvas vs cream pane | Stock GrokDay `bg_base` is opaque `#eeeeee` vs `window-style` `#eae9e1` / `window-active-style` `#f1f0e9` | **Optional:** `scripts/dev/patch-grok-theme-wezdeck.sh` with `WEZDECK_GROK_BG=f1f0e9` (or `default` → `Color::Reset`). Re-run after every Grok self-update. Pin `auto_light_theme = "grokday"` in `~/.grok/config.toml`. |
 | Slow single-notch scroll (≈1 line/tick) under tmux | Grok `[ui] scroll_lines` unset → per-terminal profile defaults to a conservative 1 line/event inside tmux | **Machine-local:** set `scroll_lines` in `~/.grok/config.toml` (this host aligns with tmux `Wheel* -N 5` → `scroll_lines = 5`). Also `/settings` → **Scroll lines**. |
 | Single-notch feels fine (~5 lines) but a fast flick barely moves | Terminal wheel events carry no magnitude; `scroll_mode = "auto"` guesses wheel vs trackpad from event timing and often treats a rapid notch burst as trackpad, damping the flick | **Machine-local:** force `scroll_mode = "wheel"` and raise `scroll_speed` (this host: `80`; `50` = 1.0x, `100` ≈ 6.0x). No per-tick scroll log in `runtime.log` — tune by feel or `/settings`. |
@@ -184,7 +185,8 @@ Upstream feedback: include the “`2J` always fires under multiplexer, but clien
 | “Shrink the Grok pane on WSL to avoid flash” | Closed 2026-08-20: ~**31×15** unfiltered pane in ~**60×18** client still flashed on `Alt+o`. Size A/B explains macOS headroom, not a local workaround |
 | Detached `tmux select-pane` as automated bounce | No attached client → FocusIn often never delivered; use CSI inject or interactive WezTerm `Alt+o` |
 | Live process still flashing after installing the wrapper | (1) Wrapper only under `~/.local/bin` while `~/.zshrc` prepends `~/.grok/bin` — run `--install` so `~/.grok/bin/grok` is the wrapper. (2) Already-running process keeps the old stdin path until exit/`--resume`. Confirm tree is `python3 → grok.real`, not `zsh →` ELF `grok`. |
-| Still flashes right after resume | `type -a grok` — if the first hit is a real ELF under `~/.grok/bin/grok` (not a symlink to `grok-with-focus-filter.sh`), re-run `--install` (often after `grok update`). |
+| Still flashes right after resume | `scripts/runtime/grok-with-focus-filter.sh --check` (or `type -a grok`) — if the first hit is a real ELF / downloads symlink under `~/.grok/bin/grok`, re-run `--install` (almost always after `grok update`). |
+| “I only use Alt+g / agent-launcher, why does a shell `grok` still flash?” | Different entry points. Managed panes call the wrapper by absolute path; a direct interactive `grok` follows login PATH and hits whatever `~/.grok/bin/grok` currently is. Fix PATH install, do not assume launcher health implies shell health. Incident 2026-09-04: update left `~/.grok/bin/grok → downloads/grok-1.0.13-…` while `~/.local/bin/grok` still pointed at the wrapper. |
 
 ### Local fix (focus-filter)
 
@@ -193,10 +195,13 @@ Keep session `focus-events on`. Blind only Grok.
 Grok’s installer adds `export PATH="$HOME/.grok/bin:$PATH"` in `~/.zshrc`, so **`~/.grok/bin` wins over `~/.local/bin`**. A symlink only under `~/.local/bin/grok` is skipped — that is why a resume can still flash after “installing” the filter there. Install into the path Grok actually uses:
 
 ```bash
+scripts/runtime/grok-with-focus-filter.sh --check     # non-mutating; exit 1 ⇒ needs repair
 scripts/runtime/grok-with-focus-filter.sh --install
-# parks the real binary at ~/.grok/bin/grok.real
+# parks / promotes the real binary at ~/.grok/bin/grok.real
+# (also upgrades .real when downloads/ is newer — typical after update)
 # points ~/.grok/bin/grok (+ ~/.local/bin/grok) at the wrapper
 hash -r
+scripts/runtime/grok-with-focus-filter.sh --check     # expect all ok:
 type -a grok          # first hit should be ~/.grok/bin/grok → …/grok-with-focus-filter.sh
 grok --version        # still prints Grok version via grok.real
 ```
@@ -206,6 +211,34 @@ grok --version        # still prints Grok version via grok.real
 - Opt out one run: `GROK_FOCUS_FILTER=0 grok …`
 - Override binary: `GROK_REAL_BIN=/path/to/grok`
 - After install (and after every `grok update`, which overwrites `~/.grok/bin/grok`), **exit and `--resume`** any live Grok. Confirm the new process is `python3 → grok.real`, not `zsh → grok` with exe `~/.grok/bin/grok` as a plain ELF.
+- **Managed launch:** `scripts/runtime/agent-launcher.sh grok` execs the wrapper by absolute path (`$repo/scripts/runtime/grok-with-focus-filter.sh`), so workspace / Alt+g / refresh panes stay filtered even when login PATH is broken. That does **not** replace `--install` for interactive `grok`.
+
+### Standing ops (after `grok update`)
+
+`grok update` routinely replaces `~/.grok/bin/grok` with a fresh ELF or a symlink into `~/.grok/downloads/`. The focus-filter is not part of Grok’s package; **every update is a regression until `--install` runs again**.
+
+Checklist (copy/paste):
+
+```bash
+# 1) Did update wipe the wrapper?
+scripts/runtime/grok-with-focus-filter.sh --check
+# FAIL on ~/.grok/bin/grok ⇒ continue
+
+# 2) Re-seat wrapper + promote newest download into grok.real
+scripts/runtime/grok-with-focus-filter.sh --install
+hash -r
+scripts/runtime/grok-with-focus-filter.sh --check
+
+# 3) Kill / exit every live Grok pane, then reopen (Alt+g / --continue / shell `grok`)
+#    Already-running trees keep the old stdin path forever.
+
+# 4) Spot-check process tree in a flashing pane:
+#    expect: python3 …/grok-focus-filter.py -- …/grok.real …
+#    bad:    zsh → grok  with exe …/downloads/grok-*-linux-x86_64
+ps -o pid,ppid,cmd -C grok 2>/dev/null; pgrep -af grok-focus-filter | head
+```
+
+Agent triage trigger: user says「直接 grok 还闪」/「update 后又闪」→ run `--check` before redesigning focus-events or blaming WezTerm.
 
 ### Mouse scroll (`~/.grok/config.toml` `[ui]`)
 
@@ -234,7 +267,7 @@ scripts/dev/repro-grok-focus-flash.sh matrix
 
 Interactive: split Grok + shell with transcript, `Alt+o` several times — whole surface should stay steady. Live tree should look like `python3 …/grok-focus-filter.py -- …/grok.real --resume …` (confirmed on this machine 2026-08-20 after `--install` + resume).
 
-Version check when revisiting upstream: `grok update --check --json` (stable) and, if needed, side-load an alpha artifact under `/tmp` and re-run the inject harness — do not flip the machine’s `channel` unless intending to stay on alpha. After any `grok update`, re-run `--install` before trusting the interactive check.
+Version check when revisiting upstream: `grok update --check --json` (stable) and, if needed, side-load an alpha artifact under `/tmp` and re-run the inject harness — do not flip the machine’s `channel` unless intending to stay on alpha. After any `grok update`, run `--install` then `--check` before trusting the interactive check ([Standing ops](#standing-ops-after-grok-update)).
 
 ## Upstream Constraints
 

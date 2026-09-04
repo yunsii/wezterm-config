@@ -26,9 +26,14 @@ Read `AGENTS.md` first, then open only the matching file under `docs/`. Read add
   (install / vimrc: [`docs/setup.md#vim-92-optional`](docs/setup.md#vim-92-optional)).
 - Grok Build fullscreen TUI: whole-transcript flash on `Alt+o` / pane focus,
   FocusGained `terminal.clear()`, cream `#eeeeee` vs pane `bg_base`, the
-  PATH focus-filter (`grok-with-focus-filter.sh --install`: `~/.grok/bin/grok`
-  → wrapper, `grok.real` = ELF; required because zshrc prepends `~/.grok/bin`),
-  why macOS WezTerm+tmux can look fine with the same heal (sub-frame client
+  PATH focus-filter (`grok-with-focus-filter.sh --install` / `--check`:
+  `~/.grok/bin/grok` → wrapper, `grok.real` = ELF; required because zshrc
+  prepends `~/.grok/bin`), **direct shell `grok` still flashes after
+  `grok update`** (updater overwrites `~/.grok/bin/grok`; re-run `--install`
+  then exit/`--resume` — do not redesign focus-events), why managed
+  `agent-launcher.sh grok` can look fine while interactive `grok` flashes
+  (launcher uses wrapper absolute path; shell follows login PATH), why
+  macOS WezTerm+tmux can look fine with the same heal (sub-frame client
   burst, not OS-exempt), why WSL→Windows still flashes even on a tiny pane,
   `scripts/dev/repro-grok-focus-flash.sh`, mouse-wheel feel under tmux
   (`scroll_lines` / `scroll_mode=wheel` / `scroll_speed` in `~/.grok/config.toml`),
@@ -185,6 +190,8 @@ Read `AGENTS.md` first, then open only the matching file under `docs/`. Read add
 - Keep private machine and project overrides in `wezterm-x/local/` and keep tracked templates in `wezterm-x/local.example/`.
 - User-level secrets (CNB tokens, third-party API keys, etc.) live under `~/.config/shell-env.d/<name>.env` — the canonical convention auto-discovered by both `~/.zshrc` and `scripts/runtime/runtime-env-lib.sh::runtime_env_load_managed`. Do not introduce new ad-hoc dotfile loaders that hardcode specific filenames; drop a file in `shell-env.d/` instead. Repo-machine config consumed by both Lua and shell stays in `wezterm-x/local/shared.env` (synced to Windows runtime). Full rules: [`docs/setup.md#env-loading-model`](docs/setup.md#env-loading-model).
 - Every agent-CLI launch path must terminate at `scripts/runtime/agent-launcher.sh <profile>` — workspace first-open, `Alt+g` on-demand window, `refresh-current-window`, and tab-overflow cold-spawn all share this single env-loading site. Do not invoke `claude` / `codex` directly from a `tmux new-window` / `respawn-pane` call site or from a new `*_RESUME_COMMAND` in `config/worktree-task.env`. Shell paths that resolve the resume argv share `scripts/runtime/worktree/lib/resume-command.sh::resolve_managed_primary_command` (cold-spawn included — do not reimplement key lookup). The `${WEZTERM_REPO}` placeholder used in `worktree-task.env` is expanded in lockstep by `resume-command.sh` and `wezterm-x/lua/config/managed_cli.lua::parse_managed_cli_env`.
+- Workday web playback (narrative NDJSON → `web/playback` Vite/React player → static share pack; 7-day retention; async capture):
+  Read [`docs/workday-playback.md`](docs/workday-playback.md).
 - Prefer updating an existing doc in `docs/` over adding a new sibling file; keep presentations under `docs/presentations/`.
 - Design user-facing features keyboard-first: every new or changed interaction must have a keyboard path, and mouse bindings are only acceptable as fallbacks (for example cross-pane text selection or quick pane focus). Weigh key ergonomics when picking a binding — reachability, OS- / IME-level hotkey conflicts (Ctrl+Space, Alt+Shift, etc.), chord depth, and whether the action already has a keyboard home in `docs/keybindings.md`.
 - `wezterm-x/commands/manifest.json` is the single source of truth for every shortcut. Adding or renaming a hotkey means: (1) add / update the manifest item with a `binding` field; (2) for wezterm-layer bindings, add the named handler to `wezterm-x/lua/ui/action_registry.lua`; (3) for tmux-chord leaves, the `binding.exec` tmux-action string is everything — no code changes elsewhere; `scripts/runtime/render-tmux-bindings.sh` regenerates `wezterm-x/tmux/chord-bindings.generated.conf` during `wezterm-runtime-sync` and `tmux.conf` loads it via `source-file -Fq`. Do not re-declare keys or actions in `keymaps.lua` or `tmux.conf` directly; both are driven by the manifest now. Missing or unregistered ids show up as `(unregistered)` in `scripts/dev/hotkey-usage-report.sh` — treat that report as the audit signal.

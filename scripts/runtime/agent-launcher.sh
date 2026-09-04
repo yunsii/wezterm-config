@@ -115,7 +115,22 @@ case "$agent" in
   grok)
     # Grok Build: `--continue` resumes the most recent session for cwd
     # (same role as `claude --continue` / `codex resume --last`).
-    exec sh -c 'grok --continue || { printf "\033[2J\033[H\n\n  \033[2;36mLoading grok ...\033[0m\n"; exec grok; }'
+    # Always prefer the focus-filter wrapper by absolute path so managed
+    # panes do not depend on whether ~/.zshrc put ~/.grok/bin (often a
+    # post-update bare ELF) ahead of ~/.local/bin. Direct interactive
+    # `grok` still needs `grok-with-focus-filter.sh --install` — see
+    # docs/tmux-ui.md#grok-build-in-tmux.
+    grok_bin="$script_dir/grok-with-focus-filter.sh"
+    if [[ ! -x "$grok_bin" ]]; then
+      grok_bin="$(command -v grok || true)"
+    fi
+    if [[ -z "$grok_bin" ]]; then
+      printf 'agent-launcher: grok not found (expected %s or PATH)\n' \
+        "$script_dir/grok-with-focus-filter.sh" >&2
+      exit 127
+    fi
+    exec sh -c '"$0" --continue || { printf "\033[2J\033[H\n\n  \033[2;36mLoading grok ...\033[0m\n"; exec "$0"; }' \
+      "$grok_bin"
     ;;
   *)
     printf 'agent-launcher: unknown agent %s\n' "$agent" >&2

@@ -13,8 +13,12 @@
 # ~/.grok/bin/grok (+ ~/.local/bin/grok) at this script. Re-run after every
 # `grok update` (the updater overwrites ~/.grok/bin/grok).
 #
+# Health check (non-mutating; agents/docs triage first):
+#   scripts/runtime/grok-with-focus-filter.sh --check
+#
 # Opt out for one run: GROK_FOCUS_FILTER=0 grok ...
 # Point at a specific binary: GROK_REAL_BIN=/path/to/grok grok ...
+# Docs: docs/tmux-ui.md#grok-build-in-tmux (Standing ops after grok update).
 set -euo pipefail
 
 # When installed as ~/.grok/bin/grok or ~/.local/bin/grok → this file,
@@ -102,13 +106,17 @@ install_wrapper() {
         printf 'install: moved %s → %s\n' "$target" "$real"
       fi
     else
-      # Unexpected symlink (e.g. to downloads) — park target of symlink if file.
+      # Unexpected symlink (e.g. `grok update` repointed ~/.grok/bin/grok at
+      # downloads/grok-*-linux-x86_64). Park / promote that artifact into
+      # grok.real so the wrapper keeps the newest binary.
       local dest
       dest="$(readlink -f "$target" 2>/dev/null || true)"
-      if [[ -n "$dest" && -f "$dest" && ! -e "$real" ]]; then
-        cp -f "$dest" "$real"
-        chmod +x "$real"
-        printf 'install: copied %s → %s\n' "$dest" "$real"
+      if [[ -n "$dest" && -f "$dest" ]]; then
+        if [[ ! -e "$real" || "$dest" -nt "$real" ]]; then
+          cp -f "$dest" "$real"
+          chmod +x "$real"
+          printf 'install: promoted %s → %s\n' "$dest" "$real"
+        fi
       fi
       rm -f "$target"
     fi
@@ -128,6 +136,18 @@ install_wrapper() {
       printf 'install: missing real binary at %s and no downloads seed\n' "$real" >&2
       exit 1
     fi
+  else
+    # Even when grok.real already exists, prefer a newer download artifact
+    # left behind by `grok update` (common: symlink overwritten, .real stale).
+    local newest=""
+    if compgen -G "${HOME}/.grok/downloads/grok-*-linux-x86_64" >/dev/null 2>&1; then
+      newest="$(ls -1t "${HOME}/.grok/downloads"/grok-*-linux-x86_64 2>/dev/null | head -1 || true)"
+    fi
+    if [[ -n "$newest" && -x "$newest" && "$newest" -nt "$real" ]]; then
+      cp -f "$newest" "$real"
+      chmod +x "$real"
+      printf 'install: upgraded %s from newer download %s\n' "$real" "$newest"
+    fi
   fi
 
   ln -sfn "$REPO_WRAPPER" "$target"
@@ -141,9 +161,74 @@ install_wrapper() {
   printf 'install: smoke --version ok via wrapper\n'
 }
 
+# Non-mutating health check for docs / agents / post-update ops.
+# Exit 0 when login-path first hit is the wrapper and grok.real is executable.
+# Exit 1 with actionable lines otherwise (do not auto-install).
+check_wrapper() {
+  local target="${HOME}/.grok/bin/grok"
+  local real="${HOME}/.grok/bin/grok.real"
+  local local_link="${HOME}/.local/bin/grok"
+  local rc=0
+
+  if is_this_wrapper "$target"; then
+    printf 'ok: %s → focus-filter wrapper\n' "$target"
+  else
+    printf 'FAIL: %s is not the focus-filter wrapper\n' "$target"
+    if [[ -L "$target" ]]; then
+      printf '  currently → %s\n' "$(readlink "$target" 2>/dev/null || true)"
+    elif [[ -e "$target" ]]; then
+      printf '  currently a plain file/ELF (typical after `grok update`)\n'
+    else
+      printf '  missing\n'
+    fi
+    printf '  fix: scripts/runtime/grok-with-focus-filter.sh --install\n'
+    rc=1
+  fi
+
+  if [[ -x "$real" ]]; then
+    printf 'ok: %s executable\n' "$real"
+  else
+    printf 'FAIL: missing executable %s\n' "$real"
+    printf '  fix: scripts/runtime/grok-with-focus-filter.sh --install\n'
+    rc=1
+  fi
+
+  if is_this_wrapper "$local_link"; then
+    printf 'ok: %s → focus-filter wrapper (backup PATH entry)\n' "$local_link"
+  else
+    printf 'WARN: %s is not the wrapper (login PATH still needs ~/.grok/bin fixed)\n' "$local_link"
+  fi
+
+  # Prefer a login-shell which so we mirror interactive `grok` / direct CLI.
+  local first=""
+  first="$(zsh -ilc 'command -v grok' 2>/dev/null || command -v grok || true)"
+  if [[ -n "$first" ]] && is_this_wrapper "$first"; then
+    printf 'ok: login/PATH first hit is the wrapper (%s)\n' "$first"
+  elif [[ -n "$first" ]]; then
+    printf 'FAIL: login/PATH first hit is %s (not the wrapper)\n' "$first"
+    printf '  direct `grok` in a fresh shell will flash under tmux until --install\n'
+    rc=1
+  else
+    printf 'FAIL: grok not on PATH\n'
+    rc=1
+  fi
+
+  if (( rc == 0 )); then
+    printf 'check: focus-filter install looks healthy\n'
+  else
+    printf 'check: focus-filter install needs repair (see FAIL lines above)\n' >&2
+  fi
+  return "$rc"
+}
+
 if [[ "${1:-}" == "--install" ]]; then
   install_wrapper
   exit 0
+fi
+
+if [[ "${1:-}" == "--check" ]]; then
+  check_wrapper
+  exit $?
 fi
 
 REAL_BIN="$(resolve_real_bin)"
