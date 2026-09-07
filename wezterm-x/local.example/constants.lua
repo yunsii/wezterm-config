@@ -90,12 +90,10 @@ return {
   -- slot algorithm so positions stay stable when ranks shuffle inside
   -- the top-N. Schema + algorithm: docs/tab-visibility.md.
   -- tab_visibility = {
-  --   enabled_workspaces = { work = true, config = true },
   --   visible_count = 5,    -- per-machine overrides
   --   warm_count = 3,
   --   half_life_days = 7,
-  --   -- spawn_visible_only = true,  -- limit startup spawn to top-N.
-  --   -- DO NOT enable until the Alt+t overflow picker lands; capped
-  --   -- sessions are otherwise unreachable. See docs/tab-visibility.md.
+  --   access_weight = 60,   -- visit bonus mixed into sticky rank_score
+  --   spawn_visible_only = true,
   -- },
 }

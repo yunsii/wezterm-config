@@ -324,3 +324,35 @@ tmux_worktree_linked_count() {
 
   printf '%s\n' "$count"
 }
+
+# Emit absolute paths for the repo family at cwd: every linked worktree
+# from `git worktree list`, including the main root. Deduped. Shared by
+# Alt+g enumeration helpers and the tab-activity sampler's hot-path set
+# (see access_ledger_hot_worktree_paths).
+tmux_worktree_linked_abs_paths() {
+  local cwd="${1:-$PWD}"
+  local abs=""
+  local seen=$'\n'
+  local label path branch
+
+  abs="$(tmux_worktree_abs_path "$cwd" 2>/dev/null || printf '%s' "$cwd")"
+  [[ -n "$abs" && -d "$abs" ]] || return 0
+
+  if tmux_worktree_in_git_repo "$abs"; then
+    while IFS=$'\t' read -r label path branch; do
+      [[ -n "$path" && -d "$path" ]] || continue
+      path="$(tmux_worktree_abs_path "$path" 2>/dev/null || printf '%s' "$path")"
+      [[ -n "$path" && -d "$path" ]] || continue
+      case "$seen" in
+        *$'\n'"$path"$'\n'*) continue ;;
+      esac
+      seen="${seen}${path}"$'\n'
+      printf '%s\n' "$path"
+    done < <(tmux_worktree_list "$abs" 2>/dev/null || true)
+  fi
+
+  case "$seen" in
+    *$'\n'"$abs"$'\n'*) ;;
+    *) printf '%s\n' "$abs" ;;
+  esac
+}

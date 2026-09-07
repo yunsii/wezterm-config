@@ -163,29 +163,13 @@ git_order=0
 while IFS=$'\t' read -r worktree_label worktree_path branch_name; do
   [[ -n "$worktree_path" ]] || continue
   prefetch_window_id="${worktree_window_index[$worktree_path]:-}"
-  # Sort / age clock (epoch seconds), strongest signal wins:
-  #   1. live @wezterm_user_interact_ts (user key/mouse on that window)
-  #   2. durable access-ledger last visit (survives tmux death)
-  #   3. worktree dir birth time, else mtime (never-visited兜底)
-  # Agent hooks do NOT feed this clock — they only drive ▲/●/✓ badges.
-  row_interact="${worktree_window_interact[$worktree_path]:-0}"
+  # Sort / age clock — shared access_ledger_visit_ts_s (also feeds the
+  # tab-activity sampler's hot-path set). Bulk ledger map keeps the
+  # Alt+g keypress path to one jq read. Agent hooks do NOT feed this.
+  row_interact="$(access_ledger_visit_ts_s "$worktree_path" \
+    "${worktree_window_interact[$worktree_path]:-0}" \
+    "${worktree_ledger_interact[$worktree_path]:-0}")"
   [[ "$row_interact" =~ ^[0-9]+$ ]] || row_interact=0
-  ledger_interact="${worktree_ledger_interact[$worktree_path]:-0}"
-  [[ "$ledger_interact" =~ ^[0-9]+$ ]] || ledger_interact=0
-  if (( ledger_interact > row_interact )); then
-    row_interact="$ledger_interact"
-  fi
-  if (( row_interact == 0 )) && [[ -d "$worktree_path" ]]; then
-    # GNU stat: %W birth (0 when unknown), %Y mtime.
-    created_s="$(stat -c '%W %Y' "$worktree_path" 2>/dev/null || true)"
-    birth_s="${created_s%% *}"
-    mtime_s="${created_s##* }"
-    if [[ "$birth_s" =~ ^[0-9]+$ ]] && (( birth_s > 0 )); then
-      row_interact="$birth_s"
-    elif [[ "$mtime_s" =~ ^[0-9]+$ ]] && (( mtime_s > 0 )); then
-      row_interact="$mtime_s"
-    fi
-  fi
   attention_cells=$'\t\t'
   if [[ -n "$prefetch_window_id" && -n "${window_status[$prefetch_window_id]:-}" ]]; then
     attention_cells="${window_status[$prefetch_window_id]}"

@@ -358,6 +358,9 @@ local base_constants = {
     visible_count = 5,
     warm_count = 3,
     half_life_days = 7,
+    -- Decayed access-ledger visit bonus mixed into sticky rank_score.
+    -- Between index(+40) and HEAD(+100); see docs/tab-visibility.md.
+    access_weight = 60,
     recompute_interval_ms = 5000,
     activity_sample_interval_ms = 60000,
     swap_flash_ms = 800,

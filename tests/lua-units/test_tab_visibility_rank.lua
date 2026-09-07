@@ -5,9 +5,9 @@
 -- refreshed project gets out-ranked by less-used projects whose stats
 -- happen to be in fewer rows.
 --
--- Schema v4: ranking key is activity_score after a row has real git
--- activity. Rows with no activity events are ignored by the brain so
--- callers fall back to workspaces.lua declaration order.
+-- Schema v4: ranking key is activity_score + decayed access_bonus
+-- (from last_access_ms). Rows with neither git activity nor access are
+-- ignored so callers fall back to workspaces.lua declaration order.
 -- `total_dwell_ms` remains the never-decayed lifetime focus counter,
 -- aggregated alongside for picker display on active rows.
 package.path = './tests/lua-units/?.lua;./wezterm-x/lua/?.lua;./wezterm-x/lua/ui/?.lua;' .. package.path
@@ -305,6 +305,97 @@ describe('_rank_sessions', function()
       },
     }
     assert_eq(#out, 0)
+  end)
+
+  it('ranks access-only rows via decayed visit bonus', function()
+    tab_visibility._reset()
+    tab_visibility.configure {
+      wezterm = mock,
+      config = { access_weight = 60, half_life_days = 7, recompute_interval_ms = 0 },
+    }
+    local now = 1000000
+    local out = r({
+      sessions = {
+        visited = { last_access_ms = now, dwell_ms = 0, raw_count = 0 },
+        idle = { dwell_ms = 999999, raw_count = 50 },
+      },
+    }, now)
+    assert_eq(#out, 1)
+    assert_eq(out[1].name, 'visited')
+    assert_close(out[1].rank_score, 60, 1e-6)
+  end)
+
+  it('sums access bonus with activity_score', function()
+    tab_visibility._reset()
+    tab_visibility.configure {
+      wezterm = mock,
+      config = { access_weight = 60, half_life_days = 7, recompute_interval_ms = 0 },
+    }
+    local now = 7 * 86400000 -- one half-life after epoch access
+    local out = r({
+      sessions = {
+        both = {
+          activity_score = 40, activity_count = 1, last_activity_ms = 1,
+          last_access_ms = 0, -- age = now - 0 → full decay? use explicit
+        },
+      },
+    }, now)
+    -- last_access_ms=0 → no bonus; pure activity.
+    assert_eq(out[1].name, 'both')
+    assert_close(out[1].rank_score, 40, 1e-6)
+
+    out = r({
+      sessions = {
+        both = {
+          activity_score = 40, activity_count = 1, last_activity_ms = 1,
+          last_access_ms = 0,
+        },
+        recent = {
+          activity_score = 10, activity_count = 1, last_activity_ms = 1,
+          last_access_ms = now, -- age 0 → +60
+        },
+      },
+    }, now)
+    assert_eq(out[1].name, 'recent')
+    assert_close(out[1].rank_score, 70, 1e-6)
+    assert_eq(out[2].name, 'both')
+    assert_close(out[2].rank_score, 40, 1e-6)
+  end)
+
+  it('decays access bonus with the same half-life as activity', function()
+    tab_visibility._reset()
+    tab_visibility.configure {
+      wezterm = mock,
+      config = { access_weight = 60, half_life_days = 7, recompute_interval_ms = 0 },
+    }
+    local half = 7 * 86400000
+    local out = r({
+      sessions = {
+        week_ago = { last_access_ms = 0 },
+      },
+    }, half)
+    assert_eq(#out, 0, 'last_access_ms=0 is not a visit')
+
+    out = r({
+      sessions = {
+        week_ago = { last_access_ms = 1 },
+      },
+    }, half + 1)
+    assert_eq(#out, 1)
+    assert_close(out[1].rank_score, 30, 0.01, 'one half-life → half weight')
+  end)
+
+  it('keeps pure activity order when neither row has access', function()
+    local out = r {
+      sessions = {
+        high = { activity_score = 100, activity_count = 1, last_activity_ms = 100 },
+        low = { activity_score = 20, activity_count = 1, last_activity_ms = 200 },
+      },
+    }
+    assert_eq(out[1].name, 'high')
+    assert_eq(out[2].name, 'low')
+    assert_close(out[1].rank_score, 100)
+    assert_close(out[2].rank_score, 20)
   end)
 end)
 

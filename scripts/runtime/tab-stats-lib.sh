@@ -11,11 +11,13 @@
 #     "half_life_days": 7,
 #     "sessions": {
 #       "<session_name>": {
-#         "activity_score": <float — decayed git-activity score, sort key>,
+#         "activity_score": <float — decayed git-activity score>,
 #         "activity_count": <int — lifetime activity event count>,
 #         "last_activity_ms": <epoch ms>,
 #         "last_seen_ms":   <epoch ms>,
-#         "last_git_fingerprint": <string>,
+#         "last_git_fingerprint": <string — mirror of last written path fp>,
+#         "git_fingerprints": { "<abs_cwd>": "<fp>", ... },
+#         "last_access_ms": <epoch ms — stamped from access ledger>,
 #         "dwell_ms":       <float — legacy focus dwell, diagnostic>,
 #         "total_dwell_ms": <int — legacy lifetime dwell, diagnostic>,
 #         "last_bump_ms":   <epoch ms>,
@@ -24,10 +26,13 @@
 #     }
 #   }
 #
-# `activity_score` is the primary ranking signal: git fingerprint changes
-# (HEAD/index/worktree) add weighted activity credit, decayed exponentially
-# with a 7-day half-life. Focus/view events update last_seen/raw_count for
-# diagnostics only; looking at an overflow session does not promote it.
+# Ranking signal is `activity_score + access_bonus(last_access_ms)`, where
+# access_bonus uses the same half-life as activity and weight
+# TAB_STATS_ACCESS_WEIGHT. Git fingerprint changes (HEAD/index/worktree
+# diff) on the configured main cwd *and* its linked worktrees add activity
+# credit onto the base session; fingerprints are keyed per path so paths
+# do not thrash each other. Focus/view events update last_seen/raw_count
+# for diagnostics only.
 #
 # `total_dwell_ms` is never decayed and receives the full uncapped dwell;
 # exposed to the picker / diagnostics for "lifetime time spent" display.
@@ -60,6 +65,10 @@ __TAB_STATS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Same constants exposed both as integers (jq math) and bash vars.
 TAB_STATS_HALF_LIFE_DAYS=7
 TAB_STATS_MS_PER_DAY=86400000
+# Access-ledger contribution to sticky rank_score. Calibrated between
+# index (+40) and HEAD (+100): a visit today ≈ one modest edit, and
+# alone cannot outrank a fresh commit. Same half-life as activity_score.
+TAB_STATS_ACCESS_WEIGHT="${TAB_STATS_ACCESS_WEIGHT:-60}"
 # Skip bump if the same session was bumped within this window. Hook can
 # fire several times per second when a tmux client churns; we only want
 # a single weight-event per real focus burst.
@@ -339,6 +348,11 @@ tab_stats_close_out() {
   __tab_stats_write_delta "$workspace" "$session_name" "$dwell_ms" 0
 }
 
+# Optional $cwd_key (5th arg / --arg cwd_key):
+# - non-empty → write only git_fingerprints[cwd_key] (do not touch
+#   last_git_fingerprint; that legacy field must stay a main-cwd mirror
+#   or first-sample of every linked path thrashes main on the next tick)
+# - empty → legacy single-path write to last_git_fingerprint
 __TAB_STATS_ACTIVITY_JQ='
   def half_life_ms($d): ($d * 86400000);
   def decay($w; $age_ms; $half_ms):
@@ -346,10 +360,19 @@ __TAB_STATS_ACTIVITY_JQ='
     elif $age_ms <= 0 then $w
     else $w * pow(2; -($age_ms / $half_ms))
     end;
+  def with_path_fp($cur; $fp; $cwd_key):
+    if ($cwd_key | tostring) == "" then
+      ($cur + { last_git_fingerprint: $fp })
+    else
+      ($cur + {
+        git_fingerprints: (($cur.git_fingerprints // {}) + { ($cwd_key | tostring): $fp })
+      })
+    end;
   ($now | tonumber) as $now
   | ($session | tostring) as $session
   | ($score_delta | tonumber) as $score_delta
   | ($fingerprint | tostring) as $fingerprint
+  | ($cwd_key | tostring) as $cwd_key
   | (.half_life_days // 7) as $hld
   | half_life_ms($hld) as $half_ms
   | (.sessions // {}) as $existing
@@ -380,17 +403,18 @@ __TAB_STATS_ACTIVITY_JQ='
       last_activity_ms: 0,
       last_seen_ms: 0,
       last_git_fingerprint: "",
+      git_fingerprints: {},
+      last_access_ms: 0,
       dwell_ms: 0,
       total_dwell_ms: 0,
       last_bump_ms: 0,
       raw_count: 0
     }) as $cur
   | $decayed
-  | .[$session] = ($cur + {
+  | .[$session] = (with_path_fp($cur; $fingerprint; $cwd_key) + {
       activity_score: (($cur.activity_score // 0) + $score_delta),
       activity_count: (($cur.activity_count // 0) + 1),
-      last_activity_ms: $now,
-      last_git_fingerprint: $fingerprint
+      last_activity_ms: $now
     })
   | { version: 4, half_life_days: $hld, sessions: . }
 '
@@ -400,6 +424,7 @@ tab_stats_record_activity() {
   local session_name="${2:?missing session_name}"
   local score_delta="${3:?missing score_delta}"
   local fingerprint="${4:?missing fingerprint}"
+  local cwd_key="${5:-}"
   local now current updated lock
   now="$(tab_stats_now_ms)"
   tab_stats_init "$workspace"
@@ -410,6 +435,7 @@ tab_stats_record_activity() {
     updated="$(printf '%s' "$current" \
       | jq --arg session "$session_name" --arg now "$now" \
            --arg score_delta "$score_delta" --arg fingerprint "$fingerprint" \
+           --arg cwd_key "$cwd_key" \
            "$__TAB_STATS_ACTIVITY_JQ" 2>/dev/null)"
     if [[ -z "$updated" ]]; then
       return 0
@@ -419,8 +445,17 @@ tab_stats_record_activity() {
 }
 
 __TAB_STATS_FINGERPRINT_JQ='
+  def with_path_fp($cur; $fp; $cwd_key):
+    if ($cwd_key | tostring) == "" then
+      ($cur + { last_git_fingerprint: $fp })
+    else
+      ($cur + {
+        git_fingerprints: (($cur.git_fingerprints // {}) + { ($cwd_key | tostring): $fp })
+      })
+    end;
   ($session | tostring) as $session
   | ($fingerprint | tostring) as $fingerprint
+  | ($cwd_key | tostring) as $cwd_key
   | (.half_life_days // 7) as $hld
   | (.sessions // {}) as $existing
   | ($existing[$session] // {
@@ -429,23 +464,15 @@ __TAB_STATS_FINGERPRINT_JQ='
       last_activity_ms: 0,
       last_seen_ms: 0,
       last_git_fingerprint: "",
+      git_fingerprints: {},
+      last_access_ms: 0,
       dwell_ms: 0,
       total_dwell_ms: 0,
       last_bump_ms: 0,
       raw_count: 0
     }) as $cur
   | $existing
-  | .[$session] = ($cur + {
-      activity_score: ($cur.activity_score // 0),
-      activity_count: ($cur.activity_count // 0),
-      last_activity_ms: ($cur.last_activity_ms // 0),
-      last_seen_ms: ($cur.last_seen_ms // ($cur.last_bump_ms // 0)),
-      last_git_fingerprint: $fingerprint,
-      dwell_ms: ($cur.dwell_ms // 0),
-      total_dwell_ms: ($cur.total_dwell_ms // 0),
-      last_bump_ms: ($cur.last_bump_ms // 0),
-      raw_count: ($cur.raw_count // 0)
-    })
+  | .[$session] = with_path_fp($cur; $fingerprint; $cwd_key)
   | { version: 4, half_life_days: $hld, sessions: . }
 '
 
@@ -453,6 +480,7 @@ tab_stats_set_git_fingerprint() {
   local workspace="${1:?missing workspace}"
   local session_name="${2:?missing session_name}"
   local fingerprint="${3:?missing fingerprint}"
+  local cwd_key="${4:-}"
   local current updated lock
   tab_stats_init "$workspace"
   lock="$(tab_stats_lock_path "$workspace")"
@@ -461,6 +489,7 @@ tab_stats_set_git_fingerprint() {
     current="$(tab_stats_read "$workspace")"
     updated="$(printf '%s' "$current" \
       | jq --arg session "$session_name" --arg fingerprint "$fingerprint" \
+           --arg cwd_key "$cwd_key" \
            "$__TAB_STATS_FINGERPRINT_JQ" 2>/dev/null)"
     if [[ -z "$updated" ]]; then
       return 0
@@ -469,19 +498,98 @@ tab_stats_set_git_fingerprint() {
   ) 9>>"$lock"
 }
 
-# Print the top N session names (newline-separated, activity_score desc,
-# then last_activity_ms desc, then alpha asc). Empty output when state
-# file empty or when no rows have sampled git activity. Legacy dwell is
-# diagnostic-only and does not participate in ranking.
+# Stamp access-ledger last_access_ms onto a session row (no score mutate).
+# Ranking computes access_bonus from this timestamp at read time.
+__TAB_STATS_ACCESS_JQ='
+  ($session | tostring) as $session
+  | ($last_access_ms | tonumber) as $la
+  | (.half_life_days // 7) as $hld
+  | (.sessions // {}) as $existing
+  | ($existing[$session] // {
+      activity_score: 0,
+      activity_count: 0,
+      last_activity_ms: 0,
+      last_seen_ms: 0,
+      last_git_fingerprint: "",
+      git_fingerprints: {},
+      last_access_ms: 0,
+      dwell_ms: 0,
+      total_dwell_ms: 0,
+      last_bump_ms: 0,
+      raw_count: 0
+    }) as $cur
+  | $existing
+  | .[$session] = ($cur + { last_access_ms: $la })
+  | { version: 4, half_life_days: $hld, sessions: . }
+'
+
+tab_stats_set_last_access() {
+  local workspace="${1:?missing workspace}"
+  local session_name="${2:?missing session_name}"
+  local last_access_ms="${3:?missing last_access_ms}"
+  local current updated lock
+  [[ "$last_access_ms" =~ ^[0-9]+$ ]] || return 0
+  (( last_access_ms > 0 )) || return 0
+  tab_stats_init "$workspace"
+  lock="$(tab_stats_lock_path "$workspace")"
+  (
+    flock -x 9
+    current="$(tab_stats_read "$workspace")"
+    updated="$(printf '%s' "$current" \
+      | jq --arg session "$session_name" --arg last_access_ms "$last_access_ms" \
+           "$__TAB_STATS_ACCESS_JQ" 2>/dev/null)"
+    if [[ -z "$updated" ]]; then
+      return 0
+    fi
+    tab_stats_write "$workspace" "$updated"
+  ) 9>>"$lock"
+}
+
+# Read the stored fingerprint for a session path.
+# - cwd_key non-empty: only git_fingerprints[cwd_key] (empty if missing).
+#   Do NOT fall back to last_git_fingerprint — that is the main-cwd
+#   legacy mirror and would make every new linked worktree look like a
+#   HEAD change on first sample.
+# - cwd_key empty: last_git_fingerprint (legacy single-path callers).
+tab_stats_git_fingerprint_for_path() {
+  local workspace="${1:?missing workspace}"
+  local session_name="${2:?missing session_name}"
+  local cwd_key="${3:-}"
+  tab_stats_read "$workspace" \
+    | jq -r --arg s "$session_name" --arg p "$cwd_key" '
+        (.sessions[$s] // {}) as $row
+        | if ($p | tostring) != "" then
+            ($row.git_fingerprints[$p] // "")
+          else
+            ($row.last_git_fingerprint // "")
+          end
+      ' 2>/dev/null || true
+}
+
+# Print the top N session names. Ranking key is
+# activity_score + access_bonus(last_access_ms); rows with neither git
+# activity nor access are omitted. Legacy dwell is diagnostic-only.
+# Bindings expected at call sites: $now, $access_weight, $half_ms.
 __TAB_STATS_RANK_SCORE_JQ='
-  def has_activity($v):
+  def has_git($v):
     (($v.activity_count // 0) | tonumber) > 0 or (($v.last_activity_ms // 0) | tonumber) > 0;
+  def has_activity($v):
+    has_git($v) or (($v.last_access_ms // 0) | tonumber) > 0;
+  def access_bonus($v):
+    (($v.last_access_ms // 0) | tonumber) as $la
+    | if $la <= 0 then 0
+      else
+        (if ($now - $la) < 0 then 0 else ($now - $la) end) as $age
+        | if $half_ms <= 0 then $access_weight
+          else $access_weight * pow(2; -($age / $half_ms))
+          end
+      end;
   def rank_score($v):
-    (($v.activity_score // 0) | tonumber);
+    ((($v.activity_score // 0) | tonumber) + access_bonus($v));
   def rank_tier($v):
     if has_activity($v) then 1 else 0 end;
   def rank_recent($v):
-    (($v.last_activity_ms // $v.last_bump_ms // 0) | tonumber);
+    ([($v.last_activity_ms // 0), ($v.last_access_ms // 0), ($v.last_bump_ms // 0)] | max | tonumber);
   def rank_count($v):
     if (($v.activity_count // 0) | tonumber) > 0 then (($v.activity_count // 0) | tonumber)
     else (($v.raw_count // 0) | tonumber)
@@ -490,13 +598,20 @@ __TAB_STATS_RANK_SCORE_JQ='
 tab_stats_top_n() {
   local workspace="${1:?missing workspace}"
   local n="${2:-5}"
-  tab_stats_read "$workspace" | jq -r --argjson n "$n" --argjson cap "$TAB_STATS_DWELL_CREDIT_CAP_MS" "
+  local now half_ms
+  now="$(tab_stats_now_ms)"
+  half_ms=$((TAB_STATS_HALF_LIFE_DAYS * TAB_STATS_MS_PER_DAY))
+  tab_stats_read "$workspace" | jq -r \
+    --argjson n "$n" \
+    --argjson now "$now" \
+    --argjson access_weight "$TAB_STATS_ACCESS_WEIGHT" \
+    --argjson half_ms "$half_ms" "
     $__TAB_STATS_RANK_SCORE_JQ
     (.sessions // {})
     | to_entries
     | map(select(has_activity(.value)))
     | sort_by([- rank_tier(.value), - rank_score(.value), - rank_recent(.value), - rank_count(.value), .key])
-    | .[0:$n]
+    | .[0:\$n]
     | .[].key
   "
 }
@@ -506,13 +621,20 @@ tab_stats_top_n() {
 tab_stats_top_n_tsv() {
   local workspace="${1:?missing workspace}"
   local n="${2:-5}"
-  tab_stats_read "$workspace" | jq -r --argjson n "$n" --argjson cap "$TAB_STATS_DWELL_CREDIT_CAP_MS" "
+  local now half_ms
+  now="$(tab_stats_now_ms)"
+  half_ms=$((TAB_STATS_HALF_LIFE_DAYS * TAB_STATS_MS_PER_DAY))
+  tab_stats_read "$workspace" | jq -r \
+    --argjson n "$n" \
+    --argjson now "$now" \
+    --argjson access_weight "$TAB_STATS_ACCESS_WEIGHT" \
+    --argjson half_ms "$half_ms" "
     $__TAB_STATS_RANK_SCORE_JQ
     (.sessions // {})
     | to_entries
     | map(select(has_activity(.value)))
     | sort_by([- rank_tier(.value), - rank_score(.value), - rank_recent(.value), - rank_count(.value), .key])
-    | .[0:$n]
+    | .[0:\$n]
     | .[]
     | [.key,
        rank_score(.value),
@@ -531,7 +653,13 @@ tab_stats_top_n_tsv() {
 # No N cap — caller filters/sorts as needed.
 tab_stats_aggregated_tsv() {
   local workspace="${1:?missing workspace}"
-  tab_stats_read "$workspace" | jq -r --argjson cap "$TAB_STATS_DWELL_CREDIT_CAP_MS" "
+  local now half_ms
+  now="$(tab_stats_now_ms)"
+  half_ms=$((TAB_STATS_HALF_LIFE_DAYS * TAB_STATS_MS_PER_DAY))
+  tab_stats_read "$workspace" | jq -r \
+    --argjson now "$now" \
+    --argjson access_weight "$TAB_STATS_ACCESS_WEIGHT" \
+    --argjson half_ms "$half_ms" "
     $__TAB_STATS_RANK_SCORE_JQ
     (.sessions // {})
     | to_entries

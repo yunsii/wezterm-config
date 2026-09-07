@@ -7,7 +7,9 @@
 --
 -- Sticky slot algorithm:
 --   1. compute visible = top-N sessions by
---      (activity_score desc, last_activity_ms desc, name asc)
+--      (activity_score + access_bonus desc, recency desc, name asc)
+--      access_bonus = access_weight * 2^(-age / half_life) from
+--      last_access_ms stamped by the WSL sampler out of the access ledger
 --   2. for each existing slot:
 --        if slot.session_name still in visible → keep, mark "stable"
 --        else → mark "stale" (the existing session fell out)
@@ -28,6 +30,8 @@ local DEFAULTS = {
   visible_count = 5,
   warm_count = 3,
   half_life_days = 7,
+  -- Visit bonus weight (access ledger). Between index(+40) and HEAD(+100).
+  access_weight = 60,
   dwell_credit_cap_ms = 1800000,
   recompute_interval_ms = 5000,
   activity_sample_interval_ms = 60000,
@@ -96,6 +100,7 @@ local module_state = {
   visible_count = DEFAULTS.visible_count,
   warm_count = DEFAULTS.warm_count,
   half_life_days = DEFAULTS.half_life_days,
+  access_weight = DEFAULTS.access_weight,
   dwell_credit_cap_ms = DEFAULTS.dwell_credit_cap_ms,
   recompute_interval_ms = DEFAULTS.recompute_interval_ms,
   activity_sample_interval_ms = DEFAULTS.activity_sample_interval_ms,
@@ -118,6 +123,7 @@ function M.configure(opts)
   module_state.visible_count = merged.visible_count
   module_state.warm_count = merged.warm_count
   module_state.half_life_days = merged.half_life_days
+  module_state.access_weight = tonumber(merged.access_weight) or DEFAULTS.access_weight
   module_state.dwell_credit_cap_ms = merged.dwell_credit_cap_ms
   module_state.recompute_interval_ms = merged.recompute_interval_ms
   module_state.activity_sample_interval_ms = merged.activity_sample_interval_ms
@@ -244,13 +250,30 @@ end
 
 M._session_label_segment = session_label_segment
 
-local function has_activity(entry)
+local function has_git_activity(entry)
   return (tonumber(entry.activity_count) or 0) > 0
     or (tonumber(entry.last_activity_ms) or 0) > 0
 end
 
-local function ranking_score(entry)
-  return tonumber(entry.activity_score) or 0
+local function has_activity(entry)
+  return has_git_activity(entry)
+    or (tonumber(entry.last_access_ms) or 0) > 0
+end
+
+local function access_bonus(entry, now_ms)
+  local last_access = tonumber(entry.last_access_ms) or 0
+  if last_access <= 0 then return 0 end
+  local weight = tonumber(module_state.access_weight) or DEFAULTS.access_weight
+  local half_days = tonumber(module_state.half_life_days) or DEFAULTS.half_life_days
+  local half_ms = half_days * 86400000
+  if not now_ms or half_ms <= 0 then return weight end
+  local age = now_ms - last_access
+  if age < 0 then age = 0 end
+  return weight * (2 ^ (-age / half_ms))
+end
+
+local function ranking_score(entry, now_ms)
+  return (tonumber(entry.activity_score) or 0) + access_bonus(entry, now_ms)
 end
 
 local function ranking_tier(entry)
@@ -258,18 +281,21 @@ local function ranking_tier(entry)
 end
 
 local function ranking_recent(entry)
-  return tonumber(entry.last_activity_ms) or tonumber(entry.last_bump_ms) or 0
+  local a = tonumber(entry.last_activity_ms) or 0
+  local b = tonumber(entry.last_access_ms) or 0
+  local c = tonumber(entry.last_bump_ms) or 0
+  if a >= b and a >= c then return a end
+  if b >= c then return b end
+  return c
 end
 
 -- Aggregate stats rows by normalized base name, then rank.
--- Aggregation: activity score summed, total_dwell_ms summed
--- (diagnostic lifetime focus, never decayed), event counts summed, and
--- recent timestamp taken as max across variants.
--- Only rows with sampled git activity participate in the ranking. Legacy
--- focus dwell fields stay available for diagnostics, but no longer affect
--- top-N selection; callers fall back to workspaces.lua order when the
--- activity ranking is empty or shorter than visible_count.
-local function rank_sessions(stats)
+-- Aggregation: activity score summed, access bonus taken from max
+-- last_access_ms across variants (not summed — one visit clock),
+-- total_dwell_ms summed, event counts summed, recent timestamp max.
+-- Rows with git activity and/or access-ledger stamps participate.
+-- Legacy focus dwell is diagnostic only.
+local function rank_sessions(stats, now_ms)
   if not stats or type(stats.sessions) ~= 'table' then return {} end
   local agg = {}
   for name, entry in pairs(stats.sessions) do
@@ -284,6 +310,7 @@ local function rank_sessions(stats)
           activity_score = 0,
           activity_count = 0,
           last_activity_ms = 0,
+          last_access_ms = 0,
           dwell_ms = 0,
           total_dwell_ms = 0,
           raw_count = 0,
@@ -293,11 +320,9 @@ local function rank_sessions(stats)
         agg[key] = cur
       end
       local dwell = tonumber(entry.dwell_ms) or 0
-      local score = ranking_score(entry)
       local tier = ranking_tier(entry)
       cur.dwell_ms = cur.dwell_ms + dwell
       if tier > cur.rank_tier then cur.rank_tier = tier end
-      cur.rank_score = cur.rank_score + score
       cur.activity_score = cur.activity_score + (tonumber(entry.activity_score) or 0)
       cur.activity_count = cur.activity_count + (tonumber(entry.activity_count) or 0)
       cur.total_dwell_ms = cur.total_dwell_ms + (tonumber(entry.total_dwell_ms) or 0)
@@ -306,12 +331,19 @@ local function rank_sessions(stats)
       if lbm > cur.last_bump_ms then cur.last_bump_ms = lbm end
       local lam = tonumber(entry.last_activity_ms) or 0
       if lam > cur.last_activity_ms then cur.last_activity_ms = lam end
+      local lac = tonumber(entry.last_access_ms) or 0
+      if lac > cur.last_access_ms then cur.last_access_ms = lac end
       local recent = ranking_recent(entry)
       if recent > cur.rank_recent_ms then cur.rank_recent_ms = recent end
     end
   end
+  -- Compute rank_score after aggregation so access_bonus uses the max
+  -- last_access_ms once (not once per __refresh_* fragment).
   local items = {}
-  for _, v in pairs(agg) do items[#items + 1] = v end
+  for _, v in pairs(agg) do
+    v.rank_score = ranking_score(v, now_ms)
+    items[#items + 1] = v
+  end
   table.sort(items, function(a, b)
     if a.rank_tier ~= b.rank_tier then return a.rank_tier > b.rank_tier end
     if a.rank_score ~= b.rank_score then return a.rank_score > b.rank_score end
@@ -325,6 +357,7 @@ local function rank_sessions(stats)
 end
 
 M._rank_sessions = rank_sessions
+M._access_bonus = access_bonus
 
 local function slots_path(workspace_name)
   if not module_state.stats_dir or module_state.stats_dir == '' then
@@ -521,7 +554,7 @@ function M.tick(workspace_name, now_ms)
 
   local stats = read_stats(workspace_name)
   cache.stats = stats
-  local ranked = rank_sessions(stats)
+  local ranked = rank_sessions(stats, now_ms)
   cache.ranked = ranked
 
   local visible_names = {}
@@ -662,6 +695,7 @@ function M.config()
     visible_count = module_state.visible_count,
     warm_count = module_state.warm_count,
     half_life_days = module_state.half_life_days,
+    access_weight = module_state.access_weight,
     dwell_credit_cap_ms = module_state.dwell_credit_cap_ms,
     recompute_interval_ms = module_state.recompute_interval_ms,
     activity_sample_interval_ms = module_state.activity_sample_interval_ms,

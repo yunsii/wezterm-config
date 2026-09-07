@@ -71,5 +71,49 @@ lines="$(printf '%s\n' "$recent" | grep -c . || true)"
 assert_eq "recent cap enforced" "$lines" "2"
 assert_contains "newest path kept" "$recent" "/tmp/wt-e"
 
+# Visit clock: live wins over older ledger; ledger wins over bare path
+# with no live stamp when we pass an explicit ledger_s.
+got="$(access_ledger_visit_ts_s "/tmp/wt-e" 10 50)"
+assert_eq "visit clock takes max(live, ledger)" "$got" "50"
+got="$(access_ledger_visit_ts_s "/tmp/wt-e" 90 50)"
+assert_eq "visit clock live can beat ledger" "$got" "90"
+
+# Hot paths: with tmux-worktree helpers + a real repo family.
+# shellcheck disable=SC1091
+source "$repo_root/scripts/runtime/tmux-worktree-lib.sh"
+repo="$sandbox/repo"
+git init -q "$repo"
+git -C "$repo" config user.email t@example.com
+git -C "$repo" config user.name T
+printf 'x\n' > "$repo/f"
+git -C "$repo" add f && git -C "$repo" commit -q -m i
+wt_hot="$sandbox/wt-hot"
+wt_cold="$sandbox/wt-cold"
+git -C "$repo" worktree add -q -b hot "$wt_hot" >/dev/null 2>&1
+git -C "$repo" worktree add -q -b cold "$wt_cold" >/dev/null 2>&1
+repo_abs="$(cd "$repo" && pwd -P)"
+wt_hot_abs="$(cd "$wt_hot" && pwd -P)"
+wt_cold_abs="$(cd "$wt_cold" && pwd -P)"
+sess="$(tmux_worktree_session_name_for_path work "$repo_abs")"
+
+# No ledger visits → bootstrap emits all linked.
+hot_all="$(access_ledger_hot_worktree_paths "$sess" "$repo_abs" | tr '\n' ' ')"
+assert_contains "bootstrap includes main" "$hot_all" "$repo_abs"
+assert_contains "bootstrap includes hot wt" "$hot_all" "$wt_hot_abs"
+assert_contains "bootstrap includes cold wt" "$hot_all" "$wt_cold_abs"
+
+# After visiting only hot → main ∪ hot, not cold.
+access_ledger_touch "$sess" "$wt_hot_abs" 5000
+hot_set="$(access_ledger_hot_worktree_paths "$sess" "$repo_abs")"
+assert_contains "hot set keeps main" "$hot_set" "$repo_abs"
+assert_contains "hot set keeps visited wt" "$hot_set" "$wt_hot_abs"
+if printf '%s\n' "$hot_set" | grep -qxF "$wt_cold_abs"; then
+  fail=$((fail + 1))
+  printf '  FAIL  hot set should omit cold wt\n'
+else
+  pass=$((pass + 1))
+  printf '  PASS  hot set omits unvisited cold wt\n'
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))
