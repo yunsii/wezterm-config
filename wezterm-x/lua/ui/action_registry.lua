@@ -449,11 +449,23 @@ function M.new(ctx)
       attention.reload_state()
       local current_pane_id = pane and pane:pane_id() or nil
       local entry = attention.pick_next(attention.STATUS_WAITING, current_pane_id)
-      if not entry then return end
+      if not entry then
+        logger.info('attention', 'alt-j jump waiting empty', {
+          trace = trace_id,
+          pane_id = current_pane_id,
+        })
+        return
+      end
+      if attention.note_jump then
+        attention.note_jump(attention.STATUS_WAITING, entry)
+      end
       logger.info('attention', 'alt-j jump waiting', {
         trace = trace_id,
         session_id = entry.session_id,
         wezterm_pane_id = entry.wezterm_pane_id,
+        tmux_session = entry.tmux_session,
+        tmux_window = entry.tmux_window,
+        tmux_pane = entry.tmux_pane,
       })
       attention.activate_in_gui(entry.wezterm_pane_id, window, pane,
         { tmux_session = entry.tmux_session })
@@ -469,11 +481,23 @@ function M.new(ctx)
       attention.reload_state()
       local current_pane_id = pane and pane:pane_id() or nil
       local entry = attention.pick_next(attention.STATUS_DONE, current_pane_id)
-      if not entry then return end
+      if not entry then
+        logger.info('attention', 'alt-k jump done empty', {
+          trace = trace_id,
+          pane_id = current_pane_id,
+        })
+        return
+      end
+      if attention.note_jump then
+        attention.note_jump(attention.STATUS_DONE, entry)
+      end
       logger.info('attention', 'alt-k jump done', {
         trace = trace_id,
         session_id = entry.session_id,
         wezterm_pane_id = entry.wezterm_pane_id,
+        tmux_session = entry.tmux_session,
+        tmux_window = entry.tmux_window,
+        tmux_pane = entry.tmux_pane,
       })
       local activated = attention.activate_in_gui(entry.wezterm_pane_id, window, pane,
         { tmux_session = entry.tmux_session })
@@ -508,11 +532,24 @@ function M.new(ctx)
         attention.STATUS_RUNNING,
         current_pane_id,
         { reverse = reverse })
-      if not entry then return end
+      if not entry then
+        logger.info('attention', reverse and 'alt-shift-l jump running empty' or 'alt-l jump running empty', {
+          trace = trace_id,
+          pane_id = current_pane_id,
+          reverse = reverse and 1 or 0,
+        })
+        return
+      end
+      if attention.note_jump then
+        attention.note_jump(attention.STATUS_RUNNING, entry)
+      end
       logger.info('attention', reverse and 'alt-shift-l jump running' or 'alt-l jump running', {
         trace = trace_id,
         session_id = entry.session_id,
         wezterm_pane_id = entry.wezterm_pane_id,
+        tmux_session = entry.tmux_session,
+        tmux_window = entry.tmux_window,
+        tmux_pane = entry.tmux_pane,
         reverse = reverse and 1 or 0,
       })
       attention.activate_in_gui(entry.wezterm_pane_id, window, pane,

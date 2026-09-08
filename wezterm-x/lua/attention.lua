@@ -83,9 +83,36 @@ local hidden_entries = {}
 -- is_entry_focused + maybe_ack_focused but successive ticks always
 -- re-read the focus file.
 local tmux_focus_cache = {}
+-- Per-kind round-robin cursor (waiting / done / running). Survives across
+-- Alt+j/k/l presses so cycling does not depend on the tmux-focus file
+-- catching up after --direct select (cross-FS + hook lag). Without this,
+-- a focus-file miss leaves focused_idx nil and every press re-picks
+-- pool[1] — activate resolves to the already-focused wezterm pane and
+-- the key feels dead. Keyed by kind → "session_id|tmux_window|tmux_pane".
+local last_jump_by_kind = {}
 local last_prune_ms = 0
 local last_live_snapshot_ms = 0
 local module_logger = nil
+
+local function entry_jump_key(entry)
+  if type(entry) ~= 'table' then return nil end
+  local sid = entry.session_id
+  if type(sid) ~= 'string' or sid == '' then return nil end
+  return sid
+    .. '|' .. tostring(entry.tmux_window or '')
+    .. '|' .. tostring(entry.tmux_pane or '')
+end
+
+-- Record the entry a jump handler just landed on so the next pick_next
+-- for the same kind advances even when is_entry_focused still reads the
+-- pre-jump tmux-focus file.
+function M.note_jump(kind, entry)
+  if type(kind) ~= 'string' or kind == '' then return end
+  local key = entry_jump_key(entry)
+  if key then
+    last_jump_by_kind[kind] = key
+  end
+end
 
 local function now_ms()
   local ok, formatted = pcall(function()
@@ -1637,7 +1664,17 @@ end
 -- this filter in lockstep with the renderer's focused-drop and the
 -- focus-ack policy.
 --
--- Returns nil when the only candidate is the user's current pane: the
+-- Cursor precedence for the round-robin step:
+--   1. Live focus via is_entry_focused (wezterm pane + tmux-focus file).
+--   2. last_jump_by_kind from M.note_jump — covers the common case where
+--      the user already landed via Alt+l but the tmux-focus file has not
+--      caught up yet (or never will, when select-* was a no-op). Without
+--      (2), focused_idx stays nil and every press re-picks pool[1],
+--      which activate_in_gui resolves to the already-focused pane → the
+--      key feels dead.
+--   3. No cursor → oldest (newest if reverse).
+--
+-- Returns nil when the only candidate is the cursor / focused pane: the
 -- user is already there and has nothing left to jump to. Old fallback
 -- `return pool[1]` made the handler "jump to self" — a no-op visually,
 -- but it still ran the post-jump optimistically_hide + forget side
@@ -1663,12 +1700,12 @@ function M.pick_next(kind, current_pane_id, opts)
   -- Round-robin in sorted order. The older "first non-focused" scan
   -- ping-ponged forever between the two oldest entries whenever the
   -- pool had 3+: from A it picked B, from B it picked A again, and C
-  -- was never reachable. Find the focused slot (if any) and step
-  -- forward (or backward when reverse). When nothing in the pool is
-  -- focused, land on the oldest (newest if reverse). When the only
-  -- candidate is focused, return nil.
+  -- was never reachable. Find the focused / last-jumped slot (if any)
+  -- and step forward (or backward when reverse). When nothing in the
+  -- pool is a cursor, land on the oldest (newest if reverse). When the
+  -- only candidate is the cursor, return nil.
   local current = current_pane_id and tostring(current_pane_id) or nil
-  local focused_idx = nil
+  local cursor_idx = nil
   for i, entry in ipairs(pool) do
     local at_current
     if not current then
@@ -1687,17 +1724,28 @@ function M.pick_next(kind, current_pane_id, opts)
       at_current = (tostring(entry.wezterm_pane_id or '') == current)
     end
     if at_current then
-      focused_idx = i
+      cursor_idx = i
       break
     end
   end
-  if not focused_idx then
+  if not cursor_idx then
+    local last_key = last_jump_by_kind[kind]
+    if type(last_key) == 'string' and last_key ~= '' then
+      for i, entry in ipairs(pool) do
+        if entry_jump_key(entry) == last_key then
+          cursor_idx = i
+          break
+        end
+      end
+    end
+  end
+  if not cursor_idx then
     return reverse and pool[#pool] or pool[1]
   end
   if #pool == 1 then
     return nil
   end
-  local next_idx = reverse and (focused_idx - 1) or (focused_idx + 1)
+  local next_idx = reverse and (cursor_idx - 1) or (cursor_idx + 1)
   if next_idx < 1 then
     next_idx = #pool
   elseif next_idx > #pool then

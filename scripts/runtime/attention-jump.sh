@@ -54,16 +54,19 @@ set -u
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Force the landed session's status line to recompute the instant a jump
-# lands. The select-window / select-pane calls below are no-ops when the
-# target window/pane is already active (you left the session parked there),
-# so tmux's session-window-changed / window-pane-changed hooks never fire
-# and the branch/worktree segment would lag until client-focus-in or the
-# 30s poll — the "Alt+. jump but status is stale" symptom. --no-debounce
-# bypasses the force-refresh debounce so a jump is never collapsed into an
-# unrelated recent refresh. All wezterm-managed sessions share the default
-# tmux server, so tmux-status-refresh.sh's bare `tmux` calls resolve the
-# session named here (matching the hook path, which also uses bare tmux).
+# Force the landed session's status line to recompute when a jump's
+# select-window / select-pane were no-ops (target already active — you
+# left the session parked there). In that case tmux's
+# session-window-changed / window-pane-changed hooks never fire and the
+# branch/worktree segment would lag until client-focus-in or the 30s
+# poll — the "Alt+. jump but status is stale" symptom. --no-debounce
+# bypasses the force-refresh debounce so this one-shot is never
+# collapsed into an unrelated recent refresh. Callers that already
+# moved the window/pane must NOT call this: the hooks refresh with the
+# normal 2s debounce, and stacking --no-debounce on every Alt+l
+# stampeded ~300ms git/status probes. All wezterm-managed sessions
+# share the default tmux server, so tmux-status-refresh.sh's bare
+# `tmux` calls resolve the session named here (matching the hook path).
 refresh_jump_target_status() {
   local socket="$1" window="$2"
   [[ -n "$socket" && -n "$window" ]] || return 0
@@ -94,6 +97,19 @@ if [[ "${1:-}" == "--direct" ]]; then
     esac
   done
   if [[ -n "$direct_socket" && -n "$direct_window" ]]; then
+    # Detect no-op selects BEFORE changing anything. When select-window /
+    # select-pane actually move focus, session-window-changed /
+    # window-pane-changed already run tmux-status-refresh.sh --force
+    # (with the 2s debounce). Forcing --no-debounce here on every Alt+l
+    # stampeded git/status probes (~300ms) and made rapid cycling feel
+    # dead. Only pay the forced refresh when both selects are no-ops —
+    # the original "parked on target, hooks never fire" case.
+    win_was_active="$(tmux -S "$direct_socket" display-message -p -t "$direct_window" '#{window_active}' 2>/dev/null || true)"
+    pane_was_active=''
+    if [[ -n "$direct_pane" ]]; then
+      pane_was_active="$(tmux -S "$direct_socket" display-message -p -t "$direct_pane" '#{pane_active}' 2>/dev/null || true)"
+    fi
+
     tmux -S "$direct_socket" select-window -t "$direct_window" 2>/dev/null || true
     pane_ok=0
     if [[ -n "$direct_pane" ]]; then
@@ -108,8 +124,20 @@ if [[ "${1:-}" == "--direct" ]]; then
       if [[ -n "$live_pane" ]]; then
         tmux -S "$direct_socket" select-pane -t "$live_pane" 2>/dev/null || true
       fi
+      # Fell back to a different pane than requested — treat as a real
+      # change so we don't force-refresh on top of the hook path.
+      pane_was_active='0'
     fi
-    refresh_jump_target_status "$direct_socket" "$direct_window"
+
+    need_forced_refresh=0
+    if [[ "$win_was_active" == "1" ]]; then
+      if [[ -z "$direct_pane" || "$pane_was_active" == "1" ]]; then
+        need_forced_refresh=1
+      fi
+    fi
+    if (( need_forced_refresh )); then
+      refresh_jump_target_status "$direct_socket" "$direct_window"
+    fi
   fi
   exit 0
 fi

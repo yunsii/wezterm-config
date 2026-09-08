@@ -373,6 +373,59 @@ describe('pick_next — running pool (Alt+l)', function()
     cleanup(tmp)
     assert_nil(picked, 'pick_next(running) jumped to self')
   end)
+
+  it('advances via note_jump when tmux-focus still names the previous pane', function()
+    -- Repro for "Alt+l feels dead": after landing on mid, the focus file
+    -- has not caught up (still names oldest). Without note_jump the next
+    -- press re-picks oldest → activate is a no-op on the already-focused
+    -- wezterm pane.
+    reset()
+    mock.set_mux {
+      windows = {
+        {
+          workspace = 'work',
+          tabs = {
+            { id = 1, title = 'a', active_pane = { id = 41 } },
+            { id = 2, title = 'b', active_pane = { id = 42 } },
+            { id = 3, title = 'c', active_pane = { id = 43 } },
+          },
+        },
+      },
+    }
+    tab_visibility.set_pane_session(41, 'wezterm_work_a_aaaaaaaaaa')
+    tab_visibility.set_pane_session(42, 'wezterm_work_b_bbbbbbbbbb')
+    tab_visibility.set_pane_session(43, 'wezterm_work_c_cccccccccc')
+    local now = os.time() * 1000
+    local entries = '{"version":1,"entries":{'
+      .. '"r_old":{"session_id":"r_old","wezterm_pane_id":"41",'
+        .. '"tmux_socket":"/tmp/sock","tmux_session":"wezterm_work_a_aaaaaaaaaa",'
+        .. '"tmux_window":"@1","tmux_pane":"%1","status":"running","ts":'
+        .. tostring(now - 3000) .. ',"reason":"old"},'
+      .. '"r_mid":{"session_id":"r_mid","wezterm_pane_id":"42",'
+        .. '"tmux_socket":"/tmp/sock","tmux_session":"wezterm_work_b_bbbbbbbbbb",'
+        .. '"tmux_window":"@1","tmux_pane":"%1","status":"running","ts":'
+        .. tostring(now - 2000) .. ',"reason":"mid"},'
+      .. '"r_new":{"session_id":"r_new","wezterm_pane_id":"43",'
+        .. '"tmux_socket":"/tmp/sock","tmux_session":"wezterm_work_c_cccccccccc",'
+        .. '"tmux_window":"@1","tmux_pane":"%1","status":"running","ts":'
+        .. tostring(now - 1000) .. ',"reason":"new"}'
+      .. '}}'
+    -- Focus file still on oldest, but wezterm focus already on mid (42)
+    -- after a prior jump — is_entry_focused misses because session b's
+    -- focus file is absent / wrong. note_jump(mid) must still advance.
+    local tmp = setup_state(entries, '/tmp/sock', 'wezterm_work_a_aaaaaaaaaa', '%1', {
+      { socket = '/tmp/sock', session = 'wezterm_work_c_cccccccccc', tmux_pane = '%1' },
+    })
+    attention.note_jump(attention.STATUS_RUNNING, {
+      session_id = 'r_mid',
+      tmux_window = '@1',
+      tmux_pane = '%1',
+    })
+    local picked = attention.pick_next(attention.STATUS_RUNNING, 42)
+    cleanup(tmp)
+    assert_truthy(picked, 'note_jump cursor did not advance')
+    assert_eq(picked.session_id, 'r_new', 'expected newest after note_jump(mid); got ' .. tostring(picked and picked.session_id))
+  end)
 end)
 
 describe('pick_next — non-tmux fallback', function()
